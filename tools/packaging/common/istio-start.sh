@@ -129,8 +129,16 @@ export PROXY_CONFIG=${PROXY_CONFIG:-${DEFAULT_PROXY_CONFIG}}
 if [ "${EXEC_USER}" == "${USER:-}" ] ; then
   # if started as istio-proxy (or current user), do a normal start, without
   # redirecting stderr.
-  INSTANCE_IP=${ISTIO_SVC_IP} POD_NAME=${POD_NAME} POD_NAMESPACE=${NS} "${ISTIO_BIN_BASE}/pilot-agent" proxy "${ISTIO_AGENT_FLAGS_ARRAY[@]}"
+  if [ -z "${WORKLOAD_IDENTITY_SOCKET_PATH}" ]; then
+      INSTANCE_IP=${ISTIO_SVC_IP} POD_NAME=${POD_NAME} POD_NAMESPACE=${NS} "${ISTIO_BIN_BASE}/pilot-agent" proxy "${ISTIO_AGENT_FLAGS_ARRAY[@]}"
+  else
+    JWT_POLICY="none" WORKLOAD_IDENTITY_SOCKET_PATH="${WORKLOAD_IDENTITY_SOCKET_PATH}" INSTANCE_IP=${ISTIO_SVC_IP} POD_NAME=${POD_NAME} POD_NAMESPACE=${NS} "${ISTIO_BIN_BASE}/pilot-agent" proxy "${ISTIO_AGENT_FLAGS_ARRAY[@]}"
+  fi
 else
   # Will run: ${ISTIO_BIN_BASE}/envoy -c $ENVOY_CFG --restart-epoch 0 --drain-time-s 2 --parent-shutdown-time-s 3 --service-cluster $SVC --service-node 'sidecar~${ISTIO_SVC_IP}~${POD_NAME}.${NS}.svc.cluster.local~${NS}.svc.cluster.local' $ISTIO_DEBUG >${ISTIO_LOG_DIR}/istio.log" istio-proxy
-  exec sudo -E -u "${EXEC_USER}" -s /bin/bash -c "INSTANCE_IP=${ISTIO_SVC_IP} POD_NAME=${POD_NAME} POD_NAMESPACE=${NS} exec ${ISTIO_BIN_BASE}/pilot-agent proxy ${ISTIO_AGENT_FLAGS_ARRAY[*]} 2>> ${ISTIO_LOG_DIR}/istio.err.log >> ${ISTIO_LOG_DIR}/istio.log"
+  if [ -z "${WORKLOAD_IDENTITY_SOCKET_PATH}" ]; then
+    exec sudo -E -u "${EXEC_USER}" -s /bin/bash -c "INSTANCE_IP=${ISTIO_SVC_IP} POD_NAME=${POD_NAME} POD_NAMESPACE=${NS} exec ${ISTIO_BIN_BASE}/pilot-agent proxy ${ISTIO_AGENT_FLAGS_ARRAY[*]} 2>> ${ISTIO_LOG_DIR}/istio.err.log >> ${ISTIO_LOG_DIR}/istio.log"
+  else
+    exec sudo -E -u "${EXEC_USER}" -s /bin/bash -c "JWT_POLICY=none WORKLOAD_IDENTITY_SOCKET_PATH=${WORKLOAD_IDENTITY_SOCKET_PATH} INSTANCE_IP=${ISTIO_SVC_IP} POD_NAME=${POD_NAME} POD_NAMESPACE=${NS} exec ${ISTIO_BIN_BASE}/pilot-agent proxy ${ISTIO_AGENT_FLAGS_ARRAY[*]} 2>> ${ISTIO_LOG_DIR}/istio.err.log >> ${ISTIO_LOG_DIR}/istio.log"
+  fi
 fi

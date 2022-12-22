@@ -45,6 +45,14 @@ var (
 
 	jwtPolicy = env.Register("JWT_POLICY", jwt.PolicyThirdParty,
 		"The JWT validation policy.")
+
+	jwtPath = env.Register("JWT_PATH", constants.ThirdPartyJwtPath, "JWT file path").Get()
+
+	proxyKind = env.Register("PROXY_KIND", "", "Proxy kind, e.g., ztunnel").Get()
+
+	workloadIdentitySocketPath = env.Register("WORKLOAD_IDENTITY_SOCKET_PATH", "",
+		"SPIRE workload identity socket path").Get()
+
 	// ProvCert is the environment controlling the use of pre-provisioned certs, for VMs.
 	// May also be used in K8S to use a Secret to bootstrap (as a 'refresh key'), but use short-lived tokens
 	// with extra SAN (labels, etc) in data path.

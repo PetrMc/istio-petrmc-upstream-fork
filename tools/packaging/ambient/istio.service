@@ -1,11 +1,10 @@
 [Unit]
-Description=istio-sidecar: The Istio sidecar
+Description=Istio ZTunnel service
 Documentation=http://istio.io/
 StartLimitIntervalSec=0
 
 [Service]
-ExecStart=/usr/local/bin/istio-start.sh run
-ExecStartPre=+/usr/bin/install -d -o istio-proxy -m 0755 /var/run/secrets
+ExecStart=/usr/local/bin/istio-start.sh ztunnel
 ExecStartPost=/usr/local/bin/istio-start.sh init
 ExecStopPost=/usr/local/bin/istio-start.sh clean
 Restart=always

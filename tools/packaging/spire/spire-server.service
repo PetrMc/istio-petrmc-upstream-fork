@@ -1,0 +1,14 @@
+[Unit]
+Description=SPIRE Server
+Documentation=http://solo.io/
+
+[Service]
+ExecStart=/usr/local/bin/spire-server run -config /var/lib/spire/server.conf
+Restart=always
+StartLimitInterval=0
+RestartSec=10
+KillMode=mixed
+TimeoutStopSec=30s
+
+[Install]
+WantedBy=multi-user.target

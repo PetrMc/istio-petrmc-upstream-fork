@@ -469,6 +469,9 @@ update-crds:
 #-----------------------------------------------------------------------------
 # deb, rpm, etc packages
 include tools/packaging/packaging.mk
+include tools/packaging/packaging-ambient.mk
+include tools/packaging/packaging-spire-agent.mk
+include tools/packaging/packaging-spire-server.mk
 
 #-----------------------------------------------------------------------------
 # Target: integration tests

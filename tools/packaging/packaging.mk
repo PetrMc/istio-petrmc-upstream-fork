@@ -53,7 +53,7 @@ ${TARGET_OUT_LINUX}/release/istio-sidecar.deb: | ${TARGET_OUT_LINUX} deb/fpm
 ${TARGET_OUT_LINUX}/release/istio-sidecar.rpm: | ${TARGET_OUT_LINUX} rpm/fpm
 
 # Package the sidecar rpm file.
-rpm/fpm:
+rpm/fpm: ambient_rpm
 	rm -f ${TARGET_OUT_LINUX}/release/istio-sidecar.rpm
 	fpm -s dir -t rpm -n ${SIDECAR_PACKAGE_NAME} -p ${TARGET_OUT_LINUX}/release/istio-sidecar.rpm --version $(PACKAGE_VERSION) -f \
 		--url http://istio.io  \
@@ -73,7 +73,7 @@ rpm/fpm:
 		$(SIDECAR_FILES)
 
 # Package the sidecar deb file.
-deb/fpm:
+deb/fpm: ambient_deb
 	rm -f ${TARGET_OUT_LINUX}/release/istio-sidecar.deb
 	fpm -s dir -t deb -n ${SIDECAR_PACKAGE_NAME} -p ${TARGET_OUT_LINUX}/release/istio-sidecar.deb --version $(PACKAGE_VERSION) -f \
 		--url http://istio.io  \

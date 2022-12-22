@@ -272,6 +272,8 @@ type Options struct {
 
 	// Extra headers to add to the CA connection.
 	CAHeaders map[string]string
+	// JWT (istio-token) file path
+	JWTFilePath string
 }
 
 // Client interface defines the clients need to implement to talk to CA for CSR.
