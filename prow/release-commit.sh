@@ -78,7 +78,7 @@ ${DEPENDENCIES:-$(cat <<EOD
     git: https://github.com/istio/release-builder
     sha: ${BUILDER_SHA}
   ztunnel:
-    git: https://github.com/istio/ztunnel
+    git: git@github.com:solo-io/ztunnel.git
     auto: deps
 architectures: [linux/amd64, linux/arm64]
 EOD
