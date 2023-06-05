@@ -121,6 +121,59 @@ function download_envoy_if_necessary () {
   fi
 }
 
+# A core feature of modsecurity's WAF filters is a set of core rules that are usually included in every filter.
+# The configuration for these rules is too large to hard-code in-line,
+# so standard practice is to configure the filters to reference core rule files directly.
+# To reference the core rules this way, we need to download them into our sidecar containers, since the proxies
+# are where the filters are actually used.
+# The following commands download the modsecurity core rules for use in the proxy container.
+# Downloads core ruleset.
+# Params:
+#   $1: The full path to output files
+CRS_COMMIT=v3.2.0
+CRS_REPO=SpiderLabs/owasp-modsecurity-crs
+function download_crs () {
+  download_file_dir="$1"
+  # Create the output directory.
+  mkdir -p "${download_file_dir}"
+
+  # Copy the crs files to the output directory.
+  echo "Downloading crs files to ${download_file_dir}"
+  repo_dir="modsecurity-repo"
+  git clone https://github.com/"${CRS_REPO}".git "${repo_dir}"
+  pushd "${repo_dir}"
+  git checkout -qf "${CRS_COMMIT}"
+  cp ./rules/*.conf "${download_file_dir}"
+  cp ./rules/*.data "${download_file_dir}"
+  popd
+
+  rm -rf "${repo_dir}"
+}
+
+# Downloads libsaxon.
+# Params:
+#   $1: The URL of the libsaxon file to be downloaded.
+#   $2: The full path of the output file.
+function download_libsaxon () {
+  download_file_dir="$(dirname "$2")"
+  download_file_name="$(basename "$2")"
+  download_file_path="${download_file_dir}/${download_file_name}"
+  # Enter the output directory.
+  mkdir -p "${download_file_dir}"
+  pushd "${download_file_dir}"
+
+  # Download the libsaxon plugin files to the output directory.
+  echo "Downloading libsaxon file: $1 to ${download_file_path}"
+  if [[ ${DOWNLOAD_COMMAND} == curl* ]]; then
+    time ${DOWNLOAD_COMMAND} --header "${AUTH_HEADER:-}" "$1" -o "${download_file_name}"
+  elif [[ ${DOWNLOAD_COMMAND} == wget* ]]; then
+    time ${DOWNLOAD_COMMAND} --header "${AUTH_HEADER:-}" "$1" -O "${download_file_name}"
+  fi
+
+  popd
+}
+
+
 mkdir -p "${TARGET_OUT}"
 
 # Set the value of DOWNLOAD_COMMAND (either curl or wget)
@@ -136,6 +189,21 @@ fi
 # Download and extract the Envoy linux release binary.
 download_envoy_if_necessary "${ISTIO_ENVOY_LINUX_RELEASE_URL}" "$ISTIO_ENVOY_LINUX_RELEASE_PATH" "${SIDECAR}"
 ISTIO_ENVOY_NATIVE_PATH=${ISTIO_ENVOY_LINUX_RELEASE_PATH}
+
+# Dropped in favor of upstream Envoy, see https://solo-io-corp.slack.com/archives/C04T298GD28/p1689866392407009
+# **SOLO** Add our libsaxon/modsecurity stuff
+SOLO_LIBSAXON_PATH="${ISTIO_ENVOY_LINUX_RELEASE_DIR}/libsaxon-solo.so"
+
+# Download the Modsecurity core rule set to the envoy release dir
+SOLO_CRS_DIR="${ISTIO_ENVOY_LINUX_RELEASE_DIR}/solo-crs"
+echo "Downloading core rule set to ${SOLO_CRS_DIR}"
+download_crs "${SOLO_CRS_DIR}"
+
+# Dropped in favor of upstream Envoy, see https://solo-io-corp.slack.com/archives/C04T298GD28/p1689866392407009
+# Download the libsaxon shared object to the envoy release dir
+SOLO_LIBSAXON_BINARY_URL="${ISTIO_ENVOY_BASE_URL}/libsaxon-solo-${ISTIO_ENVOY_VERSION}${ISTIO_ENVOY_ARCH_SUFFIX}.so"
+echo "Downloading libsaxon: ${SOLO_LIBSAXON_BINARY_URL} to ${SOLO_LIBSAXON_PATH}"
+download_libsaxon "${SOLO_LIBSAXON_BINARY_URL}" "${SOLO_LIBSAXON_PATH}"
 
 # Copy native envoy binary to TARGET_OUT
 echo "Copying ${ISTIO_ENVOY_NATIVE_PATH} to ${TARGET_OUT}/${SIDECAR}"
