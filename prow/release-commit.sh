@@ -33,7 +33,8 @@ HELM_HUB=${HELM_HUB:-gcr.io/istio-testing/charts}
 GCS_BUCKET=${GCS_BUCKET:-istio-build/dev}
 
 # Enable emulation required for cross compiling a few images (VMs)
-docker run --rm --privileged "${DOCKER_HUB}/qemu-user-static" --reset -p yes
+# **SOLO** Leave this as hardcoded since we do not currently mirror this -Daniel
+docker run --rm --privileged "gcr.io/istio-testing/qemu-user-static" --reset -p yes
 export ISTIO_DOCKER_QEMU=true
 
 # Use a pinned version in case breaking changes are needed
