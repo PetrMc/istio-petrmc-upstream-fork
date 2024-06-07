@@ -49,6 +49,7 @@ import (
 	"istio.io/istio/pkg/config/protocol"
 	"istio.io/istio/pkg/jwt"
 	"istio.io/istio/pkg/log"
+	"istio.io/istio/pkg/slices"
 	"istio.io/istio/pkg/util/grpc"
 	"istio.io/istio/pkg/util/sets"
 	"istio.io/istio/pkg/wellknown"
@@ -99,6 +100,7 @@ type VirtualHostWrapper struct {
 // The list of Services is also passed to allow maintaining consistent ordering.
 func BuildSidecarVirtualHostWrapper(routeCache *Cache, node *model.Proxy, push *model.PushContext, serviceRegistry map[host.Name]*model.Service,
 	virtualServices []config.Config, listenPort int, mostSpecificWildcardVsIndex map[host.Name]types.NamespacedName,
+	waypointServices sets.Set[host.Name],
 ) []VirtualHostWrapper {
 	out := make([]VirtualHostWrapper, 0)
 
@@ -111,7 +113,7 @@ func BuildSidecarVirtualHostWrapper(routeCache *Cache, node *model.Proxy, push *
 		hashByDestination, destinationRules := hashForVirtualService(push, node, virtualService)
 		dependentDestinationRules = append(dependentDestinationRules, destinationRules...)
 		wrappers := buildSidecarVirtualHostsForVirtualService(
-			node, virtualService, serviceRegistry, hashByDestination, listenPort, push.Mesh, mostSpecificWildcardVsIndex,
+			node, virtualService, serviceRegistry, hashByDestination, listenPort, push.Mesh, mostSpecificWildcardVsIndex, waypointServices,
 		)
 		out = append(out, wrappers...)
 	}
@@ -242,6 +244,7 @@ func buildSidecarVirtualHostsForVirtualService(
 	listenPort int,
 	mesh *meshconfig.MeshConfig,
 	mostSpecificWildcardVsIndex map[host.Name]types.NamespacedName,
+	waypointServices sets.Set[host.Name],
 ) []VirtualHostWrapper {
 	meshGateway := sets.New(constants.IstioMeshGateway)
 	opts := RouteOptions{
@@ -279,6 +282,23 @@ func buildSidecarVirtualHostsForVirtualService(
 			return nil
 		}
 	}
+
+	// SOLO
+	// For sidecar interop to service waypoints, we want to disable any VirtualServices if we have a waypoint
+	// Filter out anything that has a service waypoint
+	if features.EnableSidecarWaypointInterop {
+		matchingRegistryServices = slices.FilterInPlace(matchingRegistryServices, func(service *model.Service) bool {
+			if service.GetAddressForProxy(node) == constants.UnspecifiedIP {
+				// No VIP, so skip this. Currently, waypoints can only accept VIP traffic
+				return true
+			}
+			return !waypointServices.Contains(service.Hostname)
+		})
+		if len(hosts) == 0 && len(matchingRegistryServices) == 0 {
+			return nil
+		}
+	}
+	// END SOLO
 
 	// Now group these Services by port so that we can infer the destination.port if the user
 	// doesn't specify any port for a multiport service. We need to know the destination port in

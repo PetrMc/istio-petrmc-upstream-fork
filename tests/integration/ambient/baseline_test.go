@@ -170,7 +170,7 @@ func supportsL7(opt echo.CallOptions, src, dst echo.Instance) bool {
 // Assumption is ambient test suite sidecars will support HBONE
 // If the assumption is incorrect hboneClient may return invalid result
 func hboneClient(instance echo.Instance) bool {
-	return instance.Config().ZTunnelCaptured()
+	return instance.Config().ZTunnelCaptured() || instance.Config().HasSidecar()
 }
 
 func TestServices(t *testing.T) {
