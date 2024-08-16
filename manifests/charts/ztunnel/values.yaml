@@ -152,3 +152,10 @@ _internal_defaults_do_not_set:
       enabled: true
       # OTLP endpoint to send spans to
       otlpEndpoint: "http://opentelemetry-collector.istio-system:4317"
+
+  spire:
+    # Whether to enable SPIRE agent as the workload CA for ztunnel
+    enabled: false
+    # Path on the host to the SPIRE agent admin socket.
+    # Do not change unless you know what you're doing or have a custom SPIRE setup
+    adminSockHostPath: /run/spire/agent/sockets/csi.spiffe.io/admin

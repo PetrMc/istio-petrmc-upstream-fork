@@ -260,6 +260,11 @@ message DefaultResourcesConfig {
   ResourcesRequestsConfig requests = 1;
 }
 
+message SpireConfig {
+  // Controls whether SPIRE is used for workload identity
+  google.protobuf.BoolValue workloads = 1;
+}
+
 // Configuration for an egress gateway.
 message EgressGatewayConfig {
   // Controls whether auto scaling with a HorizontalPodAutoscaler is enabled.
@@ -398,6 +403,9 @@ message GatewaysConfig {
   google.protobuf.Value securityContext = 10;
 
   google.protobuf.Value seccompProfile = 12;
+
+  // Configuration for how/where SPIRE should be used in gateways
+  SpireConfig spire = 14;
 }
 
 // Global Configuration for Istio components.
