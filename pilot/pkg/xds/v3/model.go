@@ -32,7 +32,10 @@ const (
 	BootstrapType              = model.BootstrapType
 	AddressType                = model.AddressType
 	WorkloadType               = model.WorkloadType
+	WorkloadServiceType        = model.WorkloadServiceType
 	WorkloadAuthorizationType  = model.WorkloadAuthorizationType
+
+	FederatedServiceType = model.FederatedServiceType
 
 	// nolint
 	HttpProtocolOptionsType = "envoy.extensions.upstreams.http.v3.HttpProtocolOptions"

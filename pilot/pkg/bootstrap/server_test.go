@@ -813,7 +813,7 @@ func TestGetDNSNames(t *testing.T) {
 			var args PilotArgs
 			args.Revision = tc.revision
 			args.Namespace = "istio-system"
-			sans := getDNSNames(&args, tc.discoveryAddress)
+			sans := getDNSNames(&args, tc.discoveryAddress, "")
 			assert.Equal(t, sans, tc.sans)
 		})
 	}

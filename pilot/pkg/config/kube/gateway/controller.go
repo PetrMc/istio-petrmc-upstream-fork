@@ -32,6 +32,7 @@ import (
 	"istio.io/istio/pilot/pkg/features"
 	"istio.io/istio/pilot/pkg/model"
 	"istio.io/istio/pilot/pkg/serviceregistry/kube/controller"
+	"istio.io/istio/pilot/pkg/serviceregistry/serviceentry"
 	"istio.io/istio/pilot/pkg/status"
 	"istio.io/istio/pkg/cluster"
 	"istio.io/istio/pkg/config"
@@ -49,6 +50,7 @@ import (
 	"istio.io/istio/pkg/revisions"
 	"istio.io/istio/pkg/slices"
 	"istio.io/istio/pkg/util/sets"
+	"istio.io/istio/platform/discovery/peering"
 )
 
 var log = istiolog.RegisterScope("gateway", "gateway-api controller")
@@ -170,6 +172,7 @@ func NewController(
 		c.tagWatcher.TriggerRecomputation()
 	})
 
+	serviceEntries := buildClient[*networkingclient.ServiceEntry](c, kc, gvr.ServiceEntry, opts, "informer/ServiceEntries")
 	inputs := Inputs{
 		Namespaces: krt.NewInformer[*corev1.Namespace](kc, opts.WithName("informer/Namespaces")...),
 		Secrets: krt.WrapClient[*corev1.Secret](
@@ -193,7 +196,7 @@ func NewController(
 		GRPCRoutes:     buildClient[*gatewayv1.GRPCRoute](c, kc, gvr.GRPCRoute, opts, "informer/GRPCRoutes"),
 
 		ReferenceGrants: buildClient[*gateway.ReferenceGrant](c, kc, gvr.ReferenceGrant, opts, "informer/ReferenceGrants"),
-		ServiceEntries:  buildClient[*networkingclient.ServiceEntry](c, kc, gvr.ServiceEntry, opts, "informer/ServiceEntries"),
+		ServiceEntries:  serviceEntries,
 	}
 	if features.EnableAlphaGatewayAPI {
 		inputs.TCPRoutes = buildClient[*gatewayalpha.TCPRoute](c, kc, gvr.TCPRoute, opts, "informer/TCPRoutes")
@@ -206,6 +209,24 @@ func NewController(
 		inputs.TLSRoutes = krt.NewStaticCollection[*gatewayalpha.TLSRoute](nil, nil, opts.WithName("disable/TLSRoutes")...)
 		inputs.BackendTLSPolicies = krt.NewStaticCollection[*gatewayalpha3.BackendTLSPolicy](nil, nil, opts.WithName("disable/BackendTLSPolicies")...)
 		inputs.BackendTrafficPolicy = krt.NewStaticCollection[*gatewayx.XBackendTrafficPolicy](nil, nil, opts.WithName("disable/XBackendTrafficPolicy")...)
+	}
+	if features.EnableEnvoyMultiNetworkHBONE {
+		// if the feature is enabled we will transform the serviceEntry collection using the logic established in peering.go
+		// if the ns is "" or equal to the peering ns specified by the env var PEERING_DISCOVERY_NAMESPACE
+		// then transform the obj ns using solo.io/parent-service-namespace label if applicable
+		transformedServiceEntries := krt.NewCollection[*networkingclient.ServiceEntry](
+			serviceEntries,
+			func(ctx krt.HandlerContext, se *networkingclient.ServiceEntry) **networkingclient.ServiceEntry {
+				if serviceentry.IsPeerObject(se) {
+					// Create a deep copy of the ServiceEntry to avoid modifying the original
+					seCopy := se.DeepCopy()
+					seCopy.SetNamespace(se.Labels[peering.ParentServiceNamespaceLabel])
+					return &seCopy
+				}
+				// For non-peer objects, just return a pointer to the original
+				return &se
+			})
+		inputs.ServiceEntries = transformedServiceEntries
 	}
 
 	references := NewReferenceSet(

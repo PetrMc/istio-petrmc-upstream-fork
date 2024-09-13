@@ -15,11 +15,5 @@ func findWaypointServices(push *model.PushContext) sets.Set[host.Name] {
 	if !features.EnableSidecarWaypointInterop {
 		return nil
 	}
-	serviceInfos := push.ServicesWithWaypoint("")
-
-	res := sets.New[host.Name]()
-	for _, s := range serviceInfos {
-		res.Insert(host.Name(s.Service.Hostname))
-	}
-	return res
+	return push.ServicesWithWaypointOrRemoteWaypoint()
 }

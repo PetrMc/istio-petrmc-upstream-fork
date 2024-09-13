@@ -101,7 +101,7 @@ func (configgen *ConfigGeneratorImpl) buildWaypointInboundClusters(
 	clusters := make([]*cluster.Cluster, 0)
 	// Creates "main_internal" cluster to route to the main internal listener.
 	// Creates "encap" cluster to route to the encap listener.
-	clusters = append(clusters, GetMainInternalCluster(), GetEncapCluster(proxy))
+	clusters = append(clusters, GetMainInternalWaypointCluster(), GetEncapCluster(proxy))
 	// Creates per-VIP load balancing upstreams.
 	clusters = append(clusters, cb.buildWaypointInboundVIP(proxy, svcs, push)...)
 	// Upstream of the "encap" listener.
@@ -237,6 +237,8 @@ func (cb *ClusterBuilder) buildWaypointInboundVIPCluster(
 	localCluster.cluster.TransportSocketMatches = nil
 	// Wrap the transportSocket with internal listener upstream. Note this could be a raw buffer, PROXY, TLS, etc
 	localCluster.cluster.TransportSocket = util.WaypointInternalUpstreamTransportSocket(transportSocket)
+
+	applyMultinetworkSubset(localCluster.cluster)
 
 	return localCluster.build()
 }

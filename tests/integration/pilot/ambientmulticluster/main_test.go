@@ -1,0 +1,154 @@
+//go:build integ
+// +build integ
+
+// Copyright Solo.io, Inc
+//
+// Licensed under a Solo commercial license, not Apache License, Version 2 or any other variant
+
+package ambientmulticluster
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/client-go/tools/clientcmd/api/latest"
+	"sigs.k8s.io/yaml"
+
+	"istio.io/istio/pkg/log"
+	"istio.io/istio/pkg/test/framework"
+	"istio.io/istio/pkg/test/framework/components/crd"
+	"istio.io/istio/pkg/test/framework/components/environment/kube"
+	"istio.io/istio/pkg/test/framework/components/istio"
+	"istio.io/istio/pkg/test/framework/components/istioctl"
+	"istio.io/istio/pkg/test/framework/components/namespace"
+	testlabel "istio.io/istio/pkg/test/framework/label"
+	"istio.io/istio/pkg/test/framework/resource"
+	"istio.io/istio/pkg/test/util/tmpl"
+	"istio.io/istio/pkg/util/sets"
+	"istio.io/istio/tests/integration/pilot/ambientmulticluster/shared"
+	"istio.io/istio/tests/integration/security/util/cert"
+)
+
+var (
+	i istio.Instance
+
+	// Below are various preconfigured echo deployments. Whenever possible, tests should utilize these
+	// to avoid excessive creation/tear down of deployments. In general, a test should only deploy echo if
+	// its doing something unique to that specific test.
+	apps = &shared.EchoDeployments{}
+)
+
+// The ambientmulticluster is a test to exercise Solo's ambient multicluster flow.
+// This is not under ambient/ since that runs with one cluster only, so would never be executed.
+func TestMain(m *testing.M) {
+	// Filter out the 'remote' cluster, we don't support that model.
+	kube.ClusterFilter = sets.New(shared.LocalCluster, shared.RemoteCluster)
+	// nolint: staticcheck
+	framework.
+		NewSuite(m).
+		Label(testlabel.CustomSetup).
+		RequireMinClusters(2).
+		Setup(func(t resource.Context) error {
+			t.Settings().Ambient = true
+			return nil
+		}).
+		Setup(istio.Setup(&i, func(ctx resource.Context, cfg *istio.Config) {
+			// can't deploy VMs in this mode
+			ctx.Settings().SkipVMs()
+			cfg.DeployEastWestGW = false
+			cfg.SkipDeployCrossClusterSecrets = true
+			tm := `
+profile: ambient
+values:
+  meshConfig:
+    trustDomain: "{{.}}.local"
+    defaultHttpRetryPolicy:
+      attempts: 0 # Do not hide failures with retries
+  global:
+    multiCluster:
+      clusterName: "{{.}}"
+    network: "{{.}}"
+  pilot:
+    env:
+      PILOT_ENABLE_IP_AUTOALLOCATE: "true"
+      PILOT_SKIP_VALIDATE_TRUST_DOMAIN: "true"
+  cni:
+    ambient:
+      dnsCapture: true
+  platforms:
+    peering:
+      enabled: true
+`
+
+			cfg.ControlPlaneValues = tmpl.MustEvaluate(tm, "primary")
+			// TODO: I think this is never used
+			cfg.RemoteClusterValues = tmpl.MustEvaluate(tm, "remote")
+		}, cert.CreateCASecret)).
+		Setup(func(ctx resource.Context) error {
+			if err := crd.DeployGatewayAPI(ctx); err != nil {
+				return err
+			}
+
+			kubeconfigs := []string{}
+			contexts := []string{}
+			for _, cl := range ctx.Clusters() {
+				kubeconfigs = append(kubeconfigs, cl.MetadataValue("kubeconfig"))
+				// This is not super generic, but should work enough
+				contexts = append(contexts, "kind-"+cl.Name())
+				ik, err := istioctl.New(ctx, istioctl.Config{Cluster: cl})
+				if err != nil {
+					return err
+				}
+
+				gwns, err := namespace.Claim(ctx, namespace.Config{Prefix: "istio-gateway"})
+				if err != nil {
+					return err
+				}
+				stdout, stderr, err := ik.Invoke([]string{"multicluster", "expose", "--wait", "-n", gwns.Name()})
+				if err != nil {
+					return err
+				}
+				log.Infof("istioctl expose: %s, %s", stdout, stderr)
+			}
+
+			// We need 1 kubeconfig with all contexts... join them.
+			// Note: users can do	KUBECONFIG=a:b:C, but we don't want to do that in tests.
+			cc := clientcmd.NewDefaultClientConfigLoadingRules()
+			cc.Precedence = kubeconfigs
+			ccx, err := cc.Load()
+			if err != nil {
+				return err
+			}
+			lcfg, err := latest.Scheme.ConvertToVersion(ccx, latest.ExternalVersion)
+			if err != nil {
+				return err
+			}
+			oy, err := yaml.Marshal(lcfg)
+			if err != nil {
+				return err
+			}
+			// Do not use ctx.CreateTmpDirectory else credentials will end up in test logs. Not an issue when using kind, but good to avoid
+			dir, err := os.MkdirTemp("", "test-kubeconfig")
+			if err != nil {
+				return err
+			}
+			if err := os.WriteFile(filepath.Join(dir, "kubeconfig"), oy, 0o644); err != nil {
+				return err
+			}
+
+			stdout, stderr, err := istioctl.NewKubeManualConfig(filepath.Join(dir, "kubeconfig")).
+				Invoke([]string{"multicluster", "link", "--contexts", strings.Join(contexts, ","), "-n", "istio-gateway"})
+			if err != nil {
+				return err
+			}
+			log.Infof("istioctl link: %s, %s", stdout, stderr)
+			return nil
+		}).
+		Setup(func(t resource.Context) error {
+			return shared.SetupApps(t, apps)
+		}).
+		Run()
+}

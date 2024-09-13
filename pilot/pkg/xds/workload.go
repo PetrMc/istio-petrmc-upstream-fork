@@ -97,6 +97,14 @@ func appendAddress(addr model.AddressInfo, requestedType string, aliases []strin
 				Resource: protoconv.MessageToAny(addr.GetWorkload()), // TODO: pre-marshal
 			})
 		}
+	case v3.WorkloadServiceType:
+		if addr.GetService() != nil {
+			resources = append(resources, &discovery.Resource{
+				Name:     n,
+				Aliases:  aliases,
+				Resource: protoconv.MessageToAny(addr.GetService()), // TODO: pre-marshal
+			})
+		}
 	case v3.AddressType:
 		proto := addr.Marshaled
 		if proto == nil {

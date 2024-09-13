@@ -152,7 +152,7 @@ func (m *Multicluster) initializeCluster(cluster *multicluster.Cluster, kubeCont
 	}
 
 	// TODO implement deduping in aggregate registry to allow multiple k8s registries to handle WorkloadEntry
-	if features.EnableK8SServiceSelectWorkloadEntries {
+	if features.EnablePeering || features.EnableK8SServiceSelectWorkloadEntries {
 		if m.serviceEntryController != nil && configCluster {
 			// Add an instance handler in the service entry store to notify kubernetes about workload entry events
 			m.serviceEntryController.AppendWorkloadHandler(kubeRegistry.WorkloadInstanceHandler)

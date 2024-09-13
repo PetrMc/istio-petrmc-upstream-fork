@@ -352,6 +352,11 @@ type NodeMetadata struct {
 	// Name of the socket file which will be used for workload SDS.
 	WorkloadIdentitySocketFile string `json:"WORKLOAD_IDENTITY_SOCKET_FILE,omitempty"`
 
+	// The name of the ECS cluster, if the client is running in ECS
+	ECSCluster string `json:"ECS_CLUSTER,omitempty"`
+	// The name of the ECS Task ARN, if the client is running in ECS
+	ECSTaskARN string `json:"ECS_TASK_ARN,omitempty"`
+
 	// Contains a copy of the raw metadata. This is needed to lookup arbitrary values.
 	// If a value is known ahead of time it should be added to the struct rather than reading from here,
 	Raw map[string]any `json:"-"`

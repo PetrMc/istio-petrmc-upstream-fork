@@ -109,6 +109,41 @@ func (c *Controller) Policies(requested sets.Set[model.ConfigKey]) []model.Workl
 	return res
 }
 
+func (c *Controller) FederatedServices(services sets.String) ([]model.FederatedService, sets.String) {
+	i := []model.FederatedService{}
+	if !features.EnableAmbient {
+		return i, nil
+	}
+	removed := sets.String{}
+	for _, p := range c.GetRegistries() {
+		wis, r := p.FederatedServices(services)
+		i = append(i, wis...)
+		removed.Merge(r)
+	}
+	// We may have 'removed' it in one registry but found it in another
+	for _, wl := range i {
+		if removed.Contains(wl.ResourceName()) {
+			removed.Delete(wl.ResourceName())
+		}
+	}
+	return i, removed
+}
+
+func (c *Controller) ServicesWithWaypointOrRemoteWaypoint() sets.Set[host.Name] {
+	if !features.EnableAmbient {
+		return nil
+	}
+	var res sets.Set[host.Name]
+	for _, p := range c.GetRegistries() {
+		if res == nil {
+			res = p.ServicesWithWaypointOrRemoteWaypoint()
+		} else {
+			res.Merge(p.ServicesWithWaypointOrRemoteWaypoint())
+		}
+	}
+	return res
+}
+
 func (c *Controller) AddressInformation(addresses sets.String) ([]model.AddressInfo, sets.String) {
 	if !features.EnableAmbient {
 		return nil, nil
@@ -461,4 +496,17 @@ func (c *Controller) UnRegisterHandlersForCluster(id cluster.ID) {
 	c.storeLock.Lock()
 	defer c.storeLock.Unlock()
 	delete(c.handlersByCluster, id)
+}
+
+// GetInternalRegistries returns a copy of all registries, extracing out of the registryEntry struct to expose
+func (c *Controller) GetInternalRegistries() []serviceregistry.Instance {
+	c.storeLock.RLock()
+	defer c.storeLock.RUnlock()
+
+	// copy registries to prevent race, no need to deep copy here.
+	out := make([]serviceregistry.Instance, len(c.registries))
+	for i := range c.registries {
+		out[i] = c.registries[i].Instance
+	}
+	return out
 }

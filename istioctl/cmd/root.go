@@ -26,17 +26,20 @@ import (
 	"istio.io/istio/istioctl/pkg/admin"
 	"istio.io/istio/istioctl/pkg/analyze"
 	"istio.io/istio/istioctl/pkg/authz"
+	"istio.io/istio/istioctl/pkg/bootstrap"
 	"istio.io/istio/istioctl/pkg/checkinject"
 	"istio.io/istio/istioctl/pkg/cli"
 	"istio.io/istio/istioctl/pkg/completion"
 	"istio.io/istio/istioctl/pkg/config"
 	"istio.io/istio/istioctl/pkg/dashboard"
 	"istio.io/istio/istioctl/pkg/describe"
+	"istio.io/istio/istioctl/pkg/ecs"
 	"istio.io/istio/istioctl/pkg/injector"
 	"istio.io/istio/istioctl/pkg/internaldebug"
 	"istio.io/istio/istioctl/pkg/kubeinject"
 	"istio.io/istio/istioctl/pkg/metrics"
 	"istio.io/istio/istioctl/pkg/multicluster"
+	"istio.io/istio/istioctl/pkg/peer"
 	"istio.io/istio/istioctl/pkg/precheck"
 	"istio.io/istio/istioctl/pkg/proxyconfig"
 	"istio.io/istio/istioctl/pkg/proxystatus"
@@ -195,6 +198,9 @@ debug and diagnose their Istio mesh.
 	experimentalCmd.AddCommand(describe.Cmd(ctx))
 	experimentalCmd.AddCommand(config.Cmd())
 	experimentalCmd.AddCommand(workload.Cmd(ctx))
+	rootCmd.AddCommand(bootstrap.Cmd(ctx))
+	rootCmd.AddCommand(peer.Cmd(ctx))
+	rootCmd.AddCommand(ecs.Cmd(ctx))
 	experimentalCmd.AddCommand(internaldebug.DebugCommand(ctx))
 	experimentalCmd.AddCommand(precheck.Cmd(ctx))
 	experimentalCmd.AddCommand(proxyconfig.StatsConfigCmd(ctx))

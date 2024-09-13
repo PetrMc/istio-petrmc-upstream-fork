@@ -16,9 +16,11 @@
 package ambient
 
 import (
+	"fmt"
 	"net/netip"
 	"strings"
 
+	wrappers "google.golang.org/protobuf/types/known/wrapperspb"
 	v1 "k8s.io/api/core/v1"
 
 	"istio.io/api/networking/v1alpha3"
@@ -37,6 +39,7 @@ import (
 	"istio.io/istio/pkg/ptr"
 	"istio.io/istio/pkg/slices"
 	"istio.io/istio/pkg/workloadapi"
+	"istio.io/istio/platform/discovery/peering"
 )
 
 func (a *index) ServicesCollection(
@@ -46,10 +49,10 @@ func (a *index) ServicesCollection(
 	namespaces krt.Collection[*v1.Namespace],
 	opts krt.OptionsBuilder,
 ) krt.Collection[model.ServiceInfo] {
-	ServicesInfo := krt.NewCollection(services, a.serviceServiceBuilder(waypoints, namespaces),
-		opts.WithName("ServicesInfo")...)
 	ServiceEntriesInfo := krt.NewManyCollection(serviceEntries, a.serviceEntryServiceBuilder(waypoints, namespaces),
 		opts.WithName("ServiceEntriesInfo")...)
+	ServicesInfo := krt.NewCollection(services, a.serviceServiceBuilder(waypoints, namespaces, serviceEntries),
+		opts.WithName("ServicesInfo")...)
 	WorkloadServices := krt.JoinCollection([]krt.Collection[model.ServiceInfo]{ServicesInfo, ServiceEntriesInfo}, opts.WithName("WorkloadService")...)
 	return WorkloadServices
 }
@@ -57,6 +60,7 @@ func (a *index) ServicesCollection(
 func (a *index) serviceServiceBuilder(
 	waypoints krt.Collection[Waypoint],
 	namespaces krt.Collection[*v1.Namespace],
+	serviceEntries krt.Collection[*networkingclient.ServiceEntry],
 ) krt.TransformationSingle[*v1.Service, model.ServiceInfo] {
 	return func(ctx krt.HandlerContext, s *v1.Service) *model.ServiceInfo {
 		if s.Spec.Type == v1.ServiceTypeExternalName {
@@ -87,13 +91,15 @@ func (a *index) serviceServiceBuilder(
 		}
 		waypointStatus.Error = wperr
 
-		svc := a.constructService(ctx, s, waypoint)
+		svc := a.constructService(ctx, s, waypoint, serviceEntries)
 		return precomputeServicePtr(&model.ServiceInfo{
 			Service:       svc,
 			PortNames:     portNames,
 			LabelSelector: model.NewSelector(s.Spec.Selector),
 			Source:        MakeSource(s),
 			Waypoint:      waypointStatus,
+
+			GlobalService: peering.HasGlobalLabel(s.Labels),
 		})
 	}
 }
@@ -111,12 +117,20 @@ func (a *index) serviceEntryServiceBuilder(
 	namespaces krt.Collection[*v1.Namespace],
 ) krt.TransformationMulti[*networkingclient.ServiceEntry, model.ServiceInfo] {
 	return func(ctx krt.HandlerContext, s *networkingclient.ServiceEntry) []model.ServiceInfo {
+		var wasPeerObject bool
+		s, wasPeerObject = convertSENamespace(s)
 		waypoint, waypointError := fetchWaypointForService(ctx, waypoints, namespaces, s.ObjectMeta)
-		return a.serviceEntriesInfo(ctx, s, waypoint, waypointError)
+		return a.serviceEntriesInfo(ctx, s, waypoint, waypointError, wasPeerObject)
 	}
 }
 
-func (a *index) serviceEntriesInfo(ctx krt.HandlerContext, s *networkingclient.ServiceEntry, w *Waypoint, wperr *model.StatusMessage) []model.ServiceInfo {
+func (a *index) serviceEntriesInfo(
+	ctx krt.HandlerContext,
+	s *networkingclient.ServiceEntry,
+	w *Waypoint,
+	wperr *model.StatusMessage,
+	wasPeerObject bool,
+) []model.ServiceInfo {
 	sel := model.NewSelector(s.Spec.GetWorkloadSelector().GetLabels())
 	portNames := map[int32]model.ServicePortName{}
 	for _, p := range s.Spec.Ports {
@@ -136,12 +150,19 @@ func (a *index) serviceEntriesInfo(ctx krt.HandlerContext, s *networkingclient.S
 		waypoint.Error = wperr
 	}
 	return slices.Map(a.constructServiceEntries(ctx, s, w), func(e *workloadapi.Service) model.ServiceInfo {
+		source := MakeSource(s)
+		if wasPeerObject {
+			source.Namespace = peering.PeeringNamespace
+		}
 		return precomputeService(model.ServiceInfo{
 			Service:       e,
 			PortNames:     portNames,
 			LabelSelector: sel,
-			Source:        MakeSource(s),
+			Source:        source,
 			Waypoint:      waypoint,
+
+			GlobalService:  peering.HasGlobalLabel(s.Labels),
+			RemoteWaypoint: s.Labels[peering.RemoteWaypointLabel] == "true",
 		})
 	})
 }
@@ -171,15 +192,7 @@ func (a *index) constructServiceEntries(ctx krt.HandlerContext, svc *networkingc
 		})
 	}
 
-	var lb *workloadapi.LoadBalancing
-
-	trafficDistribution := model.GetTrafficDistribution(nil, svc.Annotations)
-	switch trafficDistribution {
-	case model.TrafficDistributionPreferSameZone:
-		lb = preferSameZoneLoadBalancer
-	case model.TrafficDistributionPreferSameNode:
-		lb = preferSameNodeLoadBalancer
-	}
+	lb := getTrafficDistribution(nil, svc.Annotations)
 
 	// TODO this is only checking one controller - we may be missing service vips for instances in another cluster
 	res := make([]*workloadapi.Service, 0, len(svc.Spec.Hosts))
@@ -208,7 +221,12 @@ func (a *index) constructServiceEntries(ctx krt.HandlerContext, svc *networkingc
 	return res
 }
 
-func (a *index) constructService(ctx krt.HandlerContext, svc *v1.Service, w *Waypoint) *workloadapi.Service {
+func (a *index) constructService(
+	ctx krt.HandlerContext,
+	svc *v1.Service,
+	w *Waypoint,
+	serviceEntries krt.Collection[*networkingclient.ServiceEntry],
+) *workloadapi.Service {
 	ports := make([]*workloadapi.Port, 0, len(svc.Spec.Ports))
 	for _, p := range svc.Spec.Ports {
 		ports = append(ports, &workloadapi.Port{
@@ -225,9 +243,8 @@ func (a *index) constructService(ctx krt.HandlerContext, svc *v1.Service, w *Way
 		return nil
 	}
 
-	var lb *workloadapi.LoadBalancing
-
 	// First, use internal traffic policy if set.
+	lb := getTrafficDistribution(svc.Spec.TrafficDistribution, svc.Annotations)
 	if itp := svc.Spec.InternalTrafficPolicy; itp != nil && *itp == v1.ServiceInternalTrafficPolicyLocal {
 		lb = &workloadapi.LoadBalancing{
 			// Only allow endpoints on the same node.
@@ -266,15 +283,27 @@ func (a *index) constructService(ctx krt.HandlerContext, svc *v1.Service, w *Way
 		}
 	}
 	// TODO: this is only checking one controller - we may be missing service vips for instances in another cluster
+
+	var sans []string
+	if svc.Labels[peering.ServiceScopeLabel] == peering.ServiceScopeGlobalOnly {
+		name := fmt.Sprintf("%s/autogen.%s.%s", peering.PeeringNamespace, svc.Namespace, svc.Name)
+		se := ptr.Flatten(krt.FetchOne(ctx, serviceEntries, krt.FilterKey(name)))
+		if se != nil {
+			sans = se.Spec.SubjectAltNames
+		}
+	}
+
+	// TODO this is only checking one controller - we may be missing service vips for instances in another cluster
 	return &workloadapi.Service{
-		Name:          svc.Name,
-		Namespace:     svc.Namespace,
-		Hostname:      string(kube.ServiceHostname(svc.Name, svc.Namespace, a.DomainSuffix)),
-		Addresses:     addresses,
-		Ports:         ports,
-		Waypoint:      w.GetAddress(),
-		LoadBalancing: lb,
-		IpFamilies:    ipFamily,
+		Name:            svc.Name,
+		Namespace:       svc.Namespace,
+		Hostname:        string(kube.ServiceHostname(svc.Name, svc.Namespace, a.DomainSuffix)),
+		SubjectAltNames: sans,
+		Addresses:       addresses,
+		Ports:           ports,
+		Waypoint:        w.GetAddress(),
+		LoadBalancing:   lb,
+		IpFamilies:      ipFamily,
 	}
 }
 
@@ -300,6 +329,23 @@ var preferSameNodeLoadBalancer = &workloadapi.LoadBalancing{
 	Mode: workloadapi.LoadBalancing_FAILOVER,
 }
 
+var preferNetworkLoadBalancer = &workloadapi.LoadBalancing{
+	// Prefer endpoints in the same network, but allow spilling over to further endpoints where required.
+	RoutingPreference: []workloadapi.LoadBalancing_Scope{
+		workloadapi.LoadBalancing_NETWORK,
+	},
+	Mode: workloadapi.LoadBalancing_FAILOVER,
+}
+
+var preferRegionLoadBalancer = &workloadapi.LoadBalancing{
+	// Prefer endpoints in the same region and network, but allow spilling over to further endpoints where required.
+	RoutingPreference: []workloadapi.LoadBalancing_Scope{
+		workloadapi.LoadBalancing_NETWORK,
+		workloadapi.LoadBalancing_REGION,
+	},
+	Mode: workloadapi.LoadBalancing_FAILOVER,
+}
+
 func getVIPs(svc *v1.Service) []string {
 	res := []string{}
 	cips := svc.Spec.ClusterIPs
@@ -314,11 +360,40 @@ func getVIPs(svc *v1.Service) []string {
 	return res
 }
 
+func getTrafficDistribution(specValue *string, annotations map[string]string) *workloadapi.LoadBalancing {
+	if specValue != nil {
+		preferClose := *specValue == v1.ServiceTrafficDistributionPreferClose
+		if preferClose {
+			return preferCloseLoadBalancer
+		}
+	}
+	// The TrafficDistribution field is quite new, so we allow a legacy annotation option as well
+	// This also has some custom types
+	switch strings.ToLower(annotations[apiannotation.NetworkingTrafficDistribution.Name]) {
+	case strings.ToLower(v1.ServiceTrafficDistributionPreferClose):
+		return preferCloseLoadBalancer
+	case "prefernetwork":
+		return preferNetworkLoadBalancer
+	case "preferregion":
+		return preferRegionLoadBalancer
+	default:
+		return nil
+	}
+}
+
 func precomputeServicePtr(w *model.ServiceInfo) *model.ServiceInfo {
 	return ptr.Of(precomputeService(*w))
 }
 
 func precomputeService(w model.ServiceInfo) model.ServiceInfo {
+	if w.Waypoint.IngressLabelPresent {
+		w.Service.Extensions = append(w.Service.Extensions, &workloadapi.Extension{
+			Name: "solo.io/SoloServiceExtension",
+			Config: protoconv.MessageToAny(&workloadapi.SoloServiceExtension{
+				IngressUseWaypoint: wrappers.Bool(w.Waypoint.IngressUseWaypoint),
+			}),
+		})
+	}
 	addr := serviceToAddress(w.Service)
 	w.MarshaledAddress = protoconv.MessageToAny(addr)
 	w.AsAddress = model.AddressInfo{

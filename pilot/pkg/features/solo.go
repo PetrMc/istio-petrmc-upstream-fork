@@ -17,3 +17,18 @@ var EnableSidecarWaypointInterop = registerAmbient("ENABLE_WAYPOINT_INTEROP", fa
 // This is done without a license check and usually should not be used
 var EnableAmbientEnvoyFilterUnlicensed, EnableAmbientEnvoyFilterSet = env.Register("ENABLE_AMBIENT_ENVOYFILTER", true,
 	"If true, ambient waypoints will support EnvoyFilter API.").Lookup()
+
+var EnablePeering, EnablePeeringExplicitly = env.Register("ENABLE_PEERING_DISCOVERY", false,
+	"If enabled, cross-cluster service discovery will be done via peering.").Lookup()
+
+var EnableEnvoyMultiNetworkHBONE = func() bool {
+	v, f := env.Register("ENABLE_AMBIENT_ENVOY_MULTI_NETWORK", false,
+		"If enabled, ambient multi-network mode will work for Envoy based data-planes (Sidecar, Gateway, Waypoint).").Lookup()
+	if f {
+		return v
+	}
+	// If unset, default to enabling when peering is enabled.
+	// We explicitly do not check the license here; if they are not licensed we will just turn off the service discovery,
+	// not break routing
+	return EnablePeering
+}()

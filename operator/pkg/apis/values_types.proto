@@ -1419,6 +1419,9 @@ message Values {
   // Configuration for Gateway Classes
   google.protobuf.Value gatewayClasses = 45;
 
+  // SOLO: platform configuration
+  google.protobuf.Value platforms = 85;
+
   // SOLO: licensing configuration
   google.protobuf.Value license = 86;
 }

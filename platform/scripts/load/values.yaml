@@ -1,0 +1,3 @@
+image: localhost:5000/pilot:1734633147
+ambient: true
+load: true

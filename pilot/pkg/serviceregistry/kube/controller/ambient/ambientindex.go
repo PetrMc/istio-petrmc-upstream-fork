@@ -37,6 +37,7 @@ import (
 	"istio.io/istio/pkg/cluster"
 	"istio.io/istio/pkg/config"
 	"istio.io/istio/pkg/config/constants"
+	"istio.io/istio/pkg/config/host"
 	"istio.io/istio/pkg/config/mesh/meshwatcher"
 	"istio.io/istio/pkg/config/schema/gvr"
 	"istio.io/istio/pkg/config/schema/kind"
@@ -94,6 +95,10 @@ type servicesCollection struct {
 	ByOwningWaypointIP       krt.Index[networkAddress, model.ServiceInfo]
 }
 
+type federatedServicesCollection struct {
+	krt.Collection[model.FederatedService]
+}
+
 // index maintains an index of ambient WorkloadInfo objects by various keys.
 // These are intentionally pre-computed based on events such that lookups are efficient.
 type index struct {
@@ -103,6 +108,8 @@ type index struct {
 	networks  networkCollections
 
 	namespaces krt.Collection[model.NamespaceInfo]
+
+	federatedServices federatedServicesCollection
 
 	authorizationPolicies krt.Collection[model.WorkloadAuthorization]
 
@@ -465,6 +472,15 @@ func New(options Options) Index {
 		)
 	}
 
+	if features.EnablePeering {
+		FederatedServices := a.FederatedServicesCollection(MeshConfig, WorkloadServices, Workloads, Waypoints, WorkloadServiceIndex, opts)
+		FederatedServices.RegisterBatch(PushXds(a.XDSUpdater,
+			func(i model.FederatedService) model.ConfigKey {
+				return model.ConfigKey{Kind: kind.FederatedService, Name: i.ResourceName()}
+			}), false)
+		a.federatedServices.Collection = FederatedServices
+	}
+
 	a.namespaces = NamespacesInfo
 	a.workloads = workloadsCollection{
 		Collection:               Workloads,
@@ -564,6 +580,11 @@ func (a *index) Lookup(key string) []model.AddressInfo {
 	return nil
 }
 
+// Lookup finds all addresses associated with a given key. Many different key formats are supported; see inline comments.
+func (a *index) LookupFederatedService(key string) *model.FederatedService {
+	return a.federatedServices.GetKey(key)
+}
+
 func (a *index) lookupService(key string) *model.ServiceInfo {
 	// 1. namespace/hostname format
 	s := a.services.GetKey(key)
@@ -621,6 +642,34 @@ func (a *index) AddressInformation(addresses sets.String) ([]model.AddressInfo, 
 		}
 	}
 	return res, sets.New(removed...)
+}
+
+func (a *index) FederatedServices(services sets.String) ([]model.FederatedService, sets.String) {
+	if len(services) == 0 {
+		// Full update
+		return a.federatedServices.List(), nil
+	}
+	var res []model.FederatedService
+	var removed []string
+	for key := range services {
+		svc := a.federatedServices.GetKey(key)
+		if svc == nil {
+			removed = append(removed, key)
+		} else {
+			res = append(res, *svc)
+		}
+	}
+	return res, sets.New(removed...)
+}
+
+func (a *index) ServicesWithWaypointOrRemoteWaypoint() sets.Set[host.Name] {
+	res := sets.Set[host.Name]{}
+	for _, svc := range a.services.List() {
+		if svc.Service.Waypoint != nil || svc.RemoteWaypoint {
+			res.Insert(host.Name(svc.Service.Hostname))
+		}
+	}
+	return res
 }
 
 func (a *index) ServicesForWaypoint(key model.WaypointKey) []model.ServiceInfo {
@@ -760,7 +809,8 @@ func (a *index) HasSynced() bool {
 		a.workloads.HasSynced() &&
 		a.waypoints.HasSynced() &&
 		a.authorizationPolicies.HasSynced() &&
-		a.networks.HasSynced()
+		a.networks.HasSynced() &&
+		(a.federatedServices.Collection == nil || a.federatedServices.HasSynced())
 }
 
 func (a *index) Network(ctx krt.HandlerContext) network.ID {

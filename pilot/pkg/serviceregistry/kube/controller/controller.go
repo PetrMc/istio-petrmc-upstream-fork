@@ -51,6 +51,7 @@ import (
 	"istio.io/istio/pkg/kube/controllers"
 	"istio.io/istio/pkg/kube/kclient"
 	"istio.io/istio/pkg/kube/krt"
+	"istio.io/istio/pkg/licensing"
 	istiolog "istio.io/istio/pkg/log"
 	"istio.io/istio/pkg/maps"
 	"istio.io/istio/pkg/monitoring"
@@ -59,6 +60,7 @@ import (
 	"istio.io/istio/pkg/queue"
 	"istio.io/istio/pkg/slices"
 	"istio.io/istio/pkg/util/sets"
+	"istio.io/istio/platform/discovery/ecs"
 )
 
 const (
@@ -226,6 +228,8 @@ type Controller struct {
 	configCluster bool
 
 	networksHandlerRegistration *mesh.WatcherHandlerRegistration
+
+	ECS *ecs.ECSDiscovery
 }
 
 // NewController creates a new Kubernetes controller
@@ -312,6 +316,13 @@ func NewController(kubeClient kubelib.Client, options Options) *Controller {
 		})
 		c.reloadMeshNetworks()
 	}
+
+	if ecs.EcsCluster != "" {
+		if licensing.CheckLicense(licensing.FeatureECS, true) {
+			c.ECS = ecs.NewECS(kubeClient, c.Network)
+		}
+	}
+
 	return c
 }
 
@@ -621,6 +632,7 @@ func (c *Controller) HasSynced() bool {
 	if c.ambientIndex != nil && !c.ambientIndex.HasSynced() {
 		return false
 	}
+	// We do not need to sync c.ECS. Unlike other controllers, it is writing to K8s, so us syncing the WE/SE readers is enough
 	return c.queue.HasSynced()
 }
 
@@ -664,6 +676,18 @@ func (c *Controller) Run(stop <-chan struct{}) {
 	}
 	kubelib.WaitForCacheSync("kube controller", stop, c.informersSynced)
 	log.Infof("kube controller for %s synced after %v", c.opts.ClusterID, time.Since(st))
+
+	if c.ECS != nil {
+		go func() {
+			// Wait until we have everything ready, then we can notify ambient everything is ready
+			// This ensures it gets the initial network state.
+			kubelib.WaitForCacheSync("kube controller queue", stop, func() bool {
+				return c.queue.HasSynced() || c.initialSyncTimedout.Load()
+			})
+
+			c.ECS.Run(stop)
+		}()
+	}
 
 	// after the in-order sync we can start processing the queue
 	c.queue.Run(stop)

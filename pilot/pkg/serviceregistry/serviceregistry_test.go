@@ -58,6 +58,7 @@ import (
 	istiotest "istio.io/istio/pkg/test"
 	"istio.io/istio/pkg/test/util/assert"
 	"istio.io/istio/pkg/test/util/retry"
+	"istio.io/istio/platform/discovery/peering"
 )
 
 func setupTest(t *testing.T) (model.ConfigStoreController, kubernetes.Interface, *xdsfake.Updater) {
@@ -1510,6 +1511,43 @@ func TestWorkloadInstances(t *testing.T) {
 			})
 		})
 	}
+
+	t.Run("Service selects peering WorkloadEntry", func(t *testing.T) {
+		store, kube, fx := setupTest(t)
+		service := service.DeepCopy()
+		service.Labels = map[string]string{peering.ServiceScopeLabel: peering.ServiceScopeGlobalOnly}
+		makeService(t, kube, service)
+		workloadEntry := config.Config{
+			Meta: config.Meta{
+				Name:             "workload",
+				Namespace:        namespace,
+				GroupVersionKind: gvk.WorkloadEntry,
+				Labels: map[string]string{
+					"app":                               "foo",
+					peering.ServiceScopeLabel:           peering.ServiceScopeGlobalOnly,
+					peering.ParentServiceLabel:          service.Name,
+					peering.ParentServiceNamespaceLabel: service.Namespace,
+					peering.SourceClusterLabel:          "c1",
+				},
+				Domain: "cluster.local",
+			},
+			Spec: &networking.WorkloadEntry{
+				Address: "2.3.4.5",
+			},
+		}
+		makeIstioObject(t, store, workloadEntry)
+
+		instances := []EndpointResponse{{
+			Address: workloadEntry.Spec.(*networking.WorkloadEntry).Address,
+			Port:    80,
+		}}
+		expectServiceEndpoints(t, fx, expectedSvc, 80, instances)
+
+		// Change the label, we should see it removed
+		workloadEntry.Labels[peering.ServiceScopeLabel] = peering.ServiceScopeGlobal
+		makeIstioObject(t, store, workloadEntry)
+		expectServiceEndpoints(t, fx, expectedSvc, 80, nil)
+	})
 }
 
 func expectAmbient(strings []string, ambient bool) []string {

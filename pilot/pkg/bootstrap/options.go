@@ -114,6 +114,8 @@ var (
 		"The JWT rule used by istiod authentication").Get()
 )
 
+var PodServiceAccount = env.Register("SERVICE_ACCOUNT", "", "").Get()
+
 // Revision is the value of the Istio control plane revision, e.g. "canary",
 // and is the value used by the "istio.io/rev" label.
 var Revision = env.Register("REVISION", "", "").Get()

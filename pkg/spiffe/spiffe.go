@@ -19,6 +19,7 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -27,10 +28,13 @@ import (
 	"time"
 
 	jose "github.com/go-jose/go-jose/v4"
+	"github.com/hashicorp/go-multierror"
 
 	meshconfig "istio.io/api/mesh/v1alpha1"
+	"istio.io/istio/pilot/pkg/features"
 	"istio.io/istio/pkg/config/constants"
 	"istio.io/istio/pkg/log"
+	"istio.io/istio/pkg/util/istiomultierror"
 	"istio.io/istio/pkg/util/sets"
 )
 
@@ -341,6 +345,26 @@ func (v *PeerCertVerifier) VerifyPeerCert(rawCerts [][]byte, _ [][]*x509.Certifi
 	if err != nil {
 		return err
 	}
+
+	if features.SkipValidateTrustDomain {
+		errs := istiomultierror.New()
+		for td, rootCertPool := range v.certPools {
+			_, err := peerCert.Verify(x509.VerifyOptions{
+				Roots:         rootCertPool,
+				Intermediates: intCertPool,
+			})
+			if err == nil {
+				return nil
+			}
+			errs = multierror.Append(errs, fmt.Errorf("failed to validate against trust domain %q: %v", td, err))
+		}
+		err := errs.ErrorOrNil()
+		if err == nil {
+			return errors.New("no cert pool found")
+		}
+		return err
+	}
+
 	rootCertPool, ok := v.certPools[trustDomain]
 	if !ok {
 		return fmt.Errorf("no cert pool found for trust domain %s", trustDomain)

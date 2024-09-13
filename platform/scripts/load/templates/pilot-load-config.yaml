@@ -1,0 +1,29 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pilot-load-config
+  namespace: {{.Release.Namespace}}
+data:
+  config.yaml: |
+    stableNames: true
+    nodeMetadata: {}
+    jitter:
+      workloads: "10s"
+      config: "0s"
+    namespaces:
+      - name: mesh
+        # 100 replicas: 5k pods, 100 services, 20 nodes
+        # 200 replicas: 10k pods, 200 services, 40 nodes
+        replicas: 200
+        # 50 pods, 1 services
+        applications:
+          - name: big
+            replicas: 1
+            instances: 50
+            type: plain # No sidecar needed
+            labels:
+              solo.io/service-scope: global
+    nodes:
+      - name: node
+        count: 40
+        ztunnel: {}

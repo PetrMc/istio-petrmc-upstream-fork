@@ -141,6 +141,10 @@ spec:
         - name: SPIRE_ENABLED
           value: "true"
         {{- end }}
+        {{- with .Values.network }}
+        - name: NETWORK
+          value: "{{.}}"
+        {{- end }}
         - name: TERMINATION_GRACE_PERIOD_SECONDS
           value: "{{ .Values.terminationGracePeriodSeconds }}"
         - name: L7_CONFIG_FILE

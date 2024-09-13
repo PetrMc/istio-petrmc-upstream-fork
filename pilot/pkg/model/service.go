@@ -797,6 +797,8 @@ const (
 	TrafficDistributionPreferSameZone
 	// TrafficDistributionPreferNode prefers traffic in same node, failing over to same subzone, then zone, region, and network.
 	TrafficDistributionPreferSameNode
+	TrafficDistributionPreferNetwork
+	TrafficDistributionPreferRegion
 )
 
 func GetTrafficDistribution(specValue *string, annotations map[string]string) TrafficDistribution {
@@ -816,6 +818,10 @@ func GetTrafficDistribution(specValue *string, annotations map[string]string) Tr
 		return TrafficDistributionPreferSameZone
 	case strings.ToLower(corev1.ServiceTrafficDistributionPreferSameNode):
 		return TrafficDistributionPreferSameNode
+	case "prefernetwork":
+		return TrafficDistributionPreferNetwork
+	case "preferregion":
+		return TrafficDistributionPreferRegion
 	default:
 		if trafficDistributionAnnotationValue != "" {
 			log.Warnf("Unknown traffic distribution annotation, defaulting to any")
@@ -950,6 +956,9 @@ type AmbientIndexes interface {
 	Policies(requested sets.Set[ConfigKey]) []WorkloadAuthorization
 	ServicesForWaypoint(WaypointKey) []ServiceInfo
 	WorkloadsForWaypoint(WaypointKey) []WorkloadInfo
+
+	FederatedServices(services sets.String) ([]FederatedService, sets.String)
+	ServicesWithWaypointOrRemoteWaypoint() sets.Set[host.Name]
 }
 
 // WaypointKey is a multi-address extension of NetworkAddress which is commonly used for lookups in AmbientIndex
@@ -1007,6 +1016,14 @@ func waypointKeyForProxy(node *Proxy, externalAddresses bool) WaypointKey {
 // NoopAmbientIndexes provides an implementation of AmbientIndexes that always returns nil, to easily "skip" it.
 type NoopAmbientIndexes struct{}
 
+func (u NoopAmbientIndexes) FederatedServices(services sets.String) ([]FederatedService, sets.String) {
+	return nil, nil
+}
+
+func (u NoopAmbientIndexes) ServicesWithWaypointOrRemoteWaypoint() sets.Set[host.Name] {
+	return nil
+}
+
 func (u NoopAmbientIndexes) AddressInformation(sets.String) ([]AddressInfo, sets.String) {
 	return nil, nil
 }
@@ -1040,6 +1057,18 @@ func (u NoopAmbientIndexes) ServicesWithWaypoint(string) []ServiceWaypointInfo {
 }
 
 var _ AmbientIndexes = NoopAmbientIndexes{}
+
+type FederatedService struct {
+	*workloadapi.FederatedService
+}
+
+func (s FederatedService) ResourceName() string {
+	return s.Namespace + "/" + s.Hostname
+}
+
+func (s FederatedService) Equals(other FederatedService) bool {
+	return proto.Equal(s.FederatedService, other.FederatedService)
+}
 
 type AddressInfo struct {
 	*workloadapi.Address
@@ -1107,6 +1136,11 @@ type ServiceInfo struct {
 	// Source is the type that introduced this service.
 	Source   TypedObject
 	Waypoint WaypointBindingStatus
+
+	GlobalService bool
+	// RemoteWaypoint marks this as having a waypoint - but on a remote cluster
+	RemoteWaypoint bool
+
 	// MarshaledAddress contains the pre-marshaled representation.
 	// Note: this is an Address -- not a Service.
 	MarshaledAddress *anypb.Any
@@ -1217,7 +1251,9 @@ func (i ServiceInfo) Equals(other ServiceInfo) bool {
 		maps.Equal(i.LabelSelector.Labels, other.LabelSelector.Labels) &&
 		maps.Equal(i.PortNames, other.PortNames) &&
 		i.Source == other.Source &&
-		i.Waypoint.Equals(other.Waypoint)
+		i.Waypoint.Equals(other.Waypoint) &&
+		i.GlobalService == other.GlobalService &&
+		i.RemoteWaypoint == other.RemoteWaypoint
 }
 
 func (i ServiceInfo) ResourceName() string {

@@ -47,6 +47,8 @@ type NetworkGateway struct {
 	Port uint32
 	// HBONEPort if non-zero indicates that the gateway supports HBONE
 	HBONEPort uint32
+	// TrustDomain, if non-empty, indicates this gateway runs in an alternative trust domain
+	TrustDomain string
 	// ServiceAccount the gateway runs as
 	ServiceAccount types.NamespacedName
 }

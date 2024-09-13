@@ -331,6 +331,7 @@ type AuthSource int
 const (
 	AuthSourceClientCertificate AuthSource = iota
 	AuthSourceIDToken
+	AuthSourceSignedRequest
 )
 
 const (

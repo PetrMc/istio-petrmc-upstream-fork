@@ -674,6 +674,7 @@ func buildEnvoyLbEndpoint(b *EndpointBuilder, e *model.IstioEndpoint, mtlsEnable
 		meta.TLSMode = ""
 	}
 	util.AppendLbEndpointMetadata(meta, ep.Metadata)
+	maybeAddMultinetworkMetadata(b, ep)
 
 	tunnel := supportTunnel(b, e)
 	// Only send HBONE if its necessary. If they support legacy mTLS and do not explicitly PreferHBONE, we will use legacy mTLS.
@@ -703,7 +704,15 @@ func buildEnvoyLbEndpoint(b *EndpointBuilder, e *model.IstioEndpoint, mtlsEnable
 			// Get the VIP of the service we are targeting (not the waypoint service)
 			serviceVIPs := b.service.ClusterVIPs.GetAddressesFor(e.Locality.ClusterID)
 			if len(serviceVIPs) == 0 {
-				serviceVIPs = []string{b.service.DefaultAddress}
+				if b.service.DefaultAddress != constants.UnspecifiedIP {
+					serviceVIPs = []string{b.service.DefaultAddress}
+				} else if b.service.AutoAllocatedIPv4Address != "" {
+					serviceVIPs = []string{b.service.AutoAllocatedIPv4Address}
+				} else {
+					// This is broken; we should try to find a way to support this but do not currently.
+					log.Warnf("service %v doesn't have any VIPs, cannot send requests to it", b.clusterName)
+					serviceVIPs = []string{b.service.DefaultAddress}
+				}
 			}
 			// // If there are multiple VIPs, we just use one. Hostname would be ideal here but isn't supported.
 			address = serviceVIPs[0]

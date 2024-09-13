@@ -118,9 +118,11 @@ func NewFakeControllerWithOptions(t test.Failer, opts FakeControllerOptions) (*F
 		c.AppendServiceHandler(opts.ServiceHandler)
 	}
 
-	t.Cleanup(func() {
-		c.client.Shutdown()
-	})
+	if !DisableTestClientCleanup {
+		t.Cleanup(func() {
+			c.client.Shutdown()
+		})
+	}
 	if !opts.SkipRun {
 		t.Cleanup(func() {
 			assert.NoError(t, queue.WaitForClose(c.queue, time.Second*5))
@@ -148,3 +150,7 @@ func NewFakeControllerWithOptions(t test.Failer, opts FakeControllerOptions) (*F
 
 	return &FakeController{Controller: c, Endpoints: endpoints}, fx
 }
+
+// DisableTestClientCleanup allows a hack to make clients not wait for shutdown. This is useful to re-use a kubeclient between
+// multiple controllers. Otherwise, the automatic cleanup messes up ordering.
+var DisableTestClientCleanup = false

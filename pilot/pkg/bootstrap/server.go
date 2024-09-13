@@ -80,6 +80,7 @@ import (
 	"istio.io/istio/pkg/security"
 	"istio.io/istio/pkg/spiffe"
 	"istio.io/istio/pkg/util/sets"
+	"istio.io/istio/platform/discovery/ecs"
 	"istio.io/istio/security/pkg/pki/ca"
 	"istio.io/istio/security/pkg/pki/ra"
 	caserver "istio.io/istio/security/pkg/server/ca"
@@ -341,7 +342,7 @@ func NewServer(args *PilotArgs, initFuncs ...func(*Server)) (*Server, error) {
 	}
 
 	// Create Istiod certs and setup watches.
-	if err := s.initIstiodCerts(args, string(istiodHost)); err != nil {
+	if err := s.initIstiodCerts(args, string(istiodHost), s.environment.Mesh().GetTrustDomain()); err != nil {
 		return nil, err
 	}
 
@@ -390,6 +391,10 @@ func NewServer(args *PilotArgs, initFuncs ...func(*Server)) (*Server, error) {
 	// The k8s JWT authenticator requires the multicluster registry to be initialized,
 	// so we build it later.
 	if s.kubeClient != nil {
+		if ecs.EcsCluster != "" {
+			authenticators = append(authenticators, ecs.NewEcsAuthenticator(s.environment.Watcher, s.kubeClient))
+			ecs.AddPrometheusServiceDiscovery(s.kubeClient, s.httpsMux)
+		}
 		authenticators = append(authenticators,
 			kubeauth.NewKubeJWTAuthenticator(
 				s.environment.Watcher,
@@ -972,11 +977,11 @@ func (s *Server) initIstiodCertLoader() error {
 //
 // Will prefer local certificates, and fallback to using the CA to sign a fresh, temporary
 // certificate.
-func (s *Server) initIstiodCerts(args *PilotArgs, host string) error {
+func (s *Server) initIstiodCerts(args *PilotArgs, host string, trustDomain string) error {
 	// Skip all certificates
 	var err error
 
-	s.dnsNames = getDNSNames(args, host)
+	s.dnsNames = getDNSNames(args, host, trustDomain)
 	if hasCustomCertArgsOrWellKnown, tlsCertPath, tlsKeyPath, caCertPath := hasCustomTLSCerts(args.ServerOptions.TLSOptions); hasCustomCertArgsOrWellKnown {
 		// Use the DNS certificate provided via args or in well known location.
 		err = s.initFileCertificateWatches(TLSOptions{
@@ -1024,7 +1029,7 @@ func (s *Server) initIstiodCerts(args *PilotArgs, host string) error {
 	return err
 }
 
-func getDNSNames(args *PilotArgs, host string) []string {
+func getDNSNames(args *PilotArgs, host string, trustDomain string) []string {
 	// Append custom hostname if there is any
 	customHost := features.IstiodServiceCustomHost
 	var cHosts []string
@@ -1048,6 +1053,17 @@ func getDNSNames(args *PilotArgs, host string) []string {
 			fmt.Sprintf("%s.%s.svc", altName, args.Namespace))
 	}
 	sans.InsertAll(knownSans...)
+
+	if features.EnablePeering {
+		// For peering, we need to authenticate to the remote Istiod.
+		// JWT requires them having access to our own Kubernetes cluster, so that is out.
+		// For mTLS, servers currently expect to get a trusted mTLS cert with a SPIFFE ID.
+		// Rather than generating a new certificate entirely, we just add an appropriate SPIFFE SAN to our serving cert
+		// and use that for clients.
+		// This *may* still be problematic in some CA setups where the Istiod's do not trust each other.
+		sans.Insert(spiffe.MustGenSpiffeURIForTrustDomain(trustDomain, args.Namespace, PodServiceAccount))
+	}
+
 	dnsNames := sets.SortedList(sans)
 	log.Infof("Discover server subject alt names: %v", dnsNames)
 	return dnsNames
@@ -1158,6 +1174,7 @@ func (s *Server) initControllers(args *PilotArgs) error {
 	if features.EnableIPAutoallocate {
 		s.initIPAutoallocateController(args)
 	}
+	s.initPlatformIntegrations(args)
 
 	if err := s.initConfigController(args); err != nil {
 		return fmt.Errorf("error initializing config controller: %v", err)

@@ -224,8 +224,11 @@ func (configgen *ConfigGeneratorImpl) buildClusters(proxy *model.Proxy, req *mod
 	cb := NewClusterBuilder(proxy, req, configgen.Cache)
 	instances := proxy.ServiceTargets
 	cacheStats := cacheStats{}
+
+	var allServices []*model.Service
 	switch proxy.Type {
 	case model.SidecarProxy:
+		allServices = proxy.SidecarScope.Services()
 		// Setup outbound clusters
 		outboundPatcher := clusterPatcher{efw: envoyFilterPatches, pctx: networking.EnvoyFilter_SIDECAR_OUTBOUND}
 		ob, cs := configgen.buildOutboundClusters(cb, proxy, outboundPatcher, services)
@@ -245,6 +248,7 @@ func (configgen *ConfigGeneratorImpl) buildClusters(proxy *model.Proxy, req *mod
 		clusters = append(clusters, inboundPatcher.insertedClusters()...)
 	case model.Waypoint:
 		_, wps := findWaypointResources(proxy, req.Push)
+		allServices = wps.orderedServices
 		// Waypoint proxies do not need outbound clusters in most cases, unless we have a route pointing to something
 		outboundPatcher := clusterPatcher{efw: envoyFilterPatches, pctx: networking.EnvoyFilter_SIDECAR_OUTBOUND}
 		inboundPatcher := clusterPatcher{efw: envoyFilterPatches, pctx: networking.EnvoyFilter_SIDECAR_INBOUND}
@@ -268,6 +272,7 @@ func (configgen *ConfigGeneratorImpl) buildClusters(proxy *model.Proxy, req *mod
 		clusters = append(clusters, configgen.buildWaypointInboundClusters(cb, proxy, req.Push, wps.services)...)
 		clusters = append(clusters, inboundPatcher.insertedClusters()...)
 	default: // Gateways
+		allServices = proxy.SidecarScope.Services()
 		patcher := clusterPatcher{efw: envoyFilterPatches, pctx: networking.EnvoyFilter_GATEWAY}
 		ob, cs := configgen.buildOutboundClusters(cb, proxy, patcher, services)
 		cacheStats = cacheStats.merge(cs)
@@ -283,6 +288,16 @@ func (configgen *ConfigGeneratorImpl) buildClusters(proxy *model.Proxy, req *mod
 	// OutboundTunnel cluster is needed for sidecar and gateway.
 	if features.EnableHBONESend && proxy.Type != model.Waypoint && bool(!proxy.Metadata.DisableHBONESend) {
 		clusters = append(clusters, cb.buildConnectOriginate(proxy, req.Push, nil))
+	}
+
+	// Multi-network support
+	if features.EnableEnvoyMultiNetworkHBONE && bool(!proxy.Metadata.DisableHBONESend) {
+		clusters = append(clusters,
+			cb.buildConnectOriginateInner(proxy, req.Push, allServices),
+			cb.buildConnectOriginateOuter(proxy, req.Push))
+		if proxy.Type == model.Waypoint {
+			clusters = append(clusters, buildCrossNetworkMainInternalUpstreamCluster())
+		}
 	}
 
 	// if credential socket exists, create a cluster for it

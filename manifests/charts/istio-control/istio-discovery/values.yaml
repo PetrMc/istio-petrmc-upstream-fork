@@ -556,3 +556,12 @@ _internal_defaults_do_not_set:
   #         type: ClusterIP
   # Per-Gateway configuration can also be set in the `Gateway.spec.infrastructure.parametersRef` field.
   gatewayClasses: {}
+
+  # SOLO
+  platforms:
+    ecs:
+      # If set, to the name of an ECS cluster, ECS service discovery will be enabled.
+      cluster: ""
+    peering:
+      # If set, Istiod will automatically peer with discovered Gateways for service discovery.
+      enabled: false

@@ -20,6 +20,7 @@ import (
 	rawbuffer "github.com/envoyproxy/go-control-plane/envoy/extensions/transport_sockets/raw_buffer/v3"
 	metadata "github.com/envoyproxy/go-control-plane/envoy/type/metadata/v3"
 
+	"istio.io/istio/pilot/pkg/features"
 	"istio.io/istio/pilot/pkg/util/protoconv"
 )
 
@@ -41,6 +42,45 @@ var DefaultInternalUpstreamTransportSocket = &core.TransportSocket{
 // WaypointInternalUpstreamTransportSocket builds an internal upstream transport socket suitable for usage in a waypoint
 // This will passthrough the OrigDst key
 func WaypointInternalUpstreamTransportSocket(inner *core.TransportSocket) *core.TransportSocket {
+	if features.EnableEnvoyMultiNetworkHBONE {
+		return &core.TransportSocket{
+			Name: "internal_upstream",
+			ConfigType: &core.TransportSocket_TypedConfig{TypedConfig: protoconv.MessageToAny(&internalupstream.InternalUpstreamTransport{
+				PassthroughMetadata: []*internalupstream.InternalUpstreamTransport_MetadataValueSource{
+					{
+						Kind: &metadata.MetadataKind{Kind: &metadata.MetadataKind_Host_{Host: &metadata.MetadataKind_Host{}}},
+						Name: OriginalDstMetadataKey,
+					},
+					// In the event we are going cross network we are going to need additional bits of metadata...
+
+					{
+						// istio.destination passed from endpoint, to set the CONNECT header
+						// This will get translated to io.istio.destination filter state by the next hop.
+						Kind: &metadata.MetadataKind{Kind: &metadata.MetadataKind_Host_{
+							Host: &metadata.MetadataKind_Host{},
+						}},
+						Name: "istio",
+					},
+					{
+						// istio.destination passed from endpoint, to select a distinct endpoint on our HBONE pool
+						// this ensures we don't mix connections to the wrong host
+						Kind: &metadata.MetadataKind{Kind: &metadata.MetadataKind_Host_{
+							Host: &metadata.MetadataKind_Host{},
+						}},
+						Name: "envoy.lb",
+					},
+					//{
+					//	Kind: &metadata.MetadataKind{Kind: &metadata.MetadataKind_Cluster_{
+					//		Cluster: &metadata.MetadataKind_Cluster{},
+					//	}},
+					//	Name: "envoy.lb",
+					//},
+				},
+
+				TransportSocket: inner,
+			})},
+		}
+	}
 	return &core.TransportSocket{
 		Name: "internal_upstream",
 		ConfigType: &core.TransportSocket_TypedConfig{TypedConfig: protoconv.MessageToAny(&internalupstream.InternalUpstreamTransport{
@@ -59,6 +99,44 @@ func WaypointInternalUpstreamTransportSocket(inner *core.TransportSocket) *core.
 // FullMetadataPassthroughInternalUpstreamTransportSocket builds an internal upstream transport socket suitable for usage in
 // originating HBONE. For waypoints, use WaypointInternalUpstreamTransportSocket.
 func FullMetadataPassthroughInternalUpstreamTransportSocket(inner *core.TransportSocket) *core.TransportSocket {
+	if features.EnableEnvoyMultiNetworkHBONE {
+		return &core.TransportSocket{
+			Name: "envoy.transport_sockets.internal_upstream",
+			ConfigType: &core.TransportSocket_TypedConfig{TypedConfig: protoconv.MessageToAny(&internalupstream.InternalUpstreamTransport{
+				PassthroughMetadata: []*internalupstream.InternalUpstreamTransport_MetadataValueSource{
+					{
+						Kind: &metadata.MetadataKind{Kind: &metadata.MetadataKind_Host_{}},
+						Name: OriginalDstMetadataKey,
+					},
+					{
+						Kind: &metadata.MetadataKind{Kind: &metadata.MetadataKind_Cluster_{
+							Cluster: &metadata.MetadataKind_Cluster{},
+						}},
+						Name: "istio",
+					},
+					{
+						Kind: &metadata.MetadataKind{Kind: &metadata.MetadataKind_Host_{
+							Host: &metadata.MetadataKind_Host{},
+						}},
+						Name: "istio",
+					},
+					{
+						Kind: &metadata.MetadataKind{Kind: &metadata.MetadataKind_Host_{
+							Host: &metadata.MetadataKind_Host{},
+						}},
+						Name: "envoy.lb",
+					},
+					{
+						Kind: &metadata.MetadataKind{Kind: &metadata.MetadataKind_Cluster_{
+							Cluster: &metadata.MetadataKind_Cluster{},
+						}},
+						Name: "envoy.lb",
+					},
+				},
+				TransportSocket: inner,
+			})},
+		}
+	}
 	return &core.TransportSocket{
 		Name: "envoy.transport_sockets.internal_upstream",
 		ConfigType: &core.TransportSocket_TypedConfig{TypedConfig: protoconv.MessageToAny(&internalupstream.InternalUpstreamTransport{

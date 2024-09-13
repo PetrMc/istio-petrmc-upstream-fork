@@ -21,6 +21,7 @@ import (
 	"encoding/pem"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	v1 "k8s.io/api/core/v1"
@@ -30,6 +31,8 @@ import (
 
 	"istio.io/istio/pkg/backoff"
 	"istio.io/istio/pkg/log"
+	"istio.io/istio/pkg/slices"
+	"istio.io/istio/pkg/util/sets"
 	"istio.io/istio/security/pkg/cmd"
 	caerror "istio.io/istio/security/pkg/pki/error"
 	"istio.io/istio/security/pkg/pki/util"
@@ -490,6 +493,8 @@ func (ca *IstioCA) sign(csrPEM []byte, subjectIDs []string, requestedLifetime ti
 		return nil, caerror.NewError(caerror.CSRError, err)
 	}
 
+	subjectIDs = reduceSpiffeSubjects(csr, subjectIDs)
+
 	lifetime := requestedLifetime
 	// If the requested requestedLifetime is non-positive, apply the default TTL.
 	if requestedLifetime.Seconds() <= 0 {
@@ -528,4 +533,25 @@ func (ca *IstioCA) signWithCertChain(csrPEM []byte, subjectIDs []string, request
 		cert = append(cert, chainPem...)
 	}
 	return cert, nil
+}
+
+// A user may be authorized to run as many different identities, but only requesting one.
+// We shouldn't grant them a cert with all the identities; SPIFFE spec requires exactly 1 URI SAN.
+// Find what they asked for in the CSR and give them that.
+func reduceSpiffeSubjects(csr *x509.CertificateRequest, subjects []string) []string {
+	if len(subjects) <= 1 {
+		return subjects
+	}
+	spiffes := sets.New(slices.Filter(subjects, func(s string) bool {
+		return strings.HasPrefix(s, "spiffe://")
+	})...)
+	if len(spiffes) <= 1 {
+		return subjects
+	}
+	csrIDs, err := util.ExtractIDs(csr.Extensions)
+	if err != nil {
+		return subjects
+	}
+	// csrIDs *should* only have 1 identity, but I suppose we can allow it if they really request multiple they are authorized for.
+	return sets.SortedList(sets.New(csrIDs...).Intersection(spiffes))
 }

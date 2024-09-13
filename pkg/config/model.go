@@ -441,6 +441,20 @@ func (meta Meta) DeepCopy() Meta {
 	return nm
 }
 
+func FromObjectMeta(meta metav1.ObjectMeta) Meta {
+	return Meta{
+		UID:               string(meta.UID),
+		Name:              meta.Name,
+		Namespace:         meta.Namespace,
+		ResourceVersion:   meta.ResourceVersion,
+		Generation:        meta.Generation,
+		CreationTimestamp: meta.CreationTimestamp.Time,
+		Labels:            meta.Labels,
+		Annotations:       meta.Annotations,
+		OwnerReferences:   meta.OwnerReferences,
+	}
+}
+
 func (c Config) DeepCopy() Config {
 	var clone Config
 	clone.Meta = c.Meta.DeepCopy()

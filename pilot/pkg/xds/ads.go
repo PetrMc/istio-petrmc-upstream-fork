@@ -33,6 +33,8 @@ import (
 	"istio.io/istio/pilot/pkg/features"
 	"istio.io/istio/pilot/pkg/model"
 	"istio.io/istio/pilot/pkg/networking/util"
+	"istio.io/istio/pilot/pkg/serviceregistry/aggregate"
+	"istio.io/istio/pilot/pkg/serviceregistry/kube/controller"
 	labelutil "istio.io/istio/pilot/pkg/serviceregistry/util/label"
 	v3 "istio.io/istio/pilot/pkg/xds/v3"
 	"istio.io/istio/pkg/cluster"
@@ -234,6 +236,26 @@ func (s *DiscoveryServer) Stream(stream DiscoveryStream) error {
 	return xds.Stream(con)
 }
 
+func (s *DiscoveryServer) maybeTriggerECSRefresh(proxy *model.NodeMetadata) {
+	if proxy == nil {
+		return
+	}
+	if proxy.ECSCluster == "" || proxy.ECSTaskARN == "" {
+		return
+	}
+	ac, ok := s.Env.ServiceDiscovery.(*aggregate.Controller)
+	if !ok {
+		log.Warnf("attempting to match as *aggregate.Controller failed, actually %T", s.Env.ServiceDiscovery)
+	}
+	reg := ac.GetInternalRegistries()
+	for _, r := range reg {
+		if sc, ok := r.(*controller.Controller); ok {
+			sc.ECS.MarkIncomingXDS(proxy.ECSCluster, proxy.ECSTaskARN)
+			break
+		}
+	}
+}
+
 // update the node associated with the connection, after receiving a packet from envoy, also adds the connection
 // to the tracking map.
 func (s *DiscoveryServer) initConnection(node *core.Node, con *Connection, identities []string) error {
@@ -382,6 +404,7 @@ func (s *DiscoveryServer) initializeProxy(con *Connection) error {
 		proxy.XdsResourceGenerator = s.Generators[proxy.Metadata.Generator]
 	}
 
+	go s.maybeTriggerECSRefresh(con.proxy.Metadata)
 	return nil
 }
 

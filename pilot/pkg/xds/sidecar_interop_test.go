@@ -152,10 +152,6 @@ spec:
 		for _, vip := range []string{"1.1.1.1", ""} {
 			for _, resolution := range []string{"STATIC", "DNS"} {
 				for _, useWaypoint := range []string{"waypoint", ""} {
-					tt := tt
-					useWaypoint := useWaypoint
-					resolution := resolution
-					vip := vip
 					name := tt.name + "-" + resolution
 					if vip != "" {
 						name += "-vip"

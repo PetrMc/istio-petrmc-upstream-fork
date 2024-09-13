@@ -168,6 +168,9 @@ const (
 	// This listener should align to the proto/port defined by the  "ambient.istio.io/waypoint-inbound-binding" annotation
 	WaypointSandwichListenerProxyProtocol = "istio.io/PROXY"
 
+	EastWestGatewayController = "istio.io/eastwest-controller"
+
+	EastWestGatewayClassName = "istio-eastwest"
 	RemoteGatewayClassName   = "istio-remote"
 	WaypointGatewayClassName = "istio-waypoint"
 	EastWestGatewayClassName = "istio-east-west"
@@ -204,4 +207,13 @@ const (
 	AllTraffic = "all"
 	// NoTraffic indicates that no traffic should go through the intended waypoint.
 	NoTraffic = "none"
+
+	// ExposeIstiodLabel is the label used to indicate the port that Istiod is exposed on.
+	ExposeIstiodLabel = "istio.io/expose-istiod"
+	// NetworkTopologyLabel label used to identify the network for one or more pods
+	NetworkTopologyLabel = "topology.istio.io/network"
+	// TrustDomainAnnotation specifies the trust domain identity within the mesh
+	TrustDomainAnnotation = "gateway.istio.io/trust-domain"
+	// GatewayServiceAccountAnnotation overrides the name of the generated `ServiceAccount`resource
+	GatewayServiceAccountAnnotation = "gateway.istio.io/service-account"
 )

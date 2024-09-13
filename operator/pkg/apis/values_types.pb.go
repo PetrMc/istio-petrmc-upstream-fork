@@ -4976,6 +4976,8 @@ type Values struct {
 	Experimental *ExperimentalConfig `protobuf:"bytes,44,opt,name=experimental,proto3" json:"experimental,omitempty"`
 	// Configuration for Gateway Classes
 	GatewayClasses *structpb.Value `protobuf:"bytes,45,opt,name=gatewayClasses,proto3" json:"gatewayClasses,omitempty"`
+	// SOLO: platform configuration
+	Platforms *structpb.Value `protobuf:"bytes,85,opt,name=platforms,proto3" json:"platforms,omitempty"`
 	// SOLO: licensing configuration
 	License       *structpb.Value `protobuf:"bytes,86,opt,name=license,proto3" json:"license,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -5143,6 +5145,13 @@ func (x *Values) GetExperimental() *ExperimentalConfig {
 func (x *Values) GetGatewayClasses() *structpb.Value {
 	if x != nil {
 		return x.GatewayClasses
+	}
+	return nil
+}
+
+func (x *Values) GetPlatforms() *structpb.Value {
+	if x != nil {
+		return x.Platforms
 	}
 	return nil
 }
@@ -5766,7 +5775,7 @@ const file_pkg_apis_values_types_proto_rawDesc = "" +
 	"\finjectionURL\x18\x01 \x01(\tR\finjectionURL\x12$\n" +
 	"\rinjectionPath\x18\x02 \x01(\tR\rinjectionPath\x12,\n" +
 	"\x11injectionCABundle\x18\x03 \x01(\tR\x11injectionCABundle\x124\n" +
-	"\aenabled\x18\x05 \x01(\v2\x1a.google.protobuf.BoolValueR\aenabled\"\x89\t\n" +
+	"\aenabled\x18\x05 \x01(\v2\x1a.google.protobuf.BoolValueR\aenabled\"\xbf\t\n" +
 	"\x06Values\x124\n" +
 	"\x03cni\x18\x02 \x01(\v2\".istio.operator.v1alpha1.CNIConfigR\x03cni\x12C\n" +
 	"\bgateways\x18\x05 \x01(\v2'.istio.operator.v1alpha1.GatewaysConfigR\bgateways\x12=\n" +
@@ -5789,7 +5798,8 @@ const file_pkg_apis_values_types_proto_rawDesc = "" +
 	"\aprofile\x18* \x01(\tR\aprofile\x122\n" +
 	"\x14compatibilityVersion\x18+ \x01(\tR\x14compatibilityVersion\x12O\n" +
 	"\fexperimental\x18, \x01(\v2+.istio.operator.v1alpha1.ExperimentalConfigR\fexperimental\x12>\n" +
-	"\x0egatewayClasses\x18- \x01(\v2\x16.google.protobuf.ValueR\x0egatewayClasses\x120\n" +
+	"\x0egatewayClasses\x18- \x01(\v2\x16.google.protobuf.ValueR\x0egatewayClasses\x124\n" +
+	"\tplatforms\x18U \x01(\v2\x16.google.protobuf.ValueR\tplatforms\x120\n" +
 	"\alicense\x18V \x01(\v2\x16.google.protobuf.ValueR\alicense\"h\n" +
 	"\x12ExperimentalConfig\x12R\n" +
 	"\x16stableValidationPolicy\x18\x01 \x01(\v2\x1a.google.protobuf.BoolValueR\x16stableValidationPolicy\"\x8c\x01\n" +
@@ -6089,20 +6099,21 @@ var file_pkg_apis_values_types_proto_depIdxs = []int32{
 	46,  // 179: istio.operator.v1alpha1.Values.istiodRemote:type_name -> istio.operator.v1alpha1.IstiodRemoteConfig
 	48,  // 180: istio.operator.v1alpha1.Values.experimental:type_name -> istio.operator.v1alpha1.ExperimentalConfig
 	56,  // 181: istio.operator.v1alpha1.Values.gatewayClasses:type_name -> google.protobuf.Value
-	56,  // 182: istio.operator.v1alpha1.Values.license:type_name -> google.protobuf.Value
-	55,  // 183: istio.operator.v1alpha1.ExperimentalConfig.stableValidationPolicy:type_name -> google.protobuf.BoolValue
-	67,  // 184: istio.operator.v1alpha1.IntOrString.intVal:type_name -> google.protobuf.Int32Value
-	68,  // 185: istio.operator.v1alpha1.IntOrString.strVal:type_name -> google.protobuf.StringValue
-	10,  // 186: istio.operator.v1alpha1.WaypointConfig.resources:type_name -> istio.operator.v1alpha1.Resources
-	57,  // 187: istio.operator.v1alpha1.WaypointConfig.affinity:type_name -> k8s.io.api.core.v1.Affinity
-	63,  // 188: istio.operator.v1alpha1.WaypointConfig.topologySpreadConstraints:type_name -> k8s.io.api.core.v1.TopologySpreadConstraint
-	69,  // 189: istio.operator.v1alpha1.WaypointConfig.nodeSelector:type_name -> k8s.io.api.core.v1.NodeSelector
-	61,  // 190: istio.operator.v1alpha1.WaypointConfig.toleration:type_name -> k8s.io.api.core.v1.Toleration
-	191, // [191:191] is the sub-list for method output_type
-	191, // [191:191] is the sub-list for method input_type
-	191, // [191:191] is the sub-list for extension type_name
-	191, // [191:191] is the sub-list for extension extendee
-	0,   // [0:191] is the sub-list for field type_name
+	56,  // 182: istio.operator.v1alpha1.Values.platforms:type_name -> google.protobuf.Value
+	56,  // 183: istio.operator.v1alpha1.Values.license:type_name -> google.protobuf.Value
+	55,  // 184: istio.operator.v1alpha1.ExperimentalConfig.stableValidationPolicy:type_name -> google.protobuf.BoolValue
+	67,  // 185: istio.operator.v1alpha1.IntOrString.intVal:type_name -> google.protobuf.Int32Value
+	68,  // 186: istio.operator.v1alpha1.IntOrString.strVal:type_name -> google.protobuf.StringValue
+	10,  // 187: istio.operator.v1alpha1.WaypointConfig.resources:type_name -> istio.operator.v1alpha1.Resources
+	57,  // 188: istio.operator.v1alpha1.WaypointConfig.affinity:type_name -> k8s.io.api.core.v1.Affinity
+	63,  // 189: istio.operator.v1alpha1.WaypointConfig.topologySpreadConstraints:type_name -> k8s.io.api.core.v1.TopologySpreadConstraint
+	69,  // 190: istio.operator.v1alpha1.WaypointConfig.nodeSelector:type_name -> k8s.io.api.core.v1.NodeSelector
+	61,  // 191: istio.operator.v1alpha1.WaypointConfig.toleration:type_name -> k8s.io.api.core.v1.Toleration
+	192, // [192:192] is the sub-list for method output_type
+	192, // [192:192] is the sub-list for method input_type
+	192, // [192:192] is the sub-list for extension type_name
+	192, // [192:192] is the sub-list for extension extendee
+	0,   // [0:192] is the sub-list for field type_name
 }
 
 func init() { file_pkg_apis_values_types_proto_init() }

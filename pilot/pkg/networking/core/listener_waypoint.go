@@ -92,25 +92,28 @@ func (lb *ListenerBuilder) buildWaypointInbound() []*listener.Listener {
 		forwarder = buildWaypointConnectOriginateListener(lb.push, lb.node)
 	}
 	listeners = append(listeners,
-		lb.buildWaypointInboundConnectTerminate(),
+		lb.buildWaypointInboundConnectTerminate(wps.orderedServices),
 		lb.buildWaypointInternal(wls, wps.orderedServices),
 		forwarder)
 
 	return listeners
 }
 
-func (lb *ListenerBuilder) buildHCMConnectTerminateChain(routes []*route.Route) []*listener.Filter {
+func (lb *ListenerBuilder) buildHCMConnectTerminateChain(routes []*route.Route, svcs []*model.Service) []*listener.Filter {
 	ph := GetProxyHeaders(lb.node, lb.push, istionetworking.ListenerClassSidecarInbound)
+	vhosts := []*route.VirtualHost{{
+		Name:    "default",
+		Domains: []string{"*"},
+		Routes:  routes,
+	}}
+	vhosts = appendServiceSpecificHBONEVhosts(vhosts, lb, svcs)
+
 	h := &hcm.HttpConnectionManager{
 		StatPrefix: ConnectTerminate,
 		RouteSpecifier: &hcm.HttpConnectionManager_RouteConfig{
 			RouteConfig: &route.RouteConfiguration{
-				Name: "default",
-				VirtualHosts: []*route.VirtualHost{{
-					Name:    "default",
-					Domains: []string{"*"},
-					Routes:  routes,
-				}},
+				Name:         "default",
+				VirtualHosts: vhosts,
 			},
 		},
 		// Append and forward client cert to backend, if configured
@@ -173,7 +176,7 @@ func (lb *ListenerBuilder) buildHCMConnectTerminateChain(routes []*route.Route) 
 	}}
 }
 
-func (lb *ListenerBuilder) buildConnectTerminateListener(routes []*route.Route) *listener.Listener {
+func (lb *ListenerBuilder) buildConnectTerminateListener(routes []*route.Route, svcs []*model.Service) *listener.Listener {
 	actualWildcard, _ := getWildcardsAndLocalHost(lb.node.GetIPMode())
 	bind := actualWildcard
 
@@ -190,7 +193,7 @@ func (lb *ListenerBuilder) buildConnectTerminateListener(routes []*route.Route) 
 						RequireClientCertificate: &wrappers.BoolValue{Value: true},
 					})},
 				},
-				Filters: lb.buildHCMConnectTerminateChain(routes),
+				Filters: lb.buildHCMConnectTerminateChain(routes, svcs),
 			},
 		},
 		// for HBONE inbound specifically, we want to prefer exact balance.
@@ -214,20 +217,9 @@ func (lb *ListenerBuilder) buildConnectTerminateListener(routes []*route.Route) 
 	return l
 }
 
-func (lb *ListenerBuilder) buildWaypointInboundConnectTerminate() *listener.Listener {
-	routes := []*route.Route{{
-		Match: &route.RouteMatch{
-			PathSpecifier: &route.RouteMatch_ConnectMatcher_{ConnectMatcher: &route.RouteMatch_ConnectMatcher{}},
-		},
-		Action: &route.Route_Route{Route: &route.RouteAction{
-			UpgradeConfigs: []*route.RouteAction_UpgradeConfig{{
-				UpgradeType:   ConnectUpgradeType,
-				ConnectConfig: &route.RouteAction_UpgradeConfig_ConnectConfig{},
-			}},
-			ClusterSpecifier: &route.RouteAction_Cluster{Cluster: MainInternalName},
-		}},
-	}}
-	return lb.buildConnectTerminateListener(routes)
+func (lb *ListenerBuilder) buildWaypointInboundConnectTerminate(svcs []*model.Service) *listener.Listener {
+	routes := buildConnectRoutes(lb.node)
+	return lb.buildConnectTerminateListener(routes, svcs)
 }
 
 // This is the regular waypoint flow, where we terminate the tunnel, and then re-encap.
@@ -624,6 +616,9 @@ func (lb *ListenerBuilder) buildWaypointHTTPFilters(svc *model.Service) (pre []*
 	)
 	// TODO: how to deal with ext-authz? It will be in the ordering twice
 	// TODO policies here will need to be different per-chain (service attached)
+	if features.EnableEnvoyMultiNetworkHBONE {
+		pre = append(pre, waypointDisableCrossNetwork)
+	}
 	pre = append(pre, authzCustomBuilder.BuildHTTP(cls)...)
 	pre = extension.PopAppendHTTP(pre, wasm, extensions.PluginPhase_AUTHN)
 	pre = append(pre, authnBuilder.BuildHTTP(cls)...)
