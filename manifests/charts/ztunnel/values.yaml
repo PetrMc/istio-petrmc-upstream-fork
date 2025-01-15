@@ -153,6 +153,22 @@ _internal_defaults_do_not_set:
       # OTLP endpoint to send spans to
       otlpEndpoint: "http://opentelemetry-collector.istio-system:4317"
 
+  # List of egress policies. Example:
+  # # Allow the egress gateway to send anywhere
+  # - namespaces: [egress]
+  #   policy: Forward
+  # # Deny traffic to some IP ranges
+  # - matchCidrs:
+  #   - 1.1.1.1/32
+  #   - 2001:0db8:/32
+  #   policy: Deny
+  # # For anything else, forward to the egress gateway
+  # - gateway: waypoint.egress.svc.cluster.local
+  #   matchCidrs:
+  #   - 0.0.0.0/0
+  #   - ::/0
+  egressPolicies: []
+
   spire:
     # Whether to enable SPIRE agent as the workload CA for ztunnel
     enabled: false

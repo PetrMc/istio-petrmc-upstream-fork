@@ -168,6 +168,10 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: spec.serviceAccountName
+        {{- with .Values.egressPolicies }}
+        - name: EGRESS_CONFIGS
+          value: {{ . | toJson | quote }}
+        {{- end }}
         {{- if .Values.meshConfig.defaultConfig.proxyMetadata }}
         {{- range $key, $value := .Values.meshConfig.defaultConfig.proxyMetadata}}
         - name: {{ $key }}
