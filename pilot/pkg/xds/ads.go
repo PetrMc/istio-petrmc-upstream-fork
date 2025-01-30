@@ -262,6 +262,10 @@ func (s *DiscoveryServer) initConnection(node *core.Node, con *Connection, ident
 		return err
 	}
 
+	if err := validateXdsLicense(con); err != nil {
+		return err
+	}
+
 	// Register the connection. this allows pushes to be triggered for the proxy. Note: the timing of
 	// this and initializeProxy important. While registering for pushes *after* initialization is complete seems like
 	// a better choice, it introduces a race condition; If we complete initialization of a new push

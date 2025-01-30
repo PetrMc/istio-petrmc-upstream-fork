@@ -25,5 +25,6 @@ COPY ${TARGETARCH:-amd64}/ztunnel /usr/local/bin/ztunnel
 
 # Environment variable indicating the exact build, for debugging
 ENV ISTIO_META_ISTIO_VERSION=$istio_version
+ENV ISTIO_META_SOLO_LTS=false
 
 ENTRYPOINT ["/usr/local/bin/ztunnel"]

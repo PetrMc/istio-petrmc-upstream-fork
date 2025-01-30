@@ -17,6 +17,7 @@ spec:
       keepaliveMaxServerConnectionAge: 120s
       autoscaleEnabled: false
       env:
+        SKIP_LICENSE_CHECK: "true"
         ENABLE_EXTERNAL_NAME_ALIAS: true
         UNSAFE_ENABLE_ADMIN_ENDPOINTS: true
         PILOT_REMOTE_CLUSTER_TIMEOUT: 15s

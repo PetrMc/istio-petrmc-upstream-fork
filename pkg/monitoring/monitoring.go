@@ -39,6 +39,8 @@ var (
 	monitoringLogger = log.RegisterScope("monitoring", "metrics monitoring")
 )
 
+var PrometheusRegisterer prometheus.Registerer
+
 func init() {
 	otel.SetLogger(log.NewLogrAdapter(monitoringLogger))
 }
@@ -49,6 +51,7 @@ func RegisterPrometheusExporter(reg prometheus.Registerer, gatherer prometheus.G
 	if reg == nil {
 		reg = prometheus.DefaultRegisterer
 	}
+	PrometheusRegisterer = reg
 	if gatherer == nil {
 		gatherer = prometheus.DefaultGatherer
 	}

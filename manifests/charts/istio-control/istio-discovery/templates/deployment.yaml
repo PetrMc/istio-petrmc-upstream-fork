@@ -143,6 +143,13 @@ spec:
             periodSeconds: 3
             timeoutSeconds: 5
           env:
+  {{ if  (.Values.license).secretRef }}
+          - name: SOLO_LICENSE_SECRET
+            value: "{{.Values.license.secretRef.namespace}}/{{.Values.license.secretRef.name}}"
+  {{ else if (.Values.license).value }}
+          - name: SOLO_LICENSE_KEY
+            value: {{.Values.license.value|quote}}
+  {{ end }}
           - name: REVISION
             value: "{{ .Values.revision | default `default` }}"
           - name: PILOT_CERT_PROVIDER

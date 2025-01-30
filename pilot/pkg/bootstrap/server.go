@@ -73,6 +73,7 @@ import (
 	"istio.io/istio/pkg/kube/krt"
 	"istio.io/istio/pkg/kube/multicluster"
 	"istio.io/istio/pkg/kube/namespace"
+	"istio.io/istio/pkg/licensing"
 	"istio.io/istio/pkg/log"
 	"istio.io/istio/pkg/monitoring"
 	"istio.io/istio/pkg/network"
@@ -590,6 +591,18 @@ func (s *Server) initKubeClient(args *PilotArgs) error {
 			return fmt.Errorf("failed creating kube client: %v", err)
 		}
 		s.kubeClient = kubelib.EnableCrdWatcher(s.kubeClient)
+
+		if state, err := licensing.InitializeLicenseState(s.kubeClient.Kube()); err != nil && state != licensing.StateUnset {
+			if licensing.LicenseFailOpen {
+				for range 10 { // Spam to make it more noticeable
+					log.Errorf("failed to initialize license state, continuing: %v", err)
+				}
+			} else {
+				return err
+			}
+		} else {
+			log.Infof("license state initialized: %v", state)
+		}
 	}
 
 	return nil
