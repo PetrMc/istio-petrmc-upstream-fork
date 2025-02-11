@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	hcm "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/network/http_connection_manager/v3"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
@@ -24,12 +25,18 @@ import (
 	"istio.io/istio/pkg/config/protocol"
 	"istio.io/istio/pkg/kube"
 	"istio.io/istio/pkg/kube/kclient/clienttest"
+	"istio.io/istio/pkg/licensing"
 	"istio.io/istio/pkg/ptr"
 	"istio.io/istio/pkg/slices"
 	"istio.io/istio/pkg/test"
 	"istio.io/istio/pkg/test/util/assert"
 	"istio.io/istio/pkg/test/util/tmpl"
+	"istio.io/istio/pkg/util/sets"
 )
+
+func init() {
+	licensing.SetForTest()
+}
 
 func TestWaypointSidecarInterop(t *testing.T) {
 	test.SetForTest(t, &features.EnableAmbient, true)
@@ -263,6 +270,302 @@ spec:
 			}
 		}
 	}
+}
+
+func TestWaypointEnvoyFilter(t *testing.T) {
+	envoyfilter := `apiVersion: networking.istio.io/v1alpha3
+kind: EnvoyFilter
+metadata:
+  name: filter-ratelimit
+  namespace: default
+  annotations:
+    envoyfilter.istio.io/referenced-services: ratelimit.default.svc.cluster.local
+spec:
+  targetRefs:
+  - kind: ServiceEntry
+    name: app
+    group: networking.istio.io
+  configPatches:
+    - applyTo: HTTP_FILTER
+      match:
+        context: GATEWAY
+        listener:
+          filterChain:
+            filter:
+              name: "envoy.filters.network.http_connection_manager"
+              subFilter:
+                name: "envoy.filters.http.router"
+      patch:
+        operation: INSERT_BEFORE
+        value:
+          name: envoy.filters.http.ratelimit
+          typed_config:
+            "@type": type.googleapis.com/envoy.extensions.filters.http.ratelimit.v3.RateLimit
+            domain: ratelimit
+            failure_mode_deny: true
+            timeout: 10s
+            rate_limit_service:
+              grpc_service:
+                envoy_grpc:
+                  # Must be exposed by envoyfilter.istio.io/referenced-services
+                  cluster_name: outbound|8081||ratelimit.default.svc.cluster.local
+                  authority: ratelimit.default.svc.cluster.local
+              transport_api_version: V3
+    - applyTo: VIRTUAL_HOST
+      match:
+        context: GATEWAY
+      patch:
+        operation: MERGE
+        value:
+          rate_limits:
+            - actions: # any actions in here
+              - request_headers:
+                  header_name: ":path"
+                  descriptor_key: "PATH"
+    - applyTo: HTTP_ROUTE
+      match:
+        context: GATEWAY
+        routeConfiguration:
+          vhost:
+            route:
+              name: slow
+      patch:
+        operation: MERGE
+        value:
+          route:
+            rate_limits:
+              - actions: # any actions in here
+                - request_headers:
+                    header_name: ":method"
+                    descriptor_key: "METHOD"
+`
+	envoyfilterGatewayLevel := `apiVersion: networking.istio.io/v1alpha3
+kind: EnvoyFilter
+metadata:
+  name: filter-lua
+  namespace: default
+spec:
+  targetRefs:
+  - name: waypoint
+    kind: Gateway
+    group: gateway.networking.k8s.io
+  configPatches:
+    - applyTo: HTTP_FILTER
+      match:
+        context: GATEWAY
+        listener:
+          filterChain:
+            filter:
+              name: "envoy.filters.network.http_connection_manager"
+              subFilter:
+                name: "envoy.filters.http.router"
+      patch:
+        operation: INSERT_BEFORE
+        value:
+          name: envoy.lua
+          typed_config:
+            "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
+            inlineCode: ""
+`
+	notSelectedAppServiceEntry := `apiVersion: networking.istio.io/v1
+kind: ServiceEntry
+metadata:
+  name: not-app
+  namespace: default
+  labels:
+    istio.io/use-waypoint: waypoint
+spec:
+  hosts: [not-app.com]
+  addresses: [2.3.4.5]
+  ports:
+  - number: 80
+    name: http
+    protocol: HTTP
+  resolution: STATIC
+  workloadSelector:
+    labels:
+      app: app`
+	referencedService := `apiVersion: networking.istio.io/v1
+kind: ServiceEntry
+metadata:
+  name: ratelimit
+  namespace: default
+spec:
+  hosts: [ratelimit.default.svc.cluster.local]
+  addresses: [2.3.4.6]
+  ports:
+  - number: 8081
+    name: http
+    protocol: HTTP
+  resolution: STATIC`
+	route := `apiVersion: gateway.networking.k8s.io/v1beta1
+kind: HTTPRoute
+metadata:
+  name: header
+  namespace: default
+spec:
+  parentRefs:
+  - kind: ServiceEntry
+    name: app
+    group: networking.istio.io
+  rules:
+  - name: slow
+    matches:
+    - path:
+        type: PathPrefix
+        value: /slow
+    backendRefs:
+    - name: echo
+      port: 80
+  - name: fast
+    backendRefs:
+    - name: echo
+      port: 80`
+	d, proxy := setupWaypointTest(t,
+		waypointGateway, waypointSvc, waypointInstance,
+		appServiceEntry, notSelectedAppServiceEntry,
+		envoyfilter, envoyfilterGatewayLevel, referencedService,
+		route)
+
+	terminateListener := xdstest.ExtractListener("connect_terminate", d.Listeners(proxy))
+	l := xdstest.ExtractListener("main_internal", d.Listeners(proxy))
+	app := xdstest.ExtractHTTPConnectionManager(t,
+		xdstest.ExtractFilterChain(model.BuildSubsetKey(model.TrafficDirectionInboundVIP, "http", "app.com", 80), l))
+	notApp := xdstest.ExtractHTTPConnectionManager(t,
+		xdstest.ExtractFilterChain(model.BuildSubsetKey(model.TrafficDirectionInboundVIP, "http", "not-app.com", 80), l))
+	connectTerminate := xdstest.ExtractHTTPConnectionManager(t, xdstest.ExtractFilterChain("default", terminateListener))
+
+	// Only selected service should get the service-attached filter
+	assert.Equal(t, sets.New(slices.Map(app.HttpFilters, (*hcm.HttpFilter).GetName)...).Contains("envoy.filters.http.ratelimit"), true)
+	assert.Equal(t, sets.New(slices.Map(notApp.HttpFilters, (*hcm.HttpFilter).GetName)...).Contains("envoy.filters.http.ratelimit"), false)
+	assert.Equal(t, sets.New(slices.Map(connectTerminate.HttpFilters, (*hcm.HttpFilter).GetName)...).Contains("envoy.filters.http.ratelimit"), false)
+
+	// Only service filter should get the gateway attached filter (not the connect terminate!)
+	assert.Equal(t, sets.New(slices.Map(app.HttpFilters, (*hcm.HttpFilter).GetName)...).Contains("envoy.lua"), true)
+	assert.Equal(t, sets.New(slices.Map(notApp.HttpFilters, (*hcm.HttpFilter).GetName)...).Contains("envoy.lua"), true)
+	assert.Equal(t, sets.New(slices.Map(connectTerminate.HttpFilters, (*hcm.HttpFilter).GetName)...).Contains("envoy.lua"), false)
+
+	// Cluster should be added...
+	assert.Equal(t, xdstest.ExtractCluster("outbound|8081||ratelimit.default.svc.cluster.local", d.Clusters(proxy)) != nil, true)
+
+	vhost := app.GetRouteConfig().GetVirtualHosts()[0].GetRateLimits()
+	assert.Equal(t, len(vhost), 1)
+	assert.Equal(t, vhost[0].GetActions()[0].GetRequestHeaders().GetHeaderName(), ":path")
+
+	// We should apply the rate limit config to the matched route ('slow') but not the unmatched one
+	routes := app.GetRouteConfig().GetVirtualHosts()[0].GetRoutes()
+	assert.Equal(t, len(routes), 2)
+	assert.Equal(t, len(routes[0].GetRoute().GetRateLimits()), 1)
+	assert.Equal(t, routes[0].GetRoute().GetRateLimits()[0].GetActions()[0].GetRequestHeaders().GetHeaderName(), ":method")
+	assert.Equal(t, len(routes[1].GetRoute().GetRateLimits()), 0)
+}
+
+func TestWaypointEnvoyFilterClusters(t *testing.T) {
+	gatewayFilter := `apiVersion: networking.istio.io/v1alpha3
+kind: EnvoyFilter
+metadata:
+  name: global-cluster-mods
+spec:
+  targetRefs:
+  - name: waypoint
+    kind: Gateway
+    group: gateway.networking.k8s.io
+  priority: -1 # Make it lower priority (we will overwrite in the next config)
+  configPatches:
+  - applyTo: CLUSTER
+    patch:
+      operation: MERGE
+      value:
+        http2_protocol_options:
+          initial_connection_window_size: 65539
+    match:
+      context: GATEWAY
+  # ADD a new cluster
+  - applyTo: CLUSTER
+    match:
+      context: GATEWAY
+    patch:
+      operation: ADD
+      value:
+        name: "lua_cluster_global"
+        type: STRICT_DNS
+        connect_timeout: 0.5s
+        lb_policy: ROUND_ROBIN
+        load_assignment:
+          cluster_name: lua_cluster
+          endpoints:
+          - lb_endpoints:
+            - endpoint:
+                address:
+                  socket_address:
+                    protocol: TCP
+                    address: "internal.org.net"
+                    port_value: 8888
+`
+	serviceFilter := `
+apiVersion: networking.istio.io/v1alpha3
+kind: EnvoyFilter
+metadata:
+  name: echo-http2-options
+spec:
+  targetRefs:
+  - kind: ServiceEntry
+    name: app
+    group: networking.istio.io
+  configPatches:
+    - applyTo: CLUSTER
+      patch:
+        operation: MERGE
+        value:
+          http2_protocol_options:
+            initial_stream_window_size: 65536
+            initial_connection_window_size: 65536
+      match:
+        context: GATEWAY
+`
+	notSelectedAppServiceEntry := `apiVersion: networking.istio.io/v1
+kind: ServiceEntry
+metadata:
+  name: not-app
+  namespace: default
+  labels:
+    istio.io/use-waypoint: waypoint
+spec:
+  hosts: [not-app.com]
+  addresses: [2.3.4.5]
+  ports:
+  - number: 80
+    name: http
+    protocol: HTTP
+  resolution: STATIC
+  workloadSelector:
+    labels:
+      app: app`
+
+	d, proxy := setupWaypointTest(t,
+		waypointGateway, waypointSvc, waypointInstance,
+		appServiceEntry, notSelectedAppServiceEntry,
+		gatewayFilter, serviceFilter)
+
+	clusters := d.Clusters(proxy)
+
+	// We can add a cluster
+	added := xdstest.ExtractCluster("lua_cluster_global", clusters)
+	assert.Equal(t, added != nil, true)
+
+	// We matched this via a Service targetRef
+	app := xdstest.ExtractCluster("inbound-vip|80|http|app.com", clusters)
+	// nolint
+	assert.Equal(t, app.GetHttp2ProtocolOptions().GetInitialStreamWindowSize().GetValue(), 65536)
+	// nolint
+	assert.Equal(t, app.GetHttp2ProtocolOptions().GetInitialConnectionWindowSize().GetValue(), 65536)
+
+	// This one is matched by a Gateway targetRef and NOT the service target ref
+	notApp := xdstest.ExtractCluster("inbound-vip|80|http|not-app.com", clusters)
+	// nolint
+	assert.Equal(t, notApp.GetHttp2ProtocolOptions().GetInitialStreamWindowSize().GetValue(), 0)
+	// nolint
+	assert.Equal(t, notApp.GetHttp2ProtocolOptions().GetInitialConnectionWindowSize().GetValue(), 65539)
 }
 
 func kubernetesObjectFromString(s string) (runtime.Object, error) {

@@ -171,6 +171,9 @@ func (lb *ListenerBuilder) patchOneListener(l *listener.Listener, ctx networking
 }
 
 func (lb *ListenerBuilder) patchListeners() {
+	if AmbientEnvoyFilterLicensed() && lb.node.IsWaypointProxy() {
+		return
+	}
 	lb.envoyFilterWrapper = lb.push.EnvoyFilters(lb.node)
 	if lb.envoyFilterWrapper == nil {
 		return

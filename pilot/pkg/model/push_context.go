@@ -863,7 +863,18 @@ func virtualServiceDestinationsFilteredBySourceNamespace(v *networking.VirtualSe
 }
 
 func (ps *PushContext) ExtraWaypointServices(proxy *Proxy, patches *MergedEnvoyFilterWrapper) (sets.Set[NamespacedHostname], sets.String) {
-	return ps.extraServicesForProxy(proxy, patches)
+	namespaced, raw := ps.extraServicesForProxy(proxy, patches)
+	if raw == nil {
+		raw = patches.ReferencedServices
+	} else if patches != nil {
+		raw.Merge(patches.ReferencedServices)
+	}
+	if namespaced == nil {
+		namespaced = patches.ReferencedNamespacedServices
+	} else if patches != nil {
+		namespaced.Merge(patches.ReferencedNamespacedServices)
+	}
+	return namespaced, raw
 }
 
 // GatewayServices returns the set of services which are referred from the proxy gateways.
@@ -2268,6 +2279,70 @@ type MergedEnvoyFilterWrapper struct {
 
 	ReferencedNamespacedServices sets.Set[NamespacedHostname]
 	ReferencedServices           sets.String
+}
+
+// WaypointEnvoyFilters return the merged EnvoyFilterWrapper of a proxy matching the WorkloadPolicyMatcher
+func (ps *PushContext) WaypointEnvoyFilters(proxy *Proxy, opts WorkloadPolicyMatcher) *MergedEnvoyFilterWrapper {
+	if len(opts.Services) > 1 {
+		// Currently, listing multiple services is unnecessary.
+		// To simplify, this function allows at most one service.
+		// The restriction can be lifted if future needs arise.
+		panic("WaypointEnvoyFilters expects at most 1 service in WorkloadPolicyMatcher")
+	}
+
+	lookupInNamespaces := []string{opts.RootNamespace, opts.WorkloadNamespace}
+	for _, svc := range opts.Services {
+		lookupInNamespaces = append(lookupInNamespaces, svc.Namespace)
+	}
+
+	matchedEnvoyFilters := make([]*EnvoyFilterWrapper, 0)
+	for _, ns := range slices.FilterDuplicates(lookupInNamespaces) {
+		for _, efw := range ps.envoyFiltersByNamespace[ns] {
+
+			n := types.NamespacedName{Namespace: efw.Namespace, Name: efw.Name}
+
+			if opts.ShouldAttachPolicy(gvk.EnvoyFilter, n, efw) {
+				matchedEnvoyFilters = append(matchedEnvoyFilters, efw)
+			}
+		}
+	}
+	sort.Slice(matchedEnvoyFilters, func(i, j int) bool {
+		ifilter := matchedEnvoyFilters[i]
+		jfilter := matchedEnvoyFilters[j]
+		if ifilter.Priority != jfilter.Priority {
+			return ifilter.Priority < jfilter.Priority
+		}
+		// Prefer root namespace filters over non-root namespace filters.
+		if ifilter.Namespace != jfilter.Namespace &&
+			(ifilter.Namespace == ps.Mesh.RootNamespace || jfilter.Namespace == ps.Mesh.RootNamespace) {
+			return ifilter.Namespace == ps.Mesh.RootNamespace
+		}
+		if ifilter.creationTime != jfilter.creationTime {
+			return ifilter.creationTime.Before(jfilter.creationTime)
+		}
+		in := ifilter.Name + "." + ifilter.Namespace
+		jn := jfilter.Name + "." + jfilter.Namespace
+		return in < jn
+	})
+	var out *MergedEnvoyFilterWrapper
+	if len(matchedEnvoyFilters) > 0 {
+		out = &MergedEnvoyFilterWrapper{
+			// no need populate workloadSelector, as it is not used later.
+			Patches: make(map[networking.EnvoyFilter_ApplyTo][]*EnvoyFilterConfigPatchWrapper),
+		}
+		// merge EnvoyFilterWrapper
+		for _, efw := range matchedEnvoyFilters {
+			for applyTo, cps := range efw.Patches {
+				for _, cp := range cps {
+					if proxyMatch(proxy, cp) {
+						out.Patches[applyTo] = append(out.Patches[applyTo], cp)
+					}
+				}
+			}
+		}
+	}
+
+	return out
 }
 
 // EnvoyFilters return the merged EnvoyFilterWrapper of a proxy

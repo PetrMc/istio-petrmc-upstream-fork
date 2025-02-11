@@ -88,6 +88,7 @@ func convertToEnvoyFilterWrapper(local *config.Config) *EnvoyFilterWrapper {
 		Priority:                     localEnvoyFilter.Priority,
 		creationTime:                 local.CreationTimestamp,
 	}
+	out.fullSpec = localEnvoyFilter
 	if localEnvoyFilter.WorkloadSelector != nil {
 		out.workloadSelector = localEnvoyFilter.WorkloadSelector.Labels
 	}
