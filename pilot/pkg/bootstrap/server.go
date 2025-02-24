@@ -39,6 +39,7 @@ import (
 
 	meshconfig "istio.io/api/mesh/v1alpha1"
 	"istio.io/api/security/v1beta1"
+	"istio.io/istio/pilot/pkg/controllers/autowaypoint"
 	"istio.io/istio/pilot/pkg/controllers/ipallocate"
 	"istio.io/istio/pilot/pkg/controllers/untaint"
 	kubecredentials "istio.io/istio/pilot/pkg/credentials/kube"
@@ -62,6 +63,7 @@ import (
 	"istio.io/istio/pkg/config/mesh"
 	"istio.io/istio/pkg/config/schema/collections"
 	"istio.io/istio/pkg/config/schema/gvk"
+	"istio.io/istio/pkg/config/schema/gvr"
 	"istio.io/istio/pkg/config/schema/kind"
 	"istio.io/istio/pkg/ctrlz"
 	"istio.io/istio/pkg/filewatcher"
@@ -1171,6 +1173,10 @@ func (s *Server) initControllers(args *PilotArgs) error {
 		s.initNodeUntaintController(args)
 	}
 
+	// SOLO: Auto waypoint controller
+	s.initAutoWaypointController(args)
+	// END SOLO
+
 	if features.EnableIPAutoallocate {
 		s.initIPAutoallocateController(args)
 	}
@@ -1431,3 +1437,36 @@ func (s *Server) initReadinessProbes() {
 		s.addReadinessProbe(name, probe)
 	}
 }
+
+// SOLO: Auto waypoint controller
+func (s *Server) initAutoWaypointController(args *PilotArgs) {
+	if s.kubeClient == nil {
+		return
+	}
+	if !features.EnableSoloAutoWaypoint {
+		return
+	}
+	s.addStartFunc("auto waypoint controller", func(stop <-chan struct{}) error {
+		go leaderelection.
+			NewLeaderElection(args.Namespace, args.PodName, leaderelection.AutoWaypointController, args.Revision, s.kubeClient).
+			AddRunFunction(func(leaderStop <-chan struct{}) {
+				// We can only run the controller if the Gateway API gateways CRD is available
+				if s.kubeClient.CrdWatcher().WaitForCRD(gvr.KubernetesGateway, leaderStop) {
+					controller := autowaypoint.NewAutoWaypoint(s.kubeClient, s.krtDebugger)
+					// Start informers again. This fixes the case where informers for namespace do not start,
+					// as we create them only after acquiring the leader lock
+					// Note: stop here should be the overall pilot stop, NOT the leader election stop. We are
+					// basically lazy loading the informer, if we stop it when we lose the lock we will never
+					// recreate it again.
+					s.kubeClient.RunAndWait(stop)
+					controller.Run(leaderStop)
+				} else {
+					log.Warn("Kubernetes Gateway API gateways CRD not found and Solo auto waypoint controller received stop signal")
+				}
+			}).
+			Run(stop)
+		return nil
+	})
+}
+
+// END SOLO

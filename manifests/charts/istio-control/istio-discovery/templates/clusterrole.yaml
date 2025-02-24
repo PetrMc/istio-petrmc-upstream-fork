@@ -163,7 +163,7 @@ rules:
     - udproutes/status
     verbs: ["update", "patch"]
   - apiGroups: ["gateway.networking.k8s.io"]
-    resources: ["gatewayclasses"]
+    resources: ["gatewayclasses", "gateways"]
     verbs: ["create", "update", "patch", "delete"]
 
   # Needed for multicluster secret reading, possibly ingress certs in the future
