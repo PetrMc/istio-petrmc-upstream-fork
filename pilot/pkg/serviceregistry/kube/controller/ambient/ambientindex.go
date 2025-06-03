@@ -473,7 +473,7 @@ func New(options Options) Index {
 	}
 
 	if features.EnablePeering {
-		FederatedServices := a.FederatedServicesCollection(MeshConfig, WorkloadServices, Workloads, Waypoints, WorkloadServiceIndex, opts)
+		FederatedServices := a.FederatedServicesCollection(a.meshConfig, WorkloadServices, Workloads, Waypoints, WorkloadServiceIndex, opts)
 		FederatedServices.RegisterBatch(PushXds(a.XDSUpdater,
 			func(i model.FederatedService) model.ConfigKey {
 				return model.ConfigKey{Kind: kind.FederatedService, Name: i.ResourceName()}

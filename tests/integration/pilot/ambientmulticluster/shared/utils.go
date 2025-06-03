@@ -95,7 +95,7 @@ func SetupApps(t resource.Context, apps *EchoDeployments) error {
 	apps.Sidecar = match.ServiceName(echo.NamespacedName{Name: ServiceSidecar, Namespace: apps.Namespace}).GetMatches(localApps)
 
 	for _, c := range t.Clusters() {
-		if _, err := ambient.NewWaypointProxyCluster(t, apps.Namespace, "waypoint", c); err != nil {
+		if _, err := ambient.NewWaypointProxyForCluster(t, apps.Namespace, "waypoint", c); err != nil {
 			return err
 		}
 		for _, svc := range []string{ServiceLocalWaypoint, ServiceRemoteWaypoint, ServiceRemoteOnlyWaypoint, ServiceBothWaypoint} {

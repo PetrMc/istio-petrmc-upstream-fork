@@ -71,7 +71,7 @@ func NewEcsAuthenticator(meshConfig mesh.Holder, client kube.Client) *AwsIAMAuth
 		ObjectFilter: client.ObjectFilter(),
 	})
 	// Add an Index on the pods, storing the service account and node. This allows us to later efficiently query.
-	index := kclient.CreateIndex[Role, *v1.ServiceAccount](sas, func(sa *v1.ServiceAccount) []Role {
+	index := kclient.CreateIndex[Role, *v1.ServiceAccount](sas, "ecs-authenticator", func(sa *v1.ServiceAccount) []Role {
 		var roles []Role
 		if r, f := sa.Annotations[AwsRoleArnAnnotation]; f {
 			roles = append(roles, normalizeRoleARN(r))

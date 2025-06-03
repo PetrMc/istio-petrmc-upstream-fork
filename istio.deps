@@ -4,21 +4,13 @@
     "name": "PROXY_REPO_SHA",
     "repoName": "proxy",
     "file": "",
-<<<<<<< HEAD
     "lastStableSHA": "2dfa899777c31c38bf980bac9450c9e1f89dd1a3"
-=======
-    "lastStableSHA": "55db8f8cb28a0c6f8f7a8c319a6cc58a63564a2b"
->>>>>>> 28c752e9eb (bump istio.deps)
   },
   {
     "_comment": "",
     "name": "ZTUNNEL_REPO_SHA",
     "repoName": "ztunnel",
     "file": "",
-<<<<<<< HEAD
     "lastStableSHA": "f54430481029ddb90ac9f43eeb36a86222963bad"
-=======
-    "lastStableSHA": "521071ddbf2cbb025125293d262fc8d841f6d93a"
->>>>>>> 28c752e9eb (bump istio.deps)
   }
 ]

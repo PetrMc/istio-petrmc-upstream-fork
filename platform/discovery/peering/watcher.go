@@ -106,23 +106,24 @@ func New(
 	c.gateways = kclient.New[*gateway.Gateway](client)
 	c.serviceEntries = kclient.New[*clientnetworking.ServiceEntry](client)
 	c.workloadEntries = kclient.New[*clientnetworking.WorkloadEntry](client)
-	c.workloadEntryServiceIndex = kclient.CreateIndex[types.NamespacedName](c.workloadEntries, func(o *clientnetworking.WorkloadEntry) []types.NamespacedName {
-		if o.Namespace != PeeringNamespace {
-			return nil
-		}
-		svc, f := o.Labels[ParentServiceLabel]
-		if !f {
-			return nil
-		}
-		ns, f := o.Labels[ParentServiceNamespaceLabel]
-		if !f {
-			return nil
-		}
-		return []types.NamespacedName{{
-			Namespace: ns,
-			Name:      svc,
-		}}
-	})
+	c.workloadEntryServiceIndex = kclient.CreateIndex[types.NamespacedName](c.workloadEntries, "peering-watcher",
+		func(o *clientnetworking.WorkloadEntry) []types.NamespacedName {
+			if o.Namespace != PeeringNamespace {
+				return nil
+			}
+			svc, f := o.Labels[ParentServiceLabel]
+			if !f {
+				return nil
+			}
+			ns, f := o.Labels[ParentServiceNamespaceLabel]
+			if !f {
+				return nil
+			}
+			return []types.NamespacedName{{
+				Namespace: ns,
+				Name:      svc,
+			}}
+		})
 	c.services = kclient.New[*corev1.Service](client)
 	c.queue = controllers.NewQueue("peering",
 		controllers.WithGenericReconciler(c.Reconcile),

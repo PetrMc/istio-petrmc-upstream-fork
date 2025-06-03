@@ -65,7 +65,7 @@ func serviceXesUsingAutoWaypoint(s krt.Collection[*corev1.Service],
 	},
 		opts.WithName("serviceXesUsingAutoWaypoint")...)
 
-	serviceXesUsingAutoWaypointByNamespace := krt.NewIndex(serviceXesUsingAutoWaypoint, func(s serviceX) []string {
+	serviceXesUsingAutoWaypointByNamespace := krt.NewIndex(serviceXesUsingAutoWaypoint, "service-using-autowaypoint-by-ns", func(s serviceX) []string {
 		return []string{s.namespace}
 	})
 

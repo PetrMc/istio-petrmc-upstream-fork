@@ -51,6 +51,7 @@ spec:
 {{- if .Values.tolerations }}
       tolerations:
 {{ toYaml .Values.tolerations | trim | indent 8 }}
+{{- end }}
 {{- if .Values.spire.enabled }}
       hostPID: true
 {{- end }}
@@ -125,7 +126,10 @@ spec:
         - name: LOG_FORMAT
           value: json
         {{- end}}
-        {{- if .Values.global.network }}
+        {{- if .Values.network }}
+        - name: NETWORK
+          value: {{.Values.network | quote }}
+        {{- else if .Values.global.network }}
         - name: NETWORK
           value: {{ .Values.global.network | quote }}
         {{- end }}
@@ -140,10 +144,6 @@ spec:
         {{- if .Values.spire.enabled }}
         - name: SPIRE_ENABLED
           value: "true"
-        {{- end }}
-        {{- with .Values.network }}
-        - name: NETWORK
-          value: "{{.}}"
         {{- end }}
         - name: TERMINATION_GRACE_PERIOD_SECONDS
           value: "{{ .Values.terminationGracePeriodSeconds }}"

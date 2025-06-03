@@ -102,7 +102,7 @@ func (a *AutoWaypoint) setup() {
 	serviceEntriesClient := kclient.NewDelayedInformer[*networkingv1.ServiceEntry](a.client, gvr.ServiceEntry, kubetypes.StandardInformer, filter)
 	serviceEntries := krt.WrapClient(serviceEntriesClient, opts.WithName("informer/serviceentries")...)
 
-	gatewaysOfInterestByNamespace := krt.NewIndex(gateways, func(o *gatewayapi.Gateway) []string {
+	gatewaysOfInterestByNamespace := krt.NewIndex(gateways, "gatways-of-interest-by-ns", func(o *gatewayapi.Gateway) []string {
 		if o.Name == "auto" {
 			return []string{o.Namespace}
 		}

@@ -192,7 +192,18 @@ func (a *index) constructServiceEntries(ctx krt.HandlerContext, svc *networkingc
 		})
 	}
 
-	lb := getTrafficDistribution(nil, svc.Annotations)
+	trafficDistribution := model.GetTrafficDistribution(nil, svc.Annotations)
+	var lb *workloadapi.LoadBalancing
+	switch trafficDistribution {
+	case model.TrafficDistributionPreferSameZone:
+		lb = preferSameZoneLoadBalancer
+	case model.TrafficDistributionPreferSameNode:
+		lb = preferSameNodeLoadBalancer
+	case model.TrafficDistributionPreferNetwork:
+		lb = preferNetworkLoadBalancer
+	case model.TrafficDistributionPreferRegion:
+		lb = preferRegionLoadBalancer
+	}
 
 	// TODO this is only checking one controller - we may be missing service vips for instances in another cluster
 	res := make([]*workloadapi.Service, 0, len(svc.Spec.Hosts))
@@ -243,8 +254,8 @@ func (a *index) constructService(
 		return nil
 	}
 
+	var lb *workloadapi.LoadBalancing
 	// First, use internal traffic policy if set.
-	lb := getTrafficDistribution(svc.Spec.TrafficDistribution, svc.Annotations)
 	if itp := svc.Spec.InternalTrafficPolicy; itp != nil && *itp == v1.ServiceInternalTrafficPolicyLocal {
 		lb = &workloadapi.LoadBalancing{
 			// Only allow endpoints on the same node.
@@ -261,6 +272,10 @@ func (a *index) constructService(
 			lb = preferSameZoneLoadBalancer
 		case model.TrafficDistributionPreferSameNode:
 			lb = preferSameNodeLoadBalancer
+		case model.TrafficDistributionPreferNetwork:
+			lb = preferNetworkLoadBalancer
+		case model.TrafficDistributionPreferRegion:
+			lb = preferRegionLoadBalancer
 		}
 	}
 
@@ -358,27 +373,6 @@ func getVIPs(svc *v1.Service) []string {
 		}
 	}
 	return res
-}
-
-func getTrafficDistribution(specValue *string, annotations map[string]string) *workloadapi.LoadBalancing {
-	if specValue != nil {
-		preferClose := *specValue == v1.ServiceTrafficDistributionPreferClose
-		if preferClose {
-			return preferCloseLoadBalancer
-		}
-	}
-	// The TrafficDistribution field is quite new, so we allow a legacy annotation option as well
-	// This also has some custom types
-	switch strings.ToLower(annotations[apiannotation.NetworkingTrafficDistribution.Name]) {
-	case strings.ToLower(v1.ServiceTrafficDistributionPreferClose):
-		return preferCloseLoadBalancer
-	case "prefernetwork":
-		return preferNetworkLoadBalancer
-	case "preferregion":
-		return preferRegionLoadBalancer
-	default:
-		return nil
-	}
 }
 
 func precomputeServicePtr(w *model.ServiceInfo) *model.ServiceInfo {
