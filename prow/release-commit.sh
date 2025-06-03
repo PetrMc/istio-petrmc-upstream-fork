@@ -64,7 +64,7 @@ ${DEPENDENCIES:-$(cat <<EOD
     git: https://github.com/istio/api
     auto: modules
   proxy:
-    git: https://github.com/istio/proxy
+    git: git@github.com:solo-io/proxy.git
     auto: deps
   client-go:
     git: https://github.com/istio/client-go
