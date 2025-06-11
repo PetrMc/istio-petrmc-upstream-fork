@@ -411,7 +411,7 @@ func (c Config) IsRegularPod() bool {
 // Currently, only zTunnel captured sources do this. Eventually this might be enabled
 // for ingress and/or sidecars.
 func (c Config) WaypointClient() bool {
-	return c.ZTunnelCaptured() && !c.IsUncaptured()
+	return c.ZTunnelCaptured() || c.HasSidecar()
 }
 
 // ZTunnelCaptured returns true in ambient enabled namespaces where there is no sidecar

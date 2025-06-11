@@ -221,6 +221,12 @@ func (a *index) WaypointsCollection(
 			return nil
 		}
 
+		// Originally added as a workaround for https://github.com/solo-io/istio/issues/2127. However, we know these are
+		// never waypoints, and we may have a lot, so its nice to filter them.
+		if gateway.Spec.GatewayClassName == "istio-remote" {
+			return nil
+		}
+
 		instances := krt.Fetch(ctx, pods, krt.FilterLabel(map[string]string{
 			label.IoK8sNetworkingGatewayGatewayName.Name: gateway.Name,
 		}), krt.FilterIndex(podsByNamespace, gateway.Namespace))

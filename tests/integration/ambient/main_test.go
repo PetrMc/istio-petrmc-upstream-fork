@@ -67,6 +67,19 @@ values:
     terminationGracePeriodSeconds: 5
     env:
       SECRET_TTL: 5m
+  meshConfig:
+    defaultConfig:
+      tracing: {} # disabled MeshConfig tracing options
+    extensionProviders:
+    # add zipkin provider
+    - name: zipkin
+      zipkin:
+        service: zipkin.istio-system.svc.cluster.local
+        port: 9411
+    enableTracing: true
+    defaultConfig:
+      tracing:
+        sampling: 100
 `
 
 	ambientMultiNetworkControlPlaneValues = `
@@ -84,6 +97,19 @@ values:
     terminationGracePeriodSeconds: 5
     env:
       SECRET_TTL: 5m
+  meshConfig:
+    defaultConfig:
+      tracing: {} # disabled MeshConfig tracing options
+    extensionProviders:
+    # add zipkin provider
+    - name: zipkin
+      zipkin:
+        service: zipkin.istio-system.svc.cluster.local
+        port: 9411
+    enableTracing: true
+    defaultConfig:
+      tracing:
+        sampling: 100
 `
 )
 

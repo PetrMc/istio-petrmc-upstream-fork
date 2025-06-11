@@ -143,6 +143,13 @@ spec:
             periodSeconds: 3
             timeoutSeconds: 5
           env:
+  {{ if  (.Values.license).secretRef }}
+          - name: SOLO_LICENSE_SECRET
+            value: "{{.Values.license.secretRef.namespace}}/{{.Values.license.secretRef.name}}"
+  {{ else if (.Values.license).value }}
+          - name: SOLO_LICENSE_KEY
+            value: {{.Values.license.value|quote}}
+  {{ end }}
           - name: REVISION
             value: "{{ .Values.revision | default `default` }}"
           - name: PILOT_CERT_PROVIDER
@@ -214,6 +221,14 @@ spec:
                 divisor: "1"
           - name: PLATFORM
             value: "{{ coalesce .Values.global.platform .Values.platform }}"
+{{- with .Values.platforms.ecs.cluster }}
+          - name: ECS_CLUSTER
+            value: "{{.}}"
+{{- end }}
+{{- if .Values.platforms.peering.enabled }}
+          - name: ENABLE_PEERING_DISCOVERY
+            value: "true"
+{{- end }}
           resources:
 {{- if .Values.resources }}
 {{ toYaml .Values.resources | trim | indent 12 }}

@@ -120,6 +120,19 @@ func (configgen *ConfigGeneratorImpl) BuildListeners(node *model.Proxy,
 		l = append(l, buildConnectOriginateListener(push, node, class))
 	}
 
+	if features.EnableHBONESend && features.EnableEnvoyMultiNetworkHBONE {
+		class := istionetworking.ListenerClassSidecarOutbound
+		if node.Type == model.Router {
+			class = istionetworking.ListenerClassGateway
+		}
+		if node.Type == model.Waypoint {
+			class = istionetworking.ListenerClassSidecarInbound
+		}
+		l = append(l,
+			buildConnectOriginateInnerListener(push, node, class),
+			buildConnectOriginateOuterListener(push, node, class))
+	}
+
 	return l
 }
 
@@ -333,6 +346,8 @@ func (lb *ListenerBuilder) buildSidecarOutboundListeners(node *model.Proxy,
 	// For conflict resolution
 	listenerMap := make(map[listenerKey]*outboundListenerEntry)
 
+	wps := findWaypointServices(push)
+
 	// The sidecarConfig if provided could filter the list of
 	// services/virtual services that we need to process. It could also
 	// define one or more listeners with specific ports. Once we generate
@@ -423,11 +438,12 @@ func (lb *ListenerBuilder) buildSidecarOutboundListeners(node *model.Proxy,
 			// TODO: dualstack wildcards
 			for _, service := range services {
 				listenerOpts := outboundListenerOpts{
-					push:    push,
-					proxy:   node,
-					bind:    bind,
-					port:    listenPort,
-					service: service,
+					push:             push,
+					proxy:            node,
+					bind:             bind,
+					port:             listenPort,
+					service:          service,
+					waypointServices: wps,
 				}
 				// Set service specific attributes here.
 				lb.buildSidecarOutboundListener(listenerOpts, listenerMap, virtualServices, actualWildcards)
@@ -474,11 +490,12 @@ func (lb *ListenerBuilder) buildSidecarOutboundListeners(node *model.Proxy,
 						continue
 					}
 					listenerOpts := outboundListenerOpts{
-						push:    push,
-						proxy:   node,
-						bind:    bind,
-						port:    servicePort,
-						service: service,
+						push:             push,
+						proxy:            node,
+						bind:             bind,
+						port:             servicePort,
+						service:          service,
+						waypointServices: wps,
 					}
 
 					// Support statefulsets/headless services with TCP ports, and empty service address field.
@@ -768,6 +785,17 @@ func buildSidecarOutboundTCPListenerOpts(opts outboundListenerOpts, virtualServi
 		// Do not filter namespace for now.
 		// TODO(https://github.com/istio/istio/issues/46146) we may need to, or something more sophisticated
 		svcConfigs = getConfigsForHost("", opts.service.Hostname, virtualServices)
+
+		// SOLO
+		// For sidecar interop to service waypoints, we want to disable any VirtualServices if we have a waypoint
+		// Filter out anything that has a service waypoint
+		if _, hasServiceWaypoint := opts.waypointServices[opts.service.Hostname]; hasServiceWaypoint {
+			if opts.service.GetAddressForProxy(opts.proxy) != constants.UnspecifiedIP {
+				// If no VIP, skip. Currently, waypoints can only accept VIP traffic
+				svcConfigs = nil
+			}
+		}
+		// END SOLO
 	} else {
 		svcConfigs = virtualServices
 	}
@@ -1078,6 +1106,8 @@ type outboundListenerOpts struct {
 
 	port    *model.Port
 	service *model.Service
+
+	waypointServices sets.Set[host.Name]
 }
 
 // buildGatewayListener builds and initializes a Listener proto based on the provided opts. It does not set any filters.

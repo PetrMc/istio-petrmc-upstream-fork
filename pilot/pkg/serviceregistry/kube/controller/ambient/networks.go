@@ -95,9 +95,15 @@ func fromGatewayBuilder(clusterID cluster.ID) krt.TransformationMulti[*v1beta1.G
 			return nil
 		}
 
+		// skip the gateway if it is pointing to the cluster network
+		if netLabel == clusterID.String() {
+			return nil
+		}
+
 		base := model.NetworkGateway{
-			Network: network.ID(netLabel),
-			Cluster: clusterID,
+			Network:     network.ID(netLabel),
+			Cluster:     clusterID,
+			TrustDomain: gw.Annotations["gateway.istio.io/trust-domain"],
 			ServiceAccount: types.NamespacedName{
 				Namespace: gw.Namespace,
 				Name:      kube.GatewaySA(gw),

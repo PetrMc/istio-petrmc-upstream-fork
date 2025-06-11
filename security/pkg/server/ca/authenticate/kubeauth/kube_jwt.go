@@ -123,7 +123,13 @@ func (a *KubeJWTAuthenticator) authenticate(targetJWT string, clusterID cluster.
 			clusterID, a.clusterID, a.remoteKubeClientGetter.ListClusters())
 	}
 
-	id, err := tokenreview.ValidateK8sJwt(kubeClient, targetJWT, security.TokenAudiences)
+	aud := security.TokenAudiences
+	// Currently we are using unbound tokens for bootstrapping as they do not have an expiration.
+	if shouldBypassAudienceCheck(targetJWT) {
+		aud = nil
+	}
+
+	id, err := tokenreview.ValidateK8sJwt(kubeClient, targetJWT, aud)
 	if err != nil {
 		return nil, fmt.Errorf("failed to validate the JWT from cluster %q: %v", clusterID, err)
 	}

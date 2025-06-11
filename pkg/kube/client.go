@@ -1404,3 +1404,7 @@ func FindIstiodMonitoringPort(pod *v1.Pod) int {
 	}
 	return 15014
 }
+
+func ResetInformerTrick(c Client) {
+	c.(*client).informerWatchesPending.Store(0)
+}

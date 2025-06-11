@@ -41,6 +41,9 @@ type IstioControlPlaneInstance struct {
 	ID string
 	// The Istio version
 	Info istioversion.BuildInfo
+
+	// Gloo license information
+	License string `json:"license,omitempty"`
 }
 
 // Evaluate the controlPlane lazily in order to allow "POD_NAME" env var setting after running the process.

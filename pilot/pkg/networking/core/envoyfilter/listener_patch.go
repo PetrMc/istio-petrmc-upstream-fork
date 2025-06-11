@@ -242,6 +242,14 @@ func patchFilterChains(patchContext networking.EnvoyFilter_PatchContext,
 	})
 }
 
+func WaypointPatchFilterChain(patchContext networking.EnvoyFilter_PatchContext,
+	patches map[networking.EnvoyFilter_ApplyTo][]*model.EnvoyFilterConfigPatchWrapper,
+	lis *listener.Listener,
+	fc *listener.FilterChain,
+) {
+	patchFilterChain(patchContext, patches, lis, fc)
+}
+
 func patchFilterChain(patchContext networking.EnvoyFilter_PatchContext,
 	patches map[networking.EnvoyFilter_ApplyTo][]*model.EnvoyFilterConfigPatchWrapper,
 	lis *listener.Listener,

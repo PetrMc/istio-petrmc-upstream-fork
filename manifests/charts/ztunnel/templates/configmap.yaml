@@ -1,0 +1,17 @@
+{{- if .Values.l7Telemetry }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: istio-ztunnel
+  namespace: {{ .Release.Namespace }}
+  labels:
+    istio.io/rev: {{ .Values.revision | default "default" }}
+    operator.istio.io/component: "Ztunnel"
+    release: {{ .Release.Name }}
+data:
+  l7_config_file: "/etc/ztunnel/config/l7_config.yaml"  # solo builds will always have this file
+
+  # Configuration file for the Solo ztunnel to be used for L7 telemetry
+  l7_config.yaml: |-
+{{ .Values.l7Telemetry | toYaml | indent 4}}
+{{- end }}

@@ -6,7 +6,7 @@ ARG BASE_VERSION=latest
 ARG ISTIO_BASE_REGISTRY=gcr.io/istio-release
 
 # The following section is used as base image if BASE_DISTRIBUTION=debug
-FROM ${ISTIO_BASE_REGISTRY}/base:${BASE_VERSION} AS debug
+FROM gcr.io/istio-enterprise/istio/base:${BASE_VERSION} AS debug
 
 # The following section is used as base image if BASE_DISTRIBUTION=distroless
 FROM ${ISTIO_BASE_REGISTRY}/iptables:${BASE_VERSION} AS distroless
@@ -29,9 +29,13 @@ COPY ${TARGETARCH:-amd64}/${SIDECAR} /usr/local/bin/${SIDECAR}
 
 # Environment variable indicating the exact proxy sha - for debugging or version-specific configs
 ENV ISTIO_META_ISTIO_PROXY_SHA=$proxy_version
+ENV ISTIO_META_SOLO_LTS=false
 
 ARG TARGETARCH
 COPY ${TARGETARCH:-amd64}/pilot-agent /usr/local/bin/pilot-agent
+
+# Add modsecurity core rule set files
+COPY solo-crs /usr/local/bin/modsecurity
 
 # The pilot-agent will bootstrap Envoy.
 ENTRYPOINT ["/usr/local/bin/pilot-agent"]

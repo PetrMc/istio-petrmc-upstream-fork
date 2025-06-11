@@ -1,0 +1,107 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: apiserver
+  namespace: {{.Release.Namespace}}
+spec:
+  selector:
+    app: apiserver
+  ports:
+    - port: 6443
+      name: tls
+    - port: 18090
+      name: tcp
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: apiserver
+  namespace: {{.Release.Namespace}}
+  labels:
+    app: apiserver
+spec:
+  selector:
+    matchLabels:
+      app: apiserver
+  template:
+    metadata:
+      name: apiserver
+      labels:
+        sidecar.istio.io/inject: "false"
+        app: apiserver
+        component: kube-apiserver
+      annotations:
+        prometheus.io/port: "6443"
+        prometheus.io/scheme: "https"
+        prometheus.io/scrape: "true"
+    spec:
+      terminationGracePeriodSeconds: 0
+      initContainers:
+        - name: prep
+          image: busybox
+          command:
+          - sh
+          - -c
+          - |
+            chmod 0700 /var/lib/etcd
+            echo "yolo,admin,de681b62-1970-49af-9e8d-b759b9421e47,system:masters" > /var/run/bootstrap-auth/tokens
+          volumeMounts:
+            - name: etcd-data
+              mountPath: /var/lib/etcd
+            - name: token-data
+              mountPath: /var/run/bootstrap-auth
+      containers:
+        - name: etcd
+          image: registry.k8s.io/etcd:3.5.16-0
+          args:
+            - etcd
+            - --data-dir=/var/lib/etcd
+            - --listen-client-urls=http://0.0.0.0:2379
+            - --advertise-client-urls=http://0.0.0.0:2379
+            - --unsafe-no-fsync
+{{/*          resources:*/}}
+{{/*            requests:*/}}
+{{/*              memory: 4096Mi*/}}
+{{/*              cpu: 2000m*/}}
+          volumeMounts:
+            - mountPath: /var/lib/etcd
+              name: etcd-data
+        - name: apiserver
+          image: registry.k8s.io/kube-apiserver:v1.32.0
+          command:
+            - kube-apiserver
+            - --etcd-servers=http://localhost:2379
+            - --disable-admission-plugins=ServiceAccount
+            - --authorization-mode=RBAC
+            - --service-cluster-ip-range
+            - "10.0.0.0/16"
+            - --service-account-issuer=kubernetes.default.svc
+            - --service-account-key-file=/etc/kubernetes/pki/sa.pub
+            - --service-account-signing-key-file=/etc/kubernetes/pki/sa.key
+            - --token-auth-file=/var/run/bootstrap-auth/tokens
+            - --feature-gates=WatchList=true
+          volumeMounts:
+            - mountPath: /etc/kubernetes/pki
+              name: pki
+            - name: token-data
+              mountPath: /var/run/bootstrap-auth
+      volumes:
+        - secret:
+            secretName: kubernetes-sa-key
+          name: pki
+        - emptyDir:
+            medium: Memory
+          name: etcd-data
+        - emptyDir: {}
+          name: token-data
+---
+# This is public - since its meant for testing only
+apiVersion: v1
+kind: Secret
+metadata:
+  name: kubernetes-sa-key
+  namespace: {{.Release.Namespace}}
+type: Opaque
+data:
+  sa.key: LS0tLS1CRUdJTiBSU0EgUFJJVkFURSBLRVktLS0tLQpNSUlFcFFJQkFBS0NBUUVBM3FKR0x2Zk91dlhOYytVbE9KNGxSM2hjR253UUJMby9UM0M5b0s4VFZCL1F2bFh1Clc0TWlOeWFVODZmb1BTUmJ2UU8wTUJuU1Y1NnRtTldROWhDZ0h1bVVIV08wZGhkV1c5M281NjkrZDZHdVVGeFgKKzNreHpkeUxjVmMvd2YyYTBBaHVseE9JT2JlMFBtMjdrOENJNGIxcXNtTGpQaFBNNEpoeEtyTDlnamtvb0VYKwpSdFROaGZ2WlNtM2t2T2J6NlRmYVIyZGY3U0d4M3pOck5MWGNzR0ZsanluL0dtMWVxNkF5STBvMWZ4ZWh1RmN2CnI1L2lkUEpMb3ZoZW0rTWo0RUNqeVM5OGNkdTVSc28rUHdUbFdZV0l0ZmptWVpBaWJqWUgvd2xTY2V0QzdRSGQKengrditTY3ovbnFjYkFTdnFqNHlJZ043MS9ka3VBcS9iU2piclFJREFRQUJBb0lCQVFDZlBwbE83U2ZzNlBiTgpLQ0Zvanc0QlFpRTNQSGhFdVdlaGpmWEZZcFZEdmdJVXN1aHNncTdObmdZN0JtWUNuZWdVbWZxZjBVaDRMZUxrCkNCYkpPdmtkUTF3VGJZYmVWVEVMUXY1ZUFsUkdnOXBvVnJVRUJodE9zYXI0SmoxUHAvTzlTOXEycTF6c1UrOVUKSEM5b3J2WDU2Zi9RbXhVS0NTV3BuTUNObHp2bmtWOFBaTVNlSVhXUHdjL3VoT1ptK1RYck5qd2hSRkZ2TVNINgpGSXlwS1Z3ZUVMNDdhdUtpVEsySHlJcWxUMisrTUZUdjdMYmU5VEhLcVVST1lUUW1yaW1ONnlLb05WWjJVa20wClovc0QwVStCSTJYRWs0ZzR4aHhMbkJiRDk5Uy8yNGFrdnFEcnovdldZMm05bkpaaEd4b0grcHZ0TTJUb0tJTHcKdmhRa0hRN2hBb0dCQVBuM1R4Y3FCWm84Z0FraGJoUTRYMTdoZVh4dHZyYXJBcTZoM3dpd01idWRuSlZiQVlUTwplMWlEdzU4RTM1Q3J0ZXZEWFVreUVEMERJREhlRFkrQllCcURTdDRXbkFUMjJWWnFnUjdXamlIRHVwZnNNYzZnCjVJekZqWHA5OXlrenZUbytlOXpzSkwvbDJMQ29QeWlJb3VIUERTSTIvekNuT05rcVlxbzErZ1k1QW9HQkFPUUMKRURGdGdJNkUzWmlJRlZxQkJwU2o1RnVNWWI2MDZuUkFHMENSUzRTVlNqUmFucmlmaVdtQnlnYkU4ODlkUUpFUQoySmdldVNtMU1haS9pbXhTNVdENE8xTy85SzBWUTlJb3pZWlhDU2h3TXZWcldvaGRRcEU0Y1E0VWZCQjJUVkxDCmxLRlBQSE41RVVXRVhhWndGYXoycklMSVN4aW1mb2o0Qnh5em9TRVZBb0dCQUxUK3kvZjc1MzZjM0NEQVloS20KRnZoK3p4YTM2R1lnUVpydGZxK3QxUFVDMVFTWWx1cnhFQU14dFk0SlcxQkg1VHhIZzk2aUwzdmVMWXV1TzZkegppSURxSEdYZmZTMWpDRkE0WWpKUUxTNXBxVXlrTEJSd0Q4MldwakRSMFF1MmVRZ1pnbHFmYXFUQTZ6eFBOeHhFCmc1eDU3Z3FlUS8yWXQrTVhlOFcvdThDUkFvR0FaQi9QMHBTK2JsZEVKQlltSWw4a2I2Tmt4UnJwVldDRzBGUFMKWTlFcDgyZkhkU1FTTFFySndjNGYxRWNxdFhYQ3c3RTlHOWZxQWJteXUrS1l1NmJQV1h6SU9LZkRuem9HVlVSYgp0RkdHRVA3c01iOVp1eVlROUVwdnd2b1YzUGpHVGNCcW1rZDhTVXp4MjdBYm05bitlcnk3MXBaeis3Z3BPcWFJCklQOTBrMTBDZ1lFQXo3REpEQ0xCSXRJVVlKNURKM21oNHJ0TUdNR3k2WkFicUFYdDBmcUYycE5mbVlqSHF6NUsKRXF4Y1lVMEVUTGhDNVJNY3VhSWJtUkU3Mjd0ZStvaCs3bExpL20zc1lqY2Vxc0RacjhxaE1LOXMzaDErcC9YLwpsMEduS1NoTVFSbzA4VFZxVURLenFyUVRLNk9RNFZiZ1pCQ1JiRGx3SThWMytJY1laSHc2SEdnPQotLS0tLUVORCBSU0EgUFJJVkFURSBLRVktLS0tLQo=
+  sa.pub: LS0tLS1CRUdJTiBQVUJMSUMgS0VZLS0tLS0KTUlJQklqQU5CZ2txaGtpRzl3MEJBUUVGQUFPQ0FROEFNSUlCQ2dLQ0FRRUEzcUpHTHZmT3V2WE5jK1VsT0o0bApSM2hjR253UUJMby9UM0M5b0s4VFZCL1F2bFh1VzRNaU55YVU4NmZvUFNSYnZRTzBNQm5TVjU2dG1OV1E5aENnCkh1bVVIV08wZGhkV1c5M281NjkrZDZHdVVGeFgrM2t4emR5TGNWYy93ZjJhMEFodWx4T0lPYmUwUG0yN2s4Q0kKNGIxcXNtTGpQaFBNNEpoeEtyTDlnamtvb0VYK1J0VE5oZnZaU20za3ZPYno2VGZhUjJkZjdTR3gzek5yTkxYYwpzR0ZsanluL0dtMWVxNkF5STBvMWZ4ZWh1RmN2cjUvaWRQSkxvdmhlbStNajRFQ2p5Uzk4Y2R1NVJzbytQd1RsCldZV0l0ZmptWVpBaWJqWUgvd2xTY2V0QzdRSGR6eCt2K1Njei9ucWNiQVN2cWo0eUlnTjcxL2RrdUFxL2JTamIKclFJREFRQUIKLS0tLS1FTkQgUFVCTElDIEtFWS0tLS0tCg==

@@ -37,6 +37,9 @@ type TLSOptions struct {
 	Cert          string
 	ServerAddress string
 	SAN           string
+
+	// GetClientCertificate is set to override the default GetClientCertificate() TLS callback
+	GetClientCertificate func(*tls.CertificateRequestInfo) (*tls.Certificate, error)
 }
 
 func getTLSDialOption(opts *TLSOptions) (grpc.DialOption, error) {
@@ -68,6 +71,11 @@ func getTLSDialOption(opts *TLSOptions) (grpc.DialOption, error) {
 		},
 		RootCAs:    rootCert,
 		MinVersion: tls.VersionTLS12,
+	}
+
+	// Override the default GetClientCertificate() TLS callback function if specified
+	if opts.GetClientCertificate != nil {
+		config.GetClientCertificate = opts.GetClientCertificate
 	}
 
 	if host, _, err := net.SplitHostPort(opts.ServerAddress); err == nil {

@@ -61,6 +61,8 @@ restricted_licenses:
   - Sleepycat
 
 allowlisted_modules:
+- github.com/solo-io/licensing
+
 # MIT: https://github.com/ghodss/yaml/blob/master/LICENSE
 - github.com/ghodss/yaml
 

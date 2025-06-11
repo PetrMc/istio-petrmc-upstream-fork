@@ -101,10 +101,9 @@ func (configgen *ConfigGeneratorImpl) buildWaypointInboundClusters(
 	clusters := make([]*cluster.Cluster, 0)
 	// Creates "main_internal" cluster to route to the main internal listener.
 	// Creates "encap" cluster to route to the encap listener.
-	clusters = append(clusters, GetMainInternalCluster(), GetEncapCluster(proxy))
+	clusters = append(clusters, GetMainInternalWaypointCluster(), GetEncapCluster(proxy))
 	// Creates per-VIP load balancing upstreams.
-	clusters = append(clusters, cb.buildWaypointInboundVIP(proxy, svcs, push.Mesh)...)
-
+	clusters = append(clusters, cb.buildWaypointInboundVIP(proxy, svcs, push)...)
 	// Upstream of the "encap" listener.
 	if features.EnableAmbientMultiNetwork && isEastWestGateway(proxy) {
 		clusters = append(clusters, cb.buildWaypointForwardInnerConnect())
@@ -239,6 +238,8 @@ func (cb *ClusterBuilder) buildWaypointInboundVIPCluster(
 	// Wrap the transportSocket with internal listener upstream. Note this could be a raw buffer, PROXY, TLS, etc
 	localCluster.cluster.TransportSocket = util.WaypointInternalUpstreamTransportSocket(transportSocket)
 
+	applyMultinetworkSubset(localCluster.cluster)
+
 	return localCluster.build()
 }
 
@@ -274,10 +275,15 @@ func buildWaypointTLSContext(opts *buildClusterOpts, tls *networking.ClientTLSSe
 }
 
 // `inbound-vip|protocol|hostname|port`. EDS routing to the internal listener for each pod in the VIP.
-func (cb *ClusterBuilder) buildWaypointInboundVIP(proxy *model.Proxy, svcs map[host.Name]*model.Service, mesh *meshconfig.MeshConfig) []*cluster.Cluster {
+func (cb *ClusterBuilder) buildWaypointInboundVIP(proxy *model.Proxy, svcs map[host.Name]*model.Service, push *model.PushContext) []*cluster.Cluster {
 	clusters := []*cluster.Cluster{}
-
+	mesh := push.Mesh
 	for _, svc := range svcs {
+		efw := clusterPatcher{}
+		if AmbientEnvoyFilterLicensed() {
+			efm := model.PolicyMatcherForProxy(proxy).WithService(svc).WithRootNamespace(push.Mesh.GetRootNamespace())
+			efw = clusterPatcher{efw: push.WaypointEnvoyFilters(proxy, efm), pctx: networking.EnvoyFilter_GATEWAY}
+		}
 		for _, port := range svc.Ports {
 			if port.Protocol == protocol.UDP {
 				continue
@@ -292,18 +298,18 @@ func (cb *ClusterBuilder) buildWaypointInboundVIP(proxy *model.Proxy, svcs map[h
 			dr := CastDestinationRule(cfg)
 			policy, _ := util.GetPortLevelTrafficPolicy(dr.GetTrafficPolicy(), port)
 			if port.Protocol.IsUnsupported() || port.Protocol.IsTCP() {
-				clusters = append(clusters, cb.buildWaypointInboundVIPCluster(proxy, svc, *port, "tcp", mesh, policy, cfg))
+				clusters = efw.conditionallyAppend(clusters, nil, cb.buildWaypointInboundVIPCluster(proxy, svc, *port, "tcp", mesh, policy, cfg))
 			}
 			if port.Protocol.IsUnsupported() || port.Protocol.IsHTTP() {
-				clusters = append(clusters, cb.buildWaypointInboundVIPCluster(proxy, svc, *port, "http", mesh, policy, cfg))
+				clusters = efw.conditionallyAppend(clusters, nil, cb.buildWaypointInboundVIPCluster(proxy, svc, *port, "http", mesh, policy, cfg))
 			}
 			for _, ss := range dr.GetSubsets() {
 				policy = util.MergeSubsetTrafficPolicy(dr.GetTrafficPolicy(), ss.GetTrafficPolicy(), port)
 				if port.Protocol.IsUnsupported() || port.Protocol.IsTCP() {
-					clusters = append(clusters, cb.buildWaypointInboundVIPCluster(proxy, svc, *port, "tcp/"+ss.Name, mesh, policy, cfg))
+					clusters = efw.conditionallyAppend(clusters, nil, cb.buildWaypointInboundVIPCluster(proxy, svc, *port, "tcp/"+ss.Name, mesh, policy, cfg))
 				}
 				if port.Protocol.IsUnsupported() || port.Protocol.IsHTTP() {
-					clusters = append(clusters, cb.buildWaypointInboundVIPCluster(proxy, svc, *port, "http/"+ss.Name, mesh, policy, cfg))
+					clusters = efw.conditionallyAppend(clusters, nil, cb.buildWaypointInboundVIPCluster(proxy, svc, *port, "http/"+ss.Name, mesh, policy, cfg))
 				}
 			}
 		}

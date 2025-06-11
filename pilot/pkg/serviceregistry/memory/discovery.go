@@ -360,6 +360,14 @@ func (sd *ServiceDiscovery) AddressInformation(requests sets.String) ([]model.Ad
 	return infos, removed
 }
 
+func (sd *ServiceDiscovery) FederatedServices(services sets.String) ([]model.FederatedService, sets.String) {
+	return nil, nil
+}
+
+func (sd *ServiceDiscovery) ServicesWithWaypointOrRemoteWaypoint() sets.Set[host.Name] {
+	return nil
+}
+
 func (sd *ServiceDiscovery) AdditionalPodSubscriptions(
 	*model.Proxy,
 	sets.String,

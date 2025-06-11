@@ -127,3 +127,51 @@ _internal_defaults_do_not_set:
     rollingUpdate:
       maxSurge: 1
       maxUnavailable: 0
+
+  # Configuration for Solo's L7 telemetry support in Ztunnel
+  l7Telemetry:
+    # Globally enable or disable L7. Disabling this also disables any telemetry and other sniffing logic in the streams wrapper
+    enabled: true
+    metrics:
+      # Enable or disable L7 metrics
+      enabled: true
+
+    accessLog:
+      # Enable or disable access log output
+      enabled: true
+      # If enabled, connections that are found to only have HTTP requests will log the TCP connection log at the 'debug' level
+      # (which is typically disabled, so effectively it does not log it).
+      # This is particularly useful when dealing with short-lived connections, where logging both TCP connections and HTTP requests causes
+      # excessive noise.
+      # Note: if the connection does not carry HTTP, the TCP connection event will always be logged.
+      # If disabled (default), both HTTP requests and TCP connections will be logged.
+      skipConnectionLog: false
+
+    distributedTracing:
+      # Can disable the distributed tracing
+      enabled: true
+      # OTLP endpoint to send spans to
+      otlpEndpoint: "http://opentelemetry-collector.istio-system:4317"
+
+  # List of egress policies. Example:
+  # # Allow the egress gateway to send anywhere
+  # - namespaces: [egress]
+  #   policy: Forward
+  # # Deny traffic to some IP ranges
+  # - matchCidrs:
+  #   - 1.1.1.1/32
+  #   - 2001:0db8:/32
+  #   policy: Deny
+  # # For anything else, forward to the egress gateway
+  # - gateway: waypoint.egress.svc.cluster.local
+  #   matchCidrs:
+  #   - 0.0.0.0/0
+  #   - ::/0
+  egressPolicies: []
+
+  spire:
+    # Whether to enable SPIRE agent as the workload CA for ztunnel
+    enabled: false
+    # Path on the host to the SPIRE agent admin socket.
+    # Do not change unless you know what you're doing or have a custom SPIRE setup
+    adminSockHostPath: /run/spire/agent/sockets/csi.spiffe.io/admin

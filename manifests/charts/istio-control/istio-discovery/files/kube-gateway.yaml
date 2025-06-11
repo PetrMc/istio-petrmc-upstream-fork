@@ -80,6 +80,28 @@ spec:
       {{- end }}
       {{- end }}
       serviceAccountName: {{.ServiceAccount | quote}}
+{{- if .Values.gateways.spire.workloads }}
+      initContainers:
+        - name: wait-for-spire-socket
+          image: busybox:1.36
+          volumeMounts:
+            - name: workload-socket
+              mountPath: /run/secrets/workload-spiffe-uds
+              readOnly: true
+          env:
+            - name: CHECK_FILE
+              value: /run/secrets/workload-spiffe-uds/socket
+          command:
+            - sh
+            - "-c"
+            - |-
+              echo `date -Iseconds` Waiting for: ${CHECK_FILE}
+              while [[ ! -e ${CHECK_FILE} ]] ; do
+                echo `date -Iseconds` File does not exist: ${CHECK_FILE}
+                sleep 15
+              done
+              ls -l ${CHECK_FILE}
+{{- end }}
       containers:
       - name: istio-proxy
       {{- if contains "/" (annotation .ObjectMeta `sidecar.istio.io/proxyImage` .Values.global.proxy.image) }}
@@ -263,8 +285,15 @@ spec:
         - name: istio-podinfo
           mountPath: /etc/istio/pod
       volumes:
+{{- if .Values.gateways.spire.workloads }}
+      - name: workload-socket
+        csi:
+          driver: "csi.spiffe.io"
+          readOnly: true
+{{- else }}
       - emptyDir: {}
         name: workload-socket
+{{- end }}
       - emptyDir: {}
         name: credential-socket
       {{- if eq .Values.global.caName "GkeWorkloadCertificate" }}

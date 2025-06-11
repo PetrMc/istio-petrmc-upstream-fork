@@ -170,7 +170,7 @@ func supportsL7(opt echo.CallOptions, src, dst echo.Instance) bool {
 // Assumption is ambient test suite sidecars will support HBONE
 // If the assumption is incorrect hboneClient may return invalid result
 func hboneClient(instance echo.Instance) bool {
-	return instance.Config().ZTunnelCaptured()
+	return instance.Config().ZTunnelCaptured() || instance.Config().HasSidecar()
 }
 
 func TestServices(t *testing.T) {
@@ -678,8 +678,74 @@ spec:
 			opt.Check = check.And(
 				check.OK(),
 				check.RequestHeaders(map[string]string{
-					"X-Lua-Inbound":   "hello world",
-					"X-Vhost-Inbound": "hello world",
+					"X-Lua-Inbound":   "",
+					"X-Vhost-Inbound": "",
+				}))
+			src.CallOrFail(t, opt)
+		})
+	})
+}
+
+func TestSoloWaypointEnvoyFilter(t *testing.T) {
+	framework.NewTest(t).Run(func(t framework.TestContext) {
+		runTestToServiceWaypoint(t, func(t framework.TestContext, src echo.Instance, dst echo.Instance, opt echo.CallOptions) {
+			// Need at least one waypoint proxy and HTTP
+			if opt.Scheme != scheme.HTTP {
+				return
+			}
+			t.ConfigIstio().Eval(apps.Namespace.Name(), map[string]string{
+				"Destination": "waypoint",
+			}, `apiVersion: networking.istio.io/v1alpha3
+kind: EnvoyFilter
+metadata:
+  name: inbound
+spec:
+  targetRefs:
+  - name: waypoint
+    kind: Gateway
+    group: gateway.networking.k8s.io
+  configPatches:
+  - applyTo: HTTP_FILTER
+    match:
+      context: SIDECAR_INBOUND
+      listener:
+        filterChain:
+          filter:
+            name: "envoy.filters.network.http_connection_manager"
+            subFilter:
+              name: "envoy.filters.http.router"
+    patch:
+      operation: INSERT_BEFORE
+      value:
+        name: envoy.lua
+        typed_config:
+          "@type": "type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua"
+          inlineCode: |
+            function envoy_on_request(request_handle)
+              request_handle:headers():add("x-lua-inbound", "hello world")
+            end
+  - applyTo: VIRTUAL_HOST
+    patch:
+      operation: MERGE
+      value:
+        request_headers_to_add:
+        - header:
+            key: x-vhost-inbound
+            value: "hello world"
+  - applyTo: CLUSTER
+    patch:
+      operation: MERGE
+      value:
+        http2_protocol_options: {}
+`).ApplyOrFail(t)
+			opt.Count = 5
+			opt.Timeout = time.Second * 10
+			// Test that we do NOT apply this envoyfilter, since EnvoyFilter is not implemented for waypoints
+			opt.Check = check.And(
+				check.OK(),
+				check.RequestHeaders(map[string]string{
+					"X-Lua-Inbound":   "",
+					"X-Vhost-Inbound": "",
 				}))
 			src.CallOrFail(t, opt)
 		})

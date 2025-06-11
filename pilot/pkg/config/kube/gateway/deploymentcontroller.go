@@ -143,6 +143,7 @@ var builtinClasses = getBuiltinClasses()
 func getBuiltinClasses() map[gateway.ObjectName]gateway.GatewayController {
 	res := map[gateway.ObjectName]gateway.GatewayController{
 		gateway.ObjectName(features.GatewayAPIDefaultGatewayClass): gateway.GatewayController(features.ManagedGatewayController),
+		gateway.ObjectName("istio-eastwest"):                       gateway.GatewayController(constants.EastWestGatewayController),
 	}
 
 	if features.MultiNetworkGatewayAPI {
@@ -170,6 +171,14 @@ func getClassInfos() map[gateway.GatewayController]classInfo {
 			defaultServiceType: corev1.ServiceTypeLoadBalancer,
 			addressType:        gateway.HostnameAddressType,
 			controllerLabel:    constants.ManagedGatewayControllerLabel,
+		},
+		gateway.GatewayController(constants.EastWestGatewayController): {
+			controller:         constants.EastWestGatewayController,
+			description:        "Eastwest gateway",
+			templates:          "kube-eastwest",
+			disableNameSuffix:  true,
+			defaultServiceType: corev1.ServiceTypeLoadBalancer,
+			addressType:        gateway.IPAddressType,
 		},
 	}
 

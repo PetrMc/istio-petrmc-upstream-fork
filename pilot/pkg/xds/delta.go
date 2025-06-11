@@ -473,6 +473,9 @@ func (s *DiscoveryServer) pushDeltaXds(con *Connection, w *model.WatchedResource
 	t0 := time.Now()
 
 	originalW := w
+
+	shouldIncludeLicense := w.TypeUrl == v3.AddressType && req.Full && req.IsRequest()
+
 	// If delta is set, client is requesting new resources or removing old ones. We should just generate the
 	// new resources it needs, rather than the entire set of known resources.
 	// Note: we do not need to account for unsubscribed resources as these are handled by parent removal;
@@ -514,6 +517,9 @@ func (s *DiscoveryServer) pushDeltaXds(con *Connection, w *model.WatchedResource
 		SystemVersionInfo: req.Push.PushVersion,
 		Nonce:             nonce(req.Push.PushVersion),
 		Resources:         res,
+	}
+	if shouldIncludeLicense {
+		resp.ControlPlane = LicenseControlPlane()
 	}
 	if usedDelta {
 		resp.RemovedResources = deletedRes

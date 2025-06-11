@@ -71,6 +71,21 @@ func GetLocalityLbSetting(
 					registrylabel.LabelHostname,
 				},
 			}, true
+		case model.TrafficDistributionPreferNetwork:
+			return &v1alpha3.LocalityLoadBalancerSetting{
+				Enabled: wrappers.Bool(true),
+				FailoverPriority: []string{
+					label.TopologyNetwork.Name,
+				},
+			}, true
+		case model.TrafficDistributionPreferRegion:
+			return &v1alpha3.LocalityLoadBalancerSetting{
+				Enabled: wrappers.Bool(true),
+				FailoverPriority: []string{
+					label.TopologyNetwork.Name,
+					registrylabel.LabelTopologyRegion,
+				},
+			}, true
 		case model.TrafficDistributionAny:
 			// fallthrough
 		}

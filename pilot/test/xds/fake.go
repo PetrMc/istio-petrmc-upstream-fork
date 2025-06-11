@@ -208,6 +208,7 @@ func NewFakeDiscoveryServer(t test.Failer, opts FakeOptions) *FakeDiscoveryServe
 				gvr.TLSRoute,
 				gvr.ReferenceGrant,
 				gvr.ServiceEntry,
+				gvr.KubernetesGateway,
 			},
 		})
 		stop := test.NewStop(t)

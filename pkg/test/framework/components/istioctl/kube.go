@@ -58,6 +58,14 @@ func newKube(ctx resource.Context, config Config) (Instance, error) {
 	return n, nil
 }
 
+func NewKubeManualConfig(kubeconfig string) Instance {
+	n := &kubeComponent{
+		kubeconfig: kubeconfig,
+	}
+
+	return n
+}
+
 // Invoke implements WaitForConfigs
 func (c *kubeComponent) WaitForConfig(defaultNamespace string, configs string) error {
 	cfgs, _, err := crd.ParseInputs(configs)

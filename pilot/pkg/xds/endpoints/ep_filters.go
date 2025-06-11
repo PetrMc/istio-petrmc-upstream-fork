@@ -21,6 +21,7 @@ import (
 	endpoint "github.com/envoyproxy/go-control-plane/envoy/config/endpoint/v3"
 	wrappers "google.golang.org/protobuf/types/known/wrapperspb"
 
+	"istio.io/istio/pilot/pkg/features"
 	"istio.io/istio/pilot/pkg/model"
 	"istio.io/istio/pilot/pkg/networking/util"
 	labelutil "istio.io/istio/pilot/pkg/serviceregistry/util/label"
@@ -65,6 +66,7 @@ func (b *EndpointBuilder) EndpointsByNetworkFilter(endpoints []*LocalityEndpoint
 
 		// Create a map to keep track of the gateways used and their aggregate weights.
 		gatewayWeights := make(map[model.NetworkGateway]uint32)
+		hboneGatewayEndpoint := make(map[model.NetworkGateway]*model.IstioEndpoint)
 
 		// Process all the endpoints.
 		for i, lbEp := range ep.llbEndpoints.LbEndpoints {
@@ -102,12 +104,17 @@ func (b *EndpointBuilder) EndpointsByNetworkFilter(endpoints []*LocalityEndpoint
 
 				continue
 			}
+			hboneMultiNetwork := hboneMultiNetworkEnabled(b, gateways, istioEndpoint)
 			// Cross-network traffic relies on mTLS to be enabled for SNI routing
 			// TODO BTS may allow us to work around this
-			if !isMtlsEnabled(lbEp) {
+			if !hboneMultiNetwork && !isMtlsEnabled(lbEp) {
 				continue
 			}
-
+			if hboneMultiNetwork {
+				for _, gateway := range gateways {
+					hboneGatewayEndpoint[gateway] = istioEndpoint
+				}
+			}
 			// Apply the weight for this endpoint to the network gateways.
 			splitWeightAmongGateways(weight, gateways, gatewayWeights)
 		}
@@ -124,6 +131,15 @@ func (b *EndpointBuilder) EndpointsByNetworkFilter(endpoints []*LocalityEndpoint
 				epWeight = 1
 			}
 			epAddr := util.BuildAddress(gw.Addr, gw.Port)
+
+			if features.EnableEnvoyMultiNetworkHBONE && gw.HBONEPort != 0 {
+				// hboneGatewayEndpoint lets us guess at additional information about the destination.
+				// In the case we are expecting, there is a single endpoint 1:1 with each gateway, and that represents the *service*
+				// rather than an individual workload -- so it is useful to report the metadata about that.
+				gwIstioEp, gwEp := b.buildCrossNetworkHBONEEndpoint(gw, epWeight, hboneGatewayEndpoint[gw])
+				lbEndpoints.append(gwIstioEp, gwEp)
+				continue
+			}
 
 			// Generate a fake IstioEndpoint to carry network and cluster information.
 			gwIstioEp := &model.IstioEndpoint{

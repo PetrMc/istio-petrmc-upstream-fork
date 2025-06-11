@@ -17,6 +17,7 @@ package bootstrap
 import (
 	"net/http"
 
+	"istio.io/istio/pilot/pkg/features"
 	"istio.io/istio/pilot/pkg/model"
 	"istio.io/istio/pilot/pkg/networking/apigen"
 	"istio.io/istio/pilot/pkg/networking/core"
@@ -52,6 +53,10 @@ func InitGenerators(
 	workloadGen := &xds.WorkloadGenerator{Server: s}
 	generators[v3.AddressType] = workloadGen
 	generators[v3.WorkloadType] = workloadGen
+	if features.EnablePeering {
+		// SOLO: for peering, we specifically request Services
+		generators[v3.FederatedServiceType] = &xds.FederatedServiceGenerator{Server: s}
+	}
 	generators[v3.WorkloadAuthorizationType] = &xds.WorkloadRBACGenerator{Server: s}
 
 	generators["grpc"] = &grpcgen.GrpcConfigGenerator{}

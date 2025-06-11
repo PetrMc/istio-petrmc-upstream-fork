@@ -39,6 +39,7 @@ import (
 
 	meshconfig "istio.io/api/mesh/v1alpha1"
 	"istio.io/api/security/v1beta1"
+	"istio.io/istio/pilot/pkg/controllers/autowaypoint"
 	"istio.io/istio/pilot/pkg/controllers/ipallocate"
 	"istio.io/istio/pilot/pkg/controllers/untaint"
 	kubecredentials "istio.io/istio/pilot/pkg/credentials/kube"
@@ -62,6 +63,7 @@ import (
 	"istio.io/istio/pkg/config/mesh"
 	"istio.io/istio/pkg/config/schema/collections"
 	"istio.io/istio/pkg/config/schema/gvk"
+	"istio.io/istio/pkg/config/schema/gvr"
 	"istio.io/istio/pkg/config/schema/kind"
 	"istio.io/istio/pkg/ctrlz"
 	"istio.io/istio/pkg/filewatcher"
@@ -73,12 +75,14 @@ import (
 	"istio.io/istio/pkg/kube/krt"
 	"istio.io/istio/pkg/kube/multicluster"
 	"istio.io/istio/pkg/kube/namespace"
+	"istio.io/istio/pkg/licensing"
 	"istio.io/istio/pkg/log"
 	"istio.io/istio/pkg/monitoring"
 	"istio.io/istio/pkg/network"
 	"istio.io/istio/pkg/security"
 	"istio.io/istio/pkg/spiffe"
 	"istio.io/istio/pkg/util/sets"
+	"istio.io/istio/platform/discovery/ecs"
 	"istio.io/istio/security/pkg/pki/ca"
 	"istio.io/istio/security/pkg/pki/ra"
 	caserver "istio.io/istio/security/pkg/server/ca"
@@ -340,7 +344,7 @@ func NewServer(args *PilotArgs, initFuncs ...func(*Server)) (*Server, error) {
 	}
 
 	// Create Istiod certs and setup watches.
-	if err := s.initIstiodCerts(args, string(istiodHost)); err != nil {
+	if err := s.initIstiodCerts(args, string(istiodHost), s.environment.Mesh().GetTrustDomain()); err != nil {
 		return nil, err
 	}
 
@@ -389,6 +393,10 @@ func NewServer(args *PilotArgs, initFuncs ...func(*Server)) (*Server, error) {
 	// The k8s JWT authenticator requires the multicluster registry to be initialized,
 	// so we build it later.
 	if s.kubeClient != nil {
+		if ecs.EcsCluster != "" {
+			authenticators = append(authenticators, ecs.NewEcsAuthenticator(s.environment.Watcher, s.kubeClient))
+			ecs.AddPrometheusServiceDiscovery(s.kubeClient, s.httpsMux)
+		}
 		authenticators = append(authenticators,
 			kubeauth.NewKubeJWTAuthenticator(
 				s.environment.Watcher,
@@ -590,6 +598,18 @@ func (s *Server) initKubeClient(args *PilotArgs) error {
 			return fmt.Errorf("failed creating kube client: %v", err)
 		}
 		s.kubeClient = kubelib.EnableCrdWatcher(s.kubeClient)
+
+		if state, err := licensing.InitializeLicenseState(s.kubeClient.Kube()); err != nil && state != licensing.StateUnset {
+			if licensing.LicenseFailOpen {
+				for range 10 { // Spam to make it more noticeable
+					log.Errorf("failed to initialize license state, continuing: %v", err)
+				}
+			} else {
+				return err
+			}
+		} else {
+			log.Infof("license state initialized: %v", state)
+		}
 	}
 
 	return nil
@@ -959,11 +979,11 @@ func (s *Server) initIstiodCertLoader() error {
 //
 // Will prefer local certificates, and fallback to using the CA to sign a fresh, temporary
 // certificate.
-func (s *Server) initIstiodCerts(args *PilotArgs, host string) error {
+func (s *Server) initIstiodCerts(args *PilotArgs, host string, trustDomain string) error {
 	// Skip all certificates
 	var err error
 
-	s.dnsNames = getDNSNames(args, host)
+	s.dnsNames = getDNSNames(args, host, trustDomain)
 	if hasCustomCertArgsOrWellKnown, tlsCertPath, tlsKeyPath, caCertPath := hasCustomTLSCerts(args.ServerOptions.TLSOptions); hasCustomCertArgsOrWellKnown {
 		// Use the DNS certificate provided via args or in well known location.
 		err = s.initFileCertificateWatches(TLSOptions{
@@ -1011,7 +1031,7 @@ func (s *Server) initIstiodCerts(args *PilotArgs, host string) error {
 	return err
 }
 
-func getDNSNames(args *PilotArgs, host string) []string {
+func getDNSNames(args *PilotArgs, host string, trustDomain string) []string {
 	// Append custom hostname if there is any
 	customHost := features.IstiodServiceCustomHost
 	var cHosts []string
@@ -1035,6 +1055,17 @@ func getDNSNames(args *PilotArgs, host string) []string {
 			fmt.Sprintf("%s.%s.svc", altName, args.Namespace))
 	}
 	sans.InsertAll(knownSans...)
+
+	if features.EnablePeering {
+		// For peering, we need to authenticate to the remote Istiod.
+		// JWT requires them having access to our own Kubernetes cluster, so that is out.
+		// For mTLS, servers currently expect to get a trusted mTLS cert with a SPIFFE ID.
+		// Rather than generating a new certificate entirely, we just add an appropriate SPIFFE SAN to our serving cert
+		// and use that for clients.
+		// This *may* still be problematic in some CA setups where the Istiod's do not trust each other.
+		sans.Insert(spiffe.MustGenSpiffeURIForTrustDomain(trustDomain, args.Namespace, PodServiceAccount))
+	}
+
 	dnsNames := sets.SortedList(sans)
 	log.Infof("Discover server subject alt names: %v", dnsNames)
 	return dnsNames
@@ -1142,9 +1173,14 @@ func (s *Server) initControllers(args *PilotArgs) error {
 		s.initNodeUntaintController(args)
 	}
 
+	// SOLO: Auto waypoint controller
+	s.initAutoWaypointController(args)
+	// END SOLO
+
 	if features.EnableIPAutoallocate {
 		s.initIPAutoallocateController(args)
 	}
+	s.initPlatformIntegrations(args)
 
 	if err := s.initConfigController(args); err != nil {
 		return fmt.Errorf("error initializing config controller: %v", err)
@@ -1401,3 +1437,36 @@ func (s *Server) initReadinessProbes() {
 		s.addReadinessProbe(name, probe)
 	}
 }
+
+// SOLO: Auto waypoint controller
+func (s *Server) initAutoWaypointController(args *PilotArgs) {
+	if s.kubeClient == nil {
+		return
+	}
+	if !features.EnableSoloAutoWaypoint {
+		return
+	}
+	s.addStartFunc("auto waypoint controller", func(stop <-chan struct{}) error {
+		go leaderelection.
+			NewLeaderElection(args.Namespace, args.PodName, leaderelection.AutoWaypointController, args.Revision, s.kubeClient).
+			AddRunFunction(func(leaderStop <-chan struct{}) {
+				// We can only run the controller if the Gateway API gateways CRD is available
+				if s.kubeClient.CrdWatcher().WaitForCRD(gvr.KubernetesGateway, leaderStop) {
+					controller := autowaypoint.NewAutoWaypoint(s.kubeClient, s.krtDebugger)
+					// Start informers again. This fixes the case where informers for namespace do not start,
+					// as we create them only after acquiring the leader lock
+					// Note: stop here should be the overall pilot stop, NOT the leader election stop. We are
+					// basically lazy loading the informer, if we stop it when we lose the lock we will never
+					// recreate it again.
+					s.kubeClient.RunAndWait(stop)
+					controller.Run(leaderStop)
+				} else {
+					log.Warn("Kubernetes Gateway API gateways CRD not found and Solo auto waypoint controller received stop signal")
+				}
+			}).
+			Run(stop)
+		return nil
+	})
+}
+
+// END SOLO

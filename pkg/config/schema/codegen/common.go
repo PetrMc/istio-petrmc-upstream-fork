@@ -44,6 +44,9 @@ func Run() error {
 		{
 			Resource: &ast.Resource{Identifier: "DNSName", Kind: "DNSName", Version: "internal", Group: "internal"},
 		},
+		{
+			Resource: &ast.Resource{Identifier: "FederatedService", Kind: "FederatedService", Version: "internal", Group: "internal"},
+		},
 	}, inp.Entries...)
 
 	sort.Slice(kindEntries, func(i, j int) bool {

@@ -66,6 +66,8 @@ type Builder interface {
 	// WithClusters will cause subsequent With or WithConfig calls to be applied to the given clusters.
 	WithClusters(...cluster.Cluster) Builder
 
+	DeployServicesOnlyToCluster() Builder
+
 	// Build and initialize all Echo Instances. Upon returning, the Instance pointers
 	// are assigned and all Instances are ready to communicate with each other.
 	Build() (echo.Instances, error)
@@ -102,6 +104,8 @@ type builder struct {
 	// clusters contains the current set of clusters that subsequent With calls will be applied to,
 	// if the Config passed to With does not explicitly choose a cluster.
 	clusters cluster.Clusters
+
+	respectWithClustersForServices bool
 
 	// configs contains configurations to be built, expanded per-cluster and grouped by cluster Kind.
 	configs []echo.Config
@@ -192,6 +196,13 @@ func (b *builder) With(i *echo.Instance, cfg echo.Config) Builder {
 func (b *builder) WithClusters(clusters ...cluster.Cluster) Builder {
 	next := b
 	next.clusters = clusters
+	return next
+}
+
+// DeployServicesOnlyToCluster will cause Services to only be deployed to the clusters specified in WithClusters.
+func (b *builder) DeployServicesOnlyToCluster() Builder {
+	next := b
+	next.respectWithClustersForServices = true
 	return next
 }
 
@@ -325,7 +336,11 @@ func (b *builder) deployServices() (err error) {
 	}
 
 	// Deploy the services to all clusters.
-	cfg := b.ctx.ConfigKube().New()
+	ck := b.ctx.ConfigKube()
+	if b.respectWithClustersForServices {
+		ck = b.ctx.ConfigKube(b.clusters...)
+	}
+	cfg := ck.New()
 	for svcNs, svcYaml := range services {
 		ns := strings.Split(svcNs, ".")[1]
 		cfg.YAML(ns, svcYaml)

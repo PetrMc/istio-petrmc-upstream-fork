@@ -260,6 +260,11 @@ message DefaultResourcesConfig {
   ResourcesRequestsConfig requests = 1;
 }
 
+message SpireConfig {
+  // Controls whether SPIRE is used for workload identity
+  google.protobuf.BoolValue workloads = 1;
+}
+
 // Configuration for an egress gateway.
 message EgressGatewayConfig {
   // Controls whether auto scaling with a HorizontalPodAutoscaler is enabled.
@@ -398,6 +403,9 @@ message GatewaysConfig {
   google.protobuf.Value securityContext = 10;
 
   google.protobuf.Value seccompProfile = 12;
+
+  // Configuration for how/where SPIRE should be used in gateways
+  SpireConfig spire = 14;
 }
 
 // Global Configuration for Istio components.
@@ -954,12 +962,12 @@ message PilotConfig {
   // Configuration for the istio-discovery chart when istiod is running in a remote cluster (e.g. "remote control plane").
   IstiodRemoteConfig istiodRemote = 61;
 
-  // Configuration for the istio-discovery chart 
+  // Configuration for the istio-discovery chart
   repeated google.protobuf.Struct envVarFrom = 62;
 }
 
 message PilotTaintControllerConfig {
-  // Enable the untaint controller for new nodes. This aims to solve a race for CNI installation on 
+  // Enable the untaint controller for new nodes. This aims to solve a race for CNI installation on
   // new nodes. For this to work, the newly added nodes need to have the istio CNI taint as they are
   // added to the cluster. This is usually done by configuring the cluster infra provider.
   bool enabled = 1;
@@ -1410,6 +1418,12 @@ message Values {
 
   // Configuration for Gateway Classes
   google.protobuf.Value gatewayClasses = 45;
+
+  // SOLO: platform configuration
+  google.protobuf.Value platforms = 85;
+
+  // SOLO: licensing configuration
+  google.protobuf.Value license = 86;
 }
 
 // ExperimentalConfig is a placeholder for experimental installation features.

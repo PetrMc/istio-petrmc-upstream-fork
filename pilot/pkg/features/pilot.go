@@ -289,6 +289,9 @@ var (
 		"If set to true, Istio will watch for ca-crl.pem file in /etc/cacerts directory "+
 			"and will distribute crl data in each namespace in the cluster for proxies to consume. ",
 	).Get()
+
+	EnableSoloAutoWaypoint = env.Register("PILOT_SOLO_ENABLE_AUTO_WAYPOINT", true,
+		"If true, pilot will automatically create a waypoint for namespaces that have the `istio.io/use-waypoint` label set to `auto`.").Get()
 )
 
 // UnsafeFeaturesEnabled returns true if any unsafe features are enabled.

@@ -37,7 +37,10 @@ const (
 	BootstrapType             = APITypePrefix + "envoy.config.bootstrap.v3.Bootstrap"
 	AddressType               = APITypePrefix + "istio.workload.Address"
 	WorkloadType              = APITypePrefix + "istio.workload.Workload"
+	WorkloadServiceType       = APITypePrefix + "istio.workload.Service"
 	WorkloadAuthorizationType = APITypePrefix + "istio.security.Authorization"
+
+	FederatedServiceType = APITypePrefix + "istio.workload.FederatedService"
 )
 
 // GetShortType returns an abbreviated form of a type, useful for logging or human friendly messages
@@ -63,6 +66,8 @@ func GetShortType(typeURL string) string {
 		return "WDS"
 	case WorkloadAuthorizationType:
 		return "WADS"
+	case FederatedServiceType:
+		return "FSDS"
 	default:
 		return typeURL
 	}
@@ -93,6 +98,8 @@ func GetMetricType(typeURL string) string {
 		return "wds"
 	case WorkloadAuthorizationType:
 		return "wads"
+	case FederatedServiceType:
+		return "fsds"
 	default:
 		return typeURL
 	}
@@ -122,6 +129,8 @@ func GetResourceType(shortType string) string {
 		return AddressType
 	case "WADS":
 		return WorkloadAuthorizationType
+	case "FSDS":
+		return FederatedServiceType
 	default:
 		return shortType
 	}

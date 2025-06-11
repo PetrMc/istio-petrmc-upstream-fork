@@ -49,6 +49,11 @@ rules:
   - apiGroups: ["networking.istio.io"]
     verbs: [ "get", "watch", "list", "update", "patch", "create", "delete" ]
     resources: [ "workloadentries" ]
+{{- if or .Values.platforms.ecs.cluster .Values.platforms.peering.enabled }}
+  - apiGroups: ["networking.istio.io"]
+    verbs: [ "get", "watch", "list", "update", "patch", "create", "delete" ]
+    resources: [ "serviceentries" ]
+{{- end }}
   - apiGroups: ["networking.istio.io"]
     verbs: [ "get", "watch", "list", "update", "patch", "create", "delete" ]
     resources: [ "workloadentries/status",  "serviceentries/status" ]
@@ -158,7 +163,7 @@ rules:
     - udproutes/status
     verbs: ["update", "patch"]
   - apiGroups: ["gateway.networking.k8s.io"]
-    resources: ["gatewayclasses"]
+    resources: ["gatewayclasses", "gateways"]
     verbs: ["create", "update", "patch", "delete"]
 
   # Needed for multicluster secret reading, possibly ingress certs in the future

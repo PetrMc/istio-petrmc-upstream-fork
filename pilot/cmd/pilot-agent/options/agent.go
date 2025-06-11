@@ -69,6 +69,8 @@ func NewAgentOptions(proxy *ProxyArgs, cfg *meshconfig.ProxyConfig, sds istioage
 		SDSFactory:                  sds,
 		WorkloadIdentitySocketFile:  workloadIdentitySocketFile,
 		EnvoySkipDeprecatedLogs:     envoySkipDeprecatedLogsEnv,
+		ProxyKind:                   proxyKind,
+		WorkloadIdentitySocketPath:  workloadIdentitySocketPath,
 	}
 	if enableWDSEnvWasSet {
 		o.MetadataDiscovery = ptr.Of(enableWDSEnv)

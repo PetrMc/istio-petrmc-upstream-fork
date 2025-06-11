@@ -32,6 +32,11 @@ import (
 // Similar with ISTIO_META_, which is used to customize the node metadata - this customizes extra CA header.
 const caHeaderPrefix = "CA_HEADER_"
 
+// credFetcherNone is used when fetching credentials from a JWT token
+// or another credential fetcher plugin (e.g. GCE) is not required.
+// This is used when using SPIRE to provision the workload certificate.
+const credFetcherNone = "none"
+
 func NewSecurityOptions(proxyConfig *meshconfig.ProxyConfig, stsPort int, tokenManagerPlugin string) (*security.Options, error) {
 	o := &security.Options{
 		CAEndpoint:                           caEndpointEnv,
@@ -60,6 +65,8 @@ func NewSecurityOptions(proxyConfig *meshconfig.ProxyConfig, stsPort int, tokenM
 		KeyFilePath:                          security.DefaultKeyFilePath,
 		RootCertFilePath:                     security.DefaultRootCertFilePath,
 		CAHeaders:                            map[string]string{},
+
+		JWTFilePath: jwtPath,
 	}
 
 	o, err := SetupSecurityOptions(proxyConfig, o, jwtPolicy.Get(),
@@ -80,7 +87,7 @@ func SetupSecurityOptions(proxyConfig *meshconfig.ProxyConfig, secOpt *security.
 	switch jwtPolicy {
 	case jwt.PolicyThirdParty:
 		log.Info("JWT policy is third-party-jwt")
-		jwtPath = constants.ThirdPartyJwtPath
+		jwtPath = secOpt.JWTFilePath
 	case jwt.PolicyFirstParty:
 		log.Warnf("Using deprecated JWT policy 'first-party-jwt'; treating as 'third-party-jwt'")
 		jwtPath = constants.ThirdPartyJwtPath
@@ -97,11 +104,16 @@ func SetupSecurityOptions(proxyConfig *meshconfig.ProxyConfig, secOpt *security.
 	}
 
 	o.CredIdentityProvider = credIdentityProvider
-	credFetcher, err := credentialfetcher.NewCredFetcher(credFetcherTypeEnv, o.TrustDomain, jwtPath, o.CredIdentityProvider)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create credential fetcher: %v", err)
+
+	var credFetcher security.CredFetcher
+	var err error
+	if credFetcherTypeEnv != credFetcherNone {
+		credFetcher, err = credentialfetcher.NewCredFetcher(credFetcherTypeEnv, o.TrustDomain, jwtPath, o.CredIdentityProvider)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create credential fetcher: %v", err)
+		}
+		log.Infof("using credential fetcher of %s type in %s trust domain", credFetcherTypeEnv, o.TrustDomain)
 	}
-	log.Infof("using credential fetcher of %s type in %s trust domain", credFetcherTypeEnv, o.TrustDomain)
 	o.CredFetcher = credFetcher
 
 	if o.CAProviderName == security.GkeWorkloadCertificateProvider {

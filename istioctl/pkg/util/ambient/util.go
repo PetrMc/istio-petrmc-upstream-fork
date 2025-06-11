@@ -39,7 +39,10 @@ func IsZtunnelPod(client kube.CLIClient, podName, podNamespace string) bool {
 	if v, ok := pod.Labels["app"]; ok {
 		return v == "ztunnel"
 	}
-	return isZtunnel
+	if pod.Labels[label.GatewayManaged.Name] == "istio.io-eastwest-controller" {
+		return true
+	}
+	return false
 }
 
 // InAmbient returns true if a resource is in ambient data plane mode.

@@ -31,6 +31,8 @@ images:
   files:
   - tools/packaging/common/envoy_bootstrap.json
   - ${TARGET_OUT_LINUX}/${RELEASE_MODE}/${SIDECAR}
+  - ${TARGET_OUT_LINUX}/release/solo-crs
+  - ${TARGET_OUT_LINUX}/release/libsaxon-solo.so
   targets:
   - ${TARGET_OUT_LINUX}/pilot-agent
 - name: pilot

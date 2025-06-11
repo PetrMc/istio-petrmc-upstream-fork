@@ -51,6 +51,7 @@ tools/istioctl.bash
 vendor
 # Contains the built artifacts
 out/
+out_spire/
 etc/
 var/
 # Go compiled tests

@@ -16,6 +16,7 @@ package ambient
 
 import (
 	"net/netip"
+	"sort"
 	"testing"
 
 	v1 "k8s.io/api/core/v1"
@@ -42,6 +43,7 @@ import (
 	"istio.io/istio/pkg/test/util/assert"
 	"istio.io/istio/pkg/workloadapi"
 	"istio.io/istio/pkg/workloadapi/security"
+	"istio.io/istio/platform/discovery/peering"
 )
 
 func TestPodWorkloads(t *testing.T) {
@@ -1275,6 +1277,183 @@ func TestWorkloadEntryWorkloads(t *testing.T) {
 			},
 		},
 		{
+			name: "cross network we peered",
+			inputs: []any{
+				model.ServiceInfo{
+					Service: peeredServiceResult,
+					PortNames: map[int32]model.ServicePortName{
+						80: {PortName: "http"},
+					},
+					LabelSelector: model.LabelSelector{
+						Labels: map[string]string{"app": "echo"},
+					},
+					Source: model.TypedObject{Kind: kind.ServiceEntry},
+				},
+				// Original Kubernetes service
+				model.ServiceInfo{
+					Service: &workloadapi.Service{
+						Name: "echo",
+						// Note: this is post-translation, so it will not be the peering namespace
+						Namespace: "default",
+						Addresses: []*workloadapi.NetworkAddress{
+							{
+								Network: testNW,
+								Address: netip.AddrFrom4([4]byte{1, 2, 3, 4}).AsSlice(),
+							},
+						},
+						Hostname: "echo.default.svc.cluster.local",
+						Ports: []*workloadapi.Port{
+							{
+								ServicePort: 80,
+								TargetPort:  80,
+							},
+						},
+					},
+					PortNames: map[int32]model.ServicePortName{
+						80: {PortName: "http"},
+					},
+					LabelSelector: model.LabelSelector{
+						Labels: map[string]string{"app": "echo"},
+					},
+					Source: model.TypedObject{Kind: kind.Service},
+				},
+			},
+			we: &networkingclient.WorkloadEntry{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "autogen.beta.default.echo",
+					Namespace: peering.PeeringNamespace,
+					Labels: map[string]string{
+						"app":                               "echo",
+						peering.ParentServiceLabel:          "echo",
+						peering.ParentServiceNamespaceLabel: "default",
+						peering.SourceClusterLabel:          "c1",
+					},
+				},
+				Spec: networking.WorkloadEntry{
+					Network: "remote-network-hostname",
+				},
+			},
+			result: &workloadapi.Workload{
+				Uid:               "cluster0/networking.istio.io/WorkloadEntry/default/autogen.beta.default.echo",
+				Name:              "autogen.beta.default.echo",
+				Namespace:         "default",
+				Network:           "remote-network-hostname",
+				CanonicalName:     "echo",
+				CanonicalRevision: "latest",
+				WorkloadType:      workloadapi.WorkloadType_POD,
+				WorkloadName:      "autogen.beta.default.echo",
+				Status:            workloadapi.WorkloadStatus_HEALTHY,
+				ClusterId:         "c1",
+				Services: map[string]*workloadapi.PortList{
+					"default/echo.default" + peering.DomainSuffix: {
+						Ports: []*workloadapi.Port{{
+							ServicePort: 80,
+							TargetPort:  80,
+						}},
+					},
+				},
+				NetworkGateway: &workloadapi.GatewayAddress{
+					Destination: &workloadapi.GatewayAddress_Hostname{Hostname: &workloadapi.NamespacedHostname{
+						Hostname:  "networkgateway.example.com",
+						Namespace: "ns-gtw",
+					}},
+					HboneMtlsPort: 15008,
+				},
+			},
+		},
+		{
+			name: "cross network we peered global-only",
+			inputs: []any{
+				model.ServiceInfo{
+					Service: peeredServiceResult,
+					PortNames: map[int32]model.ServicePortName{
+						80: {PortName: "http"},
+					},
+					LabelSelector: model.LabelSelector{
+						Labels: map[string]string{"app": "echo"},
+					},
+					Source: model.TypedObject{Kind: kind.ServiceEntry},
+				},
+				// Original Kubernetes service
+				model.ServiceInfo{
+					Service: &workloadapi.Service{
+						Name: "echo",
+						// Note: this is post-translation, so it will not be the peering namespace
+						Namespace: "default",
+						Addresses: []*workloadapi.NetworkAddress{
+							{
+								Network: testNW,
+								Address: netip.AddrFrom4([4]byte{1, 2, 3, 4}).AsSlice(),
+							},
+						},
+						Hostname: "echo.default.svc.domain.suffix",
+						Ports: []*workloadapi.Port{
+							{
+								ServicePort: 80,
+								TargetPort:  80,
+							},
+						},
+					},
+					PortNames: map[int32]model.ServicePortName{
+						80: {PortName: "http"},
+					},
+					LabelSelector: model.LabelSelector{
+						Labels: map[string]string{"app": "echo"},
+					},
+					Source: model.TypedObject{Kind: kind.Service},
+				},
+			},
+			we: &networkingclient.WorkloadEntry{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "autogen.beta.default.echo",
+					Namespace: peering.PeeringNamespace,
+					Labels: map[string]string{
+						"app":                               "echo",
+						peering.ServiceScopeLabel:           peering.ServiceScopeGlobalOnly,
+						peering.ParentServiceLabel:          "echo",
+						peering.ParentServiceNamespaceLabel: "default",
+						peering.SourceClusterLabel:          "c1",
+					},
+				},
+				Spec: networking.WorkloadEntry{
+					Network: "remote-network-hostname",
+				},
+			},
+			result: &workloadapi.Workload{
+				Uid:               "cluster0/networking.istio.io/WorkloadEntry/default/autogen.beta.default.echo",
+				Name:              "autogen.beta.default.echo",
+				Namespace:         "default",
+				Network:           "remote-network-hostname",
+				CanonicalName:     "echo",
+				CanonicalRevision: "latest",
+				WorkloadType:      workloadapi.WorkloadType_POD,
+				WorkloadName:      "autogen.beta.default.echo",
+				Status:            workloadapi.WorkloadStatus_HEALTHY,
+				ClusterId:         "c1",
+				Services: map[string]*workloadapi.PortList{
+					"default/echo.default" + peering.DomainSuffix: {
+						Ports: []*workloadapi.Port{{
+							ServicePort: 80,
+							TargetPort:  80,
+						}},
+					},
+					"default/echo.default.svc.domain.suffix": {
+						Ports: []*workloadapi.Port{{
+							ServicePort: 80,
+							TargetPort:  80,
+						}},
+					},
+				},
+				NetworkGateway: &workloadapi.GatewayAddress{
+					Destination: &workloadapi.GatewayAddress_Hostname{Hostname: &workloadapi.NamespacedHostname{
+						Hostname:  "networkgateway.example.com",
+						Namespace: "ns-gtw",
+					}},
+					HboneMtlsPort: 15008,
+				},
+			},
+		},
+		{
 			name: "waypoint binding",
 			inputs: []any{
 				Waypoint{
@@ -1766,6 +1945,34 @@ func newAmbientUnitTest(t test.Failer) *index {
 				},
 			},
 		},
+		&v1beta1.Gateway{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "local-network-ip",
+				Namespace: "ns-gtw",
+				Annotations: map[string]string{
+					annotation.GatewayServiceAccount.Name: "sa-gtw",
+				},
+				Labels: map[string]string{
+					label.TopologyNetwork.Name: testC,
+				},
+			},
+			Spec: v1beta1.GatewaySpec{
+				GatewayClassName: "istio-remote",
+				Addresses: []v1beta1.GatewaySpecAddress{
+					{
+						Type:  ptr.Of(v1beta1.IPAddressType),
+						Value: "1.1.1.1",
+					},
+				},
+				Listeners: []v1beta1.Listener{
+					{
+						Name:     "cross-network",
+						Port:     15008,
+						Protocol: "HBONE",
+					},
+				},
+			},
+		},
 	})
 	networks := buildNetworkCollections(
 		krttest.GetMockCollection[*v1.Namespace](mock),
@@ -1785,6 +1992,14 @@ func newAmbientUnitTest(t test.Failer) *index {
 		},
 	}
 	kube.WaitForCacheSync("test", test.NewStop(t), idx.networks.HasSynced)
+	var builtNetworks []string
+	for _, n := range networks.NetworkGateways.List() {
+		builtNetworks = append(builtNetworks, n.Network.String())
+	}
+	sort.SliceStable(builtNetworks, func(i, j int) bool {
+		return builtNetworks[i] < builtNetworks[j]
+	})
+	assert.Equal(t, builtNetworks, []string{"remote-network", "remote-network-hostname"})
 	return idx
 }
 

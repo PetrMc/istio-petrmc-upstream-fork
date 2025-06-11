@@ -340,7 +340,8 @@ func (b *EndpointBuilder) BuildClusterLoadAssignment(endpointIndex *model.Endpoi
 		return buildEmptyClusterLoadAssignment(b.clusterName)
 	}
 
-	if features.EnableIngressWaypointRouting {
+	if (features.EnableIngressWaypointRouting && b.nodeType == model.Router) ||
+		(features.EnableSidecarWaypointInterop && b.nodeType == model.SidecarProxy) {
 		if waypointEps, f := b.findServiceWaypoint(endpointIndex); f {
 			// endpoints are from waypoint service but the envoy endpoint is different envoy cluster
 			locLbEps := b.generate(waypointEps, true)
@@ -673,6 +674,7 @@ func buildEnvoyLbEndpoint(b *EndpointBuilder, e *model.IstioEndpoint, mtlsEnable
 		meta.TLSMode = ""
 	}
 	util.AppendLbEndpointMetadata(meta, ep.Metadata)
+	maybeAddMultinetworkMetadata(b, ep)
 
 	tunnel := supportTunnel(b, e)
 	// Only send HBONE if its necessary. If they support legacy mTLS and do not explicitly PreferHBONE, we will use legacy mTLS.
@@ -702,7 +704,15 @@ func buildEnvoyLbEndpoint(b *EndpointBuilder, e *model.IstioEndpoint, mtlsEnable
 			// Get the VIP of the service we are targeting (not the waypoint service)
 			serviceVIPs := b.service.ClusterVIPs.GetAddressesFor(e.Locality.ClusterID)
 			if len(serviceVIPs) == 0 {
-				serviceVIPs = []string{b.service.DefaultAddress}
+				if b.service.DefaultAddress != constants.UnspecifiedIP {
+					serviceVIPs = []string{b.service.DefaultAddress}
+				} else if b.service.AutoAllocatedIPv4Address != "" {
+					serviceVIPs = []string{b.service.AutoAllocatedIPv4Address}
+				} else {
+					// This is broken; we should try to find a way to support this but do not currently.
+					log.Warnf("service %v doesn't have any VIPs, cannot send requests to it", b.clusterName)
+					serviceVIPs = []string{b.service.DefaultAddress}
+				}
 			}
 			// // If there are multiple VIPs, we just use one. Hostname would be ideal here but isn't supported.
 			address = serviceVIPs[0]
@@ -863,11 +873,6 @@ func getSubSetLabels(dr *v1alpha3.DestinationRule, subsetName string) labels.Ins
 // For services that have a waypoint, we want to send to the waypoints rather than the service endpoints.
 // Lookup the service, find its waypoint, then find the waypoint's endpoints.
 func (b *EndpointBuilder) findServiceWaypoint(endpointIndex *model.EndpointIndex) ([]*model.IstioEndpoint, bool) {
-	// Currently we only support routers (gateways)
-	if b.nodeType != model.Router && !isEastWestGateway(b.proxy) {
-		// Currently only ingress and e/w gateway will call waypoints
-		return nil, false
-	}
 	if !b.service.HasAddressOrAssigned(b.proxy.Metadata.ClusterID) {
 		// No VIP, so skip this. Currently, waypoints can only accept VIP traffic
 		return nil, false
@@ -883,7 +888,7 @@ func (b *EndpointBuilder) findServiceWaypoint(endpointIndex *model.EndpointIndex
 	}
 	svc := svcs[0]
 	// They need to explicitly opt-in on the service to send from ingress -> waypoint
-	if !svc.IngressUseWaypoint && !isEastWestGateway(b.proxy) {
+	if b.nodeType == model.Router && !svc.IngressUseWaypoint && !isEastWestGateway(b.proxy) {
 		return nil, false
 	}
 	waypointClusterName := model.BuildSubsetKey(

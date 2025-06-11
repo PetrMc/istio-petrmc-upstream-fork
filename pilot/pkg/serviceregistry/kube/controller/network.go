@@ -317,14 +317,41 @@ func (n *networkManager) getGatewayDetails(svc *model.Service) []model.NetworkGa
 	// label based gateways
 	// TODO label based gateways could support being the gateway for multiple networks
 	if nw := svc.Attributes.Labels[label.TopologyNetwork.Name]; nw != "" {
+		port := DefaultNetworkGatewayPort
 		if gwPortStr := svc.Attributes.Labels[label.NetworkingGatewayPort.Name]; gwPortStr != "" {
 			if gwPort, err := strconv.Atoi(gwPortStr); err == nil {
-				return []model.NetworkGateway{{Port: uint32(gwPort), Network: network.ID(nw)}}
+				port = gwPort
+			} else {
+				log.Warnf("could not parse %q for %s on %s/%s; defaulting to %d",
+					gwPortStr, label.NetworkingGatewayPort.Name, svc.Attributes.Namespace, svc.Attributes.Name, DefaultNetworkGatewayPort)
 			}
-			log.Warnf("could not parse %q for %s on %s/%s; defaulting to %d",
-				gwPortStr, label.NetworkingGatewayPort.Name, svc.Attributes.Namespace, svc.Attributes.Name, DefaultNetworkGatewayPort)
 		}
-		return []model.NetworkGateway{{Port: DefaultNetworkGatewayPort, Network: network.ID(nw)}}
+		hbonePort := 0
+		sa := types.NamespacedName{}
+		trustDomain := ""
+		if gwPortStr := svc.Attributes.Labels["networking.istio.io/hboneGatewayPort"]; gwPortStr != "" {
+			if gwPort, err := strconv.Atoi(gwPortStr); err == nil {
+				hbonePort = gwPort
+			} else {
+				log.Warnf("could not parse %q for %s on %s/%s; defaulting to %d",
+					gwPortStr, "networking.istio.io/hboneGatewayPort", svc.Attributes.Namespace, svc.Attributes.Name, 0)
+			}
+			sa = types.NamespacedName{
+				Namespace: svc.Attributes.Namespace,
+				// TODO: this should really be a annotation...
+				Name: model.GetOrDefault(svc.Attributes.Labels["gateway.istio.io/service-account"], svc.Attributes.Name),
+			}
+
+			// TODO: this is wrong, should be annotations!!!
+			trustDomain = svc.Attributes.Labels["gateway.istio.io/trust-domain"]
+		}
+		return []model.NetworkGateway{{
+			Network:        network.ID(nw),
+			Port:           uint32(port),
+			HBONEPort:      uint32(hbonePort),
+			TrustDomain:    trustDomain,
+			ServiceAccount: sa,
+		}}
 	}
 
 	// meshNetworks registryServiceName+fromRegistry
@@ -340,7 +367,13 @@ func (n *networkManager) getGatewayDetails(svc *model.Service) []model.NetworkGa
 // discovering duplicates from the generated Service is not a huge concern as we de-duplicate in NetworkGateways
 // which returns a set, although it's not totally efficient.
 func (n *networkManager) handleGatewayResource(_ *v1beta1.Gateway, gw *v1beta1.Gateway, event model.Event) error {
-	if nw := gw.GetLabels()[label.TopologyNetwork.Name]; nw == "" {
+	nw := gw.GetLabels()[label.TopologyNetwork.Name]
+	if nw == "" {
+		return nil
+	}
+
+	// skip the gateway if it is pointing to the cluster network
+	if nw == n.clusterID.String() {
 		return nil
 	}
 
@@ -373,8 +406,9 @@ func (n *networkManager) handleGatewayResource(_ *v1beta1.Gateway, gw *v1beta1.G
 	}
 
 	base := model.NetworkGateway{
-		Network: network.ID(gw.GetLabels()[label.TopologyNetwork.Name]),
-		Cluster: n.clusterID,
+		Network:     network.ID(gw.GetLabels()[label.TopologyNetwork.Name]),
+		Cluster:     n.clusterID,
+		TrustDomain: gw.Annotations["gateway.istio.io/trust-domain"],
 		ServiceAccount: types.NamespacedName{
 			Namespace: gw.Namespace,
 			Name:      kube.GatewaySA(gw),

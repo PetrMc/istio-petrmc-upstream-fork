@@ -249,7 +249,7 @@ func setupXdsProxyWithDownstreamOptions(t *testing.T, opts []grpc.ServerOption) 
 	t.Cleanup(func() {
 		ia.Close()
 	})
-	proxy, err := initXdsProxy(ia)
+	proxy, err := initXdsProxy(context.Background(), ia)
 	if err != nil {
 		t.Fatalf("Failed to initialize xds proxy %v", err)
 	}

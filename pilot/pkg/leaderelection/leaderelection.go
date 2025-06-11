@@ -58,6 +58,8 @@ const (
 	GatewayDeploymentController = "istio-gateway-deployment"
 	NodeUntaintController       = "istio-node-untaint"
 	IPAutoallocateController    = "istio-ip-autoallocate"
+	PeeringController           = "solo-peering"
+	AutoWaypointController      = "solo-auto-waypoint"
 )
 
 // Leader election key prefix for remote istiod managed clusters

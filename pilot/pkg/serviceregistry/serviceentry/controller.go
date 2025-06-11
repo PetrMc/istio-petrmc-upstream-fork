@@ -46,6 +46,7 @@ import (
 	"istio.io/istio/pkg/slices"
 	"istio.io/istio/pkg/util/protomarshal"
 	"istio.io/istio/pkg/util/sets"
+	"istio.io/istio/platform/discovery/peering"
 )
 
 var (
@@ -152,6 +153,7 @@ func NewController(configController model.ConfigStoreController, xdsUpdater mode
 	meshConfig mesh.Watcher,
 	options ...Option,
 ) *Controller {
+	configController = WrapControllerWithPeeringTranslation(configController)
 	s := newController(configController, xdsUpdater, meshConfig, options...)
 	if configController != nil {
 		configController.RegisterEventHandler(gvk.ServiceEntry, s.serviceEntryHandler)
@@ -249,9 +251,16 @@ func (s *Controller) workloadEntryHandler(old, curr config.Config, event model.E
 	}
 
 	wi := s.convertWorkloadEntryToWorkloadInstance(curr, s.Cluster())
+	peered := peering.WasPeerObject(&curr)
+	shouldShare := !peered || (peered && curr.Labels[peering.ServiceScopeLabel] == peering.ServiceScopeGlobalOnly)
 	if wi != nil && !wi.DNSServiceEntryOnly {
+		handlerEvent := event
+		if peered && !shouldShare {
+			handlerEvent = model.EventDelete
+		}
+		// Ignore peering objects. We do not support services selecting these objects and there is a large performance impact.
 		// fire off the k8s handlers
-		s.NotifyWorkloadInstanceHandlers(wi, event)
+		s.NotifyWorkloadInstanceHandlers(wi, handlerEvent)
 	}
 
 	allInstances := []*model.ServiceInstance{}
@@ -995,6 +1004,9 @@ func makeConfigKey(svc *model.Service) model.ConfigKey {
 // isHealthy checks that the provided WorkloadEntry is healthy. If health checks are not enabled,
 // it is assumed to always be healthy
 func isHealthy(cfg config.Config) bool {
+	if cfg.Annotations[peering.ServiceEndpointStatus] == peering.ServiceEndpointStatusUnhealthy {
+		return false
+	}
 	if parseHealthAnnotation(cfg.Annotations[status.WorkloadEntryHealthCheckAnnotation]) {
 		// We default to false if the condition is not set. This ensures newly created WorkloadEntries
 		// are treated as unhealthy until we prove they are healthy by probe success.

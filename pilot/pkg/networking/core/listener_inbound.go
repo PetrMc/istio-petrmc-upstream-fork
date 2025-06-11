@@ -147,7 +147,7 @@ func (lb *ListenerBuilder) buildInboundHBONEListeners() []*listener.Listener {
 			ClusterSpecifier: &route.RouteAction_Cluster{Cluster: MainInternalName},
 		}},
 	}}
-	terminate := lb.buildConnectTerminateListener(routes)
+	terminate := lb.buildConnectTerminateListener(routes, nil)
 	// Now we have top level listener... but we must have an internal listener for each standard filter chain
 	// 1 listener per port; that listener will do protocol detection.
 	l := &listener.Listener{

@@ -34,7 +34,9 @@ _internal_defaults_do_not_set:
   # Additional container arguments
   extraContainerArgs: []
 
-  env: {}
+  env:
+    # Enable waypoint interop by default in Solo builds
+    ENABLE_WAYPOINT_INTEROP: "true"
 
   envVarFrom: []
 
@@ -542,6 +544,9 @@ _internal_defaults_do_not_set:
     # Set to `type: RuntimeDefault` to use the default profile for templated gateways, if your container runtime supports it
     seccompProfile: {}
 
+    spire:
+      workloads: false
+
   # gatewayClasses allows customizing the configuration of the default deployment of Gateways per GatewayClass.
   # For example:
   # gatewayClasses:
@@ -551,3 +556,12 @@ _internal_defaults_do_not_set:
   #         type: ClusterIP
   # Per-Gateway configuration can also be set in the `Gateway.spec.infrastructure.parametersRef` field.
   gatewayClasses: {}
+
+  # SOLO
+  platforms:
+    ecs:
+      # If set, to the name of an ECS cluster, ECS service discovery will be enabled.
+      cluster: ""
+    peering:
+      # If set, Istiod will automatically peer with discovered Gateways for service discovery.
+      enabled: false

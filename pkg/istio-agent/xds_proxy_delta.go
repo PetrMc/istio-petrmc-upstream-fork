@@ -72,6 +72,28 @@ func (p *XdsProxy) DeltaAggregatedResources(downstream DeltaDiscoveryStream) err
 	}
 	defer upstreamConn.Close()
 
+	// If SPIRE is issuing workload identity, ensure Istiod connection
+	// is terminated when the workload identity changes.
+	if p.spireClient != nil {
+		identityChangeCtx, identityChangeCancel := context.WithCancel(context.Background())
+		defer identityChangeCancel()
+		identityChange, id := p.spireClient.SubscribeToIdentityChange()
+		defer p.spireClient.UnsubscribeFromIdentityChange(id)
+
+		go func(conn *grpc.ClientConn) {
+			for {
+				select {
+				case <-identityChange:
+					proxyLog.Info("workload identity changed, disconnecting from Istiod")
+					conn.Close()
+
+				case <-identityChangeCtx.Done():
+					return
+				}
+			}
+		}(upstreamConn)
+	}
+
 	xds := discovery.NewAggregatedDiscoveryServiceClient(upstreamConn)
 	ctx = metadata.AppendToOutgoingContext(context.Background(), "ClusterID", p.clusterID)
 	for k, v := range p.xdsHeaders {

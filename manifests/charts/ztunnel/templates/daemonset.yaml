@@ -52,6 +52,9 @@ spec:
       tolerations:
 {{ toYaml .Values.tolerations | trim | indent 8 }}
 {{- end }}
+{{- if .Values.spire.enabled }}
+      hostPID: true
+{{- end }}
       containers:
       - name: istio-proxy
 {{- if contains "/" .Values.image }}
@@ -75,7 +78,11 @@ spec:
           # both force this to `true`: https://kubernetes.io/docs/tasks/configure-pod-container/security-context/
           # But there is a K8S validation bug that doesn't propery catch this: https://github.com/kubernetes/kubernetes/issues/119568
           allowPrivilegeEscalation: true
+{{- if .Values.spire.enabled }} # Needed for spire procfs-scan
+          privileged: true
+{{- else }}
           privileged: false
+{{- end }}
           capabilities:
             drop:
             - ALL
@@ -100,8 +107,12 @@ spec:
         - ztunnel
         env:
         - name: CA_ADDRESS
-        {{- if .Values.caAddress }}
+        {{- if and (.Values.caAddress) (not .Values.spire.enabled) }}
           value: {{ .Values.caAddress }}
+        # For SPIRE, this is fixed to a local sockmount
+        # of the SPIRE agent admin API
+        {{- else if .Values.spire.enabled }}
+          value: "unix:///var/run/spire/admin.sock"
         {{- else }}
           value: istiod{{- if not (eq .Values.revision "") }}-{{ .Values.revision }}{{- end }}.{{ .Values.istioNamespace }}.svc:15012
         {{- end }}
@@ -115,7 +126,10 @@ spec:
         - name: LOG_FORMAT
           value: json
         {{- end}}
-        {{- if .Values.global.network }}
+        {{- if .Values.network }}
+        - name: NETWORK
+          value: {{.Values.network | quote }}
+        {{- else if .Values.global.network }}
         - name: NETWORK
           value: {{ .Values.global.network | quote }}
         {{- end }}
@@ -127,8 +141,17 @@ spec:
           value: {{ .Values.multiCluster.clusterName | default "Kubernetes" }}
         - name: INPOD_ENABLED
           value: "true"
+        {{- if .Values.spire.enabled }}
+        - name: SPIRE_ENABLED
+          value: "true"
+        {{- end }}
         - name: TERMINATION_GRACE_PERIOD_SECONDS
           value: "{{ .Values.terminationGracePeriodSeconds }}"
+        - name: L7_CONFIG_FILE
+          valueFrom:
+            configMapKeyRef:
+              name: istio-ztunnel
+              key: l7_config_file
         - name: POD_NAME
           valueFrom:
             fieldRef:
@@ -149,6 +172,10 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: spec.serviceAccountName
+        {{- with .Values.egressPolicies }}
+        - name: EGRESS_CONFIGS
+          value: {{ . | toJson | quote }}
+        {{- end }}
         {{- if .Values.meshConfig.defaultConfig.proxyMetadata }}
         {{- range $key, $value := .Values.meshConfig.defaultConfig.proxyMetadata}}
         - name: {{ $key }}
@@ -174,6 +201,15 @@ spec:
           name: cni-ztunnel-sock-dir
         - mountPath: /tmp
           name: tmp
+        - mountPath: /etc/ztunnel/config
+          name: istio-ztunnel-l7-config
+        {{- if .Values.spire.enabled }}
+        - mountPath: /host/proc
+          name: zt-host-procfs
+          readOnly: true
+        - mountPath: /var/run/spire
+          name: spire-admin-sock-dir
+        {{- end }}
         {{- with .Values.volumeMounts }}
           {{- toYaml . | nindent 8 }}
         {{- end }}
@@ -205,6 +241,19 @@ spec:
       # pprof needs a writable /tmp, and we don't have that thanks to `readOnlyRootFilesystem: true`, so mount one
       - name: tmp
         emptyDir: {}
+      - name: istio-ztunnel-l7-config
+        configMap:
+          name: istio-ztunnel
+      {{- if .Values.spire.enabled }}
+      - name: zt-host-procfs
+        hostPath:
+          path: /proc
+          type: Directory
+      - name: spire-admin-sock-dir
+        hostPath:
+          path: {{ .Values.spire.adminSockHostPath }}
+          type: DirectoryOrCreate # ideally this would be a socket, but spire-agent may not have started yet.
+      {{- end }}
       {{- with .Values.volumes }}
         {{- toYaml . | nindent 6}}
       {{- end }}

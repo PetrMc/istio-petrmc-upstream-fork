@@ -2,7 +2,7 @@
 ARG BASE_VERSION=latest
 ARG ISTIO_BASE_REGISTRY=gcr.io/istio-release
 
-FROM ${ISTIO_BASE_REGISTRY}/base:${BASE_VERSION}
+FROM gcr.io/istio-enterprise/istio/base:${BASE_VERSION}
 USER 1000:1000
 ARG TARGETARCH
 COPY ${TARGETARCH:-amd64}/istioctl /usr/local/bin/istioctl

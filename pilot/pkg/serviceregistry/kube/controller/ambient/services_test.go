@@ -35,6 +35,7 @@ import (
 	"istio.io/istio/pkg/slices"
 	"istio.io/istio/pkg/test/util/assert"
 	"istio.io/istio/pkg/workloadapi"
+	"istio.io/istio/platform/discovery/peering"
 )
 
 func TestServiceEntryServices(t *testing.T) {
@@ -573,6 +574,47 @@ func TestServiceEntryServices(t *testing.T) {
 				},
 			},
 		},
+		{
+			name:   "peered",
+			inputs: []any{},
+			se: &networkingclient.ServiceEntry{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "autogen.default.echo",
+					Namespace: peering.PeeringNamespace,
+					Labels: map[string]string{
+						peering.ParentServiceLabel:          "echo",
+						peering.ParentServiceNamespaceLabel: "default",
+					},
+				},
+				Spec: networking.ServiceEntry{
+					Hosts: []string{"echo.default" + peering.DomainSuffix},
+					Ports: []*networking.ServicePort{{
+						Number: 80,
+						Name:   "http",
+					}},
+					SubjectAltNames: []string{"spiffe://beta.local/ns/default/sa/default"},
+					Resolution:      networking.ServiceEntry_STATIC,
+					WorkloadSelector: &networking.WorkloadSelector{
+						Labels: map[string]string{"app": "echo"},
+					},
+				},
+				Status: networking.ServiceEntryStatus{
+					Addresses: []*networking.ServiceEntryAddress{
+						{
+							Host:  "echo.default" + peering.DomainSuffix,
+							Value: "240.240.0.1",
+						},
+						{
+							Host:  "echo.default" + peering.DomainSuffix,
+							Value: "2001:2::1",
+						},
+					},
+				},
+			},
+			result: []*workloadapi.Service{
+				peeredServiceResult,
+			},
+		},
 	}
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
@@ -924,6 +966,49 @@ func TestServiceServices(t *testing.T) {
 			},
 		},
 		{
+			name: "peering takeover",
+			inputs: []any{
+				&networkingclient.ServiceEntry{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "autogen.ns.name",
+						Namespace: peering.PeeringNamespace,
+					},
+					Spec: networking.ServiceEntry{
+						SubjectAltNames: []string{"se.san"},
+					},
+				},
+			},
+			svc: &v1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "name",
+					Namespace: "ns",
+					Labels: map[string]string{
+						peering.ServiceScopeLabel: peering.ServiceScopeGlobalOnly,
+					},
+				},
+				Spec: v1.ServiceSpec{
+					ClusterIP: "1.2.3.4",
+					Ports: []v1.ServicePort{{
+						Port: 80,
+						Name: "http",
+					}},
+				},
+			},
+			result: &workloadapi.Service{
+				Name:      "name",
+				Namespace: "ns",
+				Hostname:  "name.ns.svc.domain.suffix",
+				Addresses: []*workloadapi.NetworkAddress{{
+					Network: testNW,
+					Address: netip.AddrFrom4([4]byte{1, 2, 3, 4}).AsSlice(),
+				}},
+				SubjectAltNames: []string{"se.san"},
+				Ports: []*workloadapi.Port{{
+					ServicePort: 80,
+				}},
+			},
+		},
+		{
 			name: "cross namespace waypoint denied",
 			inputs: []any{
 				Waypoint{
@@ -986,6 +1071,7 @@ func TestServiceServices(t *testing.T) {
 			builder := a.serviceServiceBuilder(
 				krttest.GetMockCollection[Waypoint](mock),
 				krttest.GetMockCollection[*v1.Namespace](mock),
+				krttest.GetMockCollection[*networkingclient.ServiceEntry](mock),
 			)
 			res := builder(krt.TestingDummyContext{}, tt.svc)
 			if res == nil {
@@ -1117,12 +1203,34 @@ func TestServiceConditions(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			mock := krttest.NewMock(t, tt.inputs)
 			a := newAmbientUnitTest(t)
-			builder := a.serviceServiceBuilder(
-				krttest.GetMockCollection[Waypoint](mock),
-				krttest.GetMockCollection[*v1.Namespace](mock),
-			)
+			builder := a.serviceServiceBuilder(krttest.GetMockCollection[Waypoint](mock), krttest.GetMockCollection[*v1.Namespace](mock), nil)
 			res := builder(krt.TestingDummyContext{}, tt.svc)
 			assert.Equal(t, res.GetConditions(), tt.conditions)
 		})
 	}
+}
+
+// Split out to share between tests
+var peeredServiceResult = &workloadapi.Service{
+	Name: "autogen.default.echo",
+	// Note: this is post-translation, so it will not be the peering namespace
+	Namespace: "default",
+	Addresses: []*workloadapi.NetworkAddress{
+		{
+			Network: testNW,
+			Address: netip.AddrFrom4([4]byte{240, 240, 0, 1}).AsSlice(),
+		},
+		{
+			Network: testNW,
+			Address: netip.MustParseAddr("2001:2::1").AsSlice(),
+		},
+	},
+	SubjectAltNames: []string{"spiffe://beta.local/ns/default/sa/default"},
+	Hostname:        "echo.default" + peering.DomainSuffix,
+	Ports: []*workloadapi.Port{
+		{
+			ServicePort: 80,
+			TargetPort:  80,
+		},
+	},
 }

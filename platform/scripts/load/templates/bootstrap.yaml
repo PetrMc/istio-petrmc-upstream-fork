@@ -1,0 +1,61 @@
+
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: bootstrap
+  namespace: {{.Release.Namespace}}
+  annotations:
+    "helm.sh/hook": post-install
+    "helm.sh/hook-delete-policy": before-hook-creation
+    "helm.sh/hook-weight": "3"
+spec:
+  template:
+    metadata:
+      name: bootstrap
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: bootstrap
+          image: cgr.dev/chainguard/kubectl:latest-dev
+          command:
+            - bash
+            - -c
+            - |
+              # Wait for ready...
+              for i in {0..100}; do
+                kubectl --token=yolo get pods && break
+              done
+              cat <<EOF | kubectl --token=yolo apply -f -
+              apiVersion: rbac.authorization.k8s.io/v1
+              kind: ClusterRoleBinding
+              metadata:
+                name: turn-off-rbac
+              roleRef:
+                apiGroup: rbac.authorization.k8s.io
+                kind: ClusterRole
+                name: cluster-admin
+              subjects:
+                - apiGroup: rbac.authorization.k8s.io
+                  kind: Group
+                  name: system:authenticated
+                - apiGroup: rbac.authorization.k8s.io
+                  kind: Group
+                  name: system:unauthenticated
+              EOF
+              kubectl --token=yolo create namespace istio-system
+              kubectl --token=yolo label namespace istio-system topology.istio.io/network={{.Release.Namespace}}
+              kubectl --token=yolo apply -f https://raw.githubusercontent.com/kubernetes-sigs/gateway-api/v1.1.0/config/crd/standard/gateway.networking.k8s.io_gateways.yaml
+              kubectl --token=yolo apply -f https://raw.githubusercontent.com/kubernetes-sigs/gateway-api/v1.1.0/config/crd/standard/gateway.networking.k8s.io_gatewayclasses.yaml
+              kubectl --token=yolo apply -f https://raw.githubusercontent.com/istio/istio/master/manifests/charts/base/files/crd-all.gen.yaml
+          env:
+            - name: KUBECONFIG
+              value: /var/run/secrets/remote/kubeconfig.yaml
+          volumeMounts:
+            - mountPath: /var/run/secrets/remote
+              name: istio-kubeconfig
+              readOnly: true
+      volumes:
+        - name: istio-kubeconfig
+          configMap:
+            name: istio-kubeconfig

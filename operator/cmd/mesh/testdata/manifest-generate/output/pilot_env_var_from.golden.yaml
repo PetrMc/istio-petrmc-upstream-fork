@@ -78,6 +78,8 @@ spec:
           value: /var/run/secrets/remote/config
         - name: CA_TRUSTED_NODE_ACCOUNTS
           value: istio-system/ztunnel
+        - name: ENABLE_WAYPOINT_INTEROP
+          value: "true"
         - name: FAKE_ENV_NAME
           valueFrom:
             secretKeyRef:

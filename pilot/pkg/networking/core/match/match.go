@@ -17,6 +17,7 @@ package match
 import (
 	xds "github.com/cncf/xds/go/xds/core/v3"
 	matcher "github.com/cncf/xds/go/xds/type/matcher/v3"
+	action "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/common/matcher/action/v3"
 	network "github.com/envoyproxy/go-control-plane/envoy/extensions/matching/common_inputs/network/v3"
 	wrappers "google.golang.org/protobuf/types/known/wrapperspb"
 
@@ -124,6 +125,17 @@ func ToMatcher(match *matcher.Matcher) *matcher.Matcher_OnMatch {
 	return &matcher.Matcher_OnMatch{
 		OnMatch: &matcher.Matcher_OnMatch_Matcher{
 			Matcher: match,
+		},
+	}
+}
+
+func ToSkipFilter() *matcher.Matcher_OnMatch {
+	return &matcher.Matcher_OnMatch{
+		OnMatch: &matcher.Matcher_OnMatch_Action{
+			Action: &xds.TypedExtensionConfig{
+				Name:        "skip",
+				TypedConfig: protoconv.MessageToAny(&action.SkipFilter{}),
+			},
 		},
 	}
 }

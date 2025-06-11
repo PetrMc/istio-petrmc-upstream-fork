@@ -75,6 +75,8 @@ var (
 	network        string
 	locality       string
 	weight         uint32
+
+	useSvcAccountToken bool
 )
 
 const (
@@ -279,6 +281,8 @@ Configure requires either the WorkloadGroup artifact path or its location on the
 	configureCmd.PersistentFlags().BoolVar(&dnsCapture, "capture-dns", true, "Enables the capture of outgoing DNS packets on port 53, redirecting to istio-agent")
 	configureCmd.PersistentFlags().StringVar(&internalIP, "internalIP", "", "Internal IP address of the workload")
 	configureCmd.PersistentFlags().StringVar(&externalIP, "externalIP", "", "External IP address of the workload")
+	// TODO: Consider defaulting service account token usage to 'false'. It is set to 'true' for backward compatibility.
+	configureCmd.PersistentFlags().BoolVar(&useSvcAccountToken, "useServiceAccountToken", true, "Use k8s service account token for workload authentication")
 	opts.AttachControlPlaneFlags(configureCmd)
 	return configureCmd
 }
@@ -403,6 +407,10 @@ func createCertsTokens(kubeClient kube.CLIClient, wg *clientnetworking.WorkloadG
 	}
 	if err = os.WriteFile(filepath.Join(dir, "root-cert.pem"), []byte(rootCert.Data[constants.CACertNamespaceConfigMapDataName]), filePerms); err != nil {
 		return err
+	}
+
+	if !useSvcAccountToken {
+		return nil
 	}
 
 	serviceAccount := wg.Spec.Template.ServiceAccount

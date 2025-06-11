@@ -224,8 +224,11 @@ func (configgen *ConfigGeneratorImpl) buildClusters(proxy *model.Proxy, req *mod
 	cb := NewClusterBuilder(proxy, req, configgen.Cache)
 	instances := proxy.ServiceTargets
 	cacheStats := cacheStats{}
+
+	var allServices []*model.Service
 	switch proxy.Type {
 	case model.SidecarProxy:
+		allServices = proxy.SidecarScope.Services()
 		// Setup outbound clusters
 		outboundPatcher := clusterPatcher{efw: envoyFilterPatches, pctx: networking.EnvoyFilter_SIDECAR_OUTBOUND}
 		ob, cs := configgen.buildOutboundClusters(cb, proxy, outboundPatcher, services)
@@ -245,18 +248,32 @@ func (configgen *ConfigGeneratorImpl) buildClusters(proxy *model.Proxy, req *mod
 		clusters = append(clusters, inboundPatcher.insertedClusters()...)
 	case model.Waypoint:
 		_, wps := findWaypointResources(proxy, req.Push)
+		allServices = wps.orderedServices
 		// Waypoint proxies do not need outbound clusters in most cases, unless we have a route pointing to something
 		outboundPatcher := clusterPatcher{efw: envoyFilterPatches, pctx: networking.EnvoyFilter_SIDECAR_OUTBOUND}
+		inboundPatcher := clusterPatcher{efw: envoyFilterPatches, pctx: networking.EnvoyFilter_SIDECAR_INBOUND}
+
+		if AmbientEnvoyFilterLicensed() {
+			// OSS has some half-implemented EnvoyFilter... for compat, keep it around when the flag is disabled
+			// When we do enable the flag, though, use the proper semantics
+			// We will match based on targetRefs.
+			efm := model.PolicyMatcherForProxy(proxy)
+			wrapper := req.Push.WaypointEnvoyFilters(proxy, efm)
+			outboundPatcher = clusterPatcher{efw: wrapper, pctx: networking.EnvoyFilter_GATEWAY}
+			inboundPatcher = outboundPatcher
+		}
+
 		extraNamespacedHosts, extraHosts := req.Push.ExtraWaypointServices(proxy, envoyFilterPatches)
 		ob, cs := configgen.buildOutboundClusters(cb, proxy, outboundPatcher, filterWaypointOutboundServices(
 			req.Push.ServicesAttachedToMesh(), wps.services, extraNamespacedHosts, extraHosts, services))
+
 		cacheStats = cacheStats.merge(cs)
 		resources = append(resources, ob...)
 		// Setup inbound clusters
-		inboundPatcher := clusterPatcher{efw: envoyFilterPatches, pctx: networking.EnvoyFilter_SIDECAR_INBOUND}
 		clusters = append(clusters, configgen.buildWaypointInboundClusters(cb, proxy, req.Push, wps.services)...)
 		clusters = append(clusters, inboundPatcher.insertedClusters()...)
 	default: // Gateways
+		allServices = proxy.SidecarScope.Services()
 		patcher := clusterPatcher{efw: envoyFilterPatches, pctx: networking.EnvoyFilter_GATEWAY}
 		ob, cs := configgen.buildOutboundClusters(cb, proxy, patcher, services)
 		cacheStats = cacheStats.merge(cs)
@@ -272,6 +289,16 @@ func (configgen *ConfigGeneratorImpl) buildClusters(proxy *model.Proxy, req *mod
 	// OutboundTunnel cluster is needed for sidecar and gateway.
 	if features.EnableHBONESend && proxy.Type != model.Waypoint && bool(!proxy.Metadata.DisableHBONESend) {
 		clusters = append(clusters, cb.buildConnectOriginate(proxy, req.Push, nil))
+	}
+
+	// Multi-network support
+	if features.EnableEnvoyMultiNetworkHBONE && bool(!proxy.Metadata.DisableHBONESend) {
+		clusters = append(clusters,
+			cb.buildConnectOriginateInner(proxy, req.Push, allServices),
+			cb.buildConnectOriginateOuter(proxy, req.Push))
+		if proxy.Type == model.Waypoint {
+			clusters = append(clusters, buildCrossNetworkMainInternalUpstreamCluster())
+		}
 	}
 
 	// if credential socket exists, create a cluster for it
@@ -336,6 +363,18 @@ func (configgen *ConfigGeneratorImpl) buildOutboundClusters(cb *ClusterBuilder, 
 
 			// create default cluster
 			discoveryType := convertResolution(cb.proxyType, service)
+
+			// SOLO
+			// This is tricky; we convert to EDS when we have a service waypoint. This needs to be kept in sync with endpoint_builder
+			// which will replace the endpoints with the waypoint's.
+			// Currently, we do not support waypoint -> waypoint, so skip this for waypoints. We should consider how we want this
+			// in the future.
+			if features.EnableSidecarWaypointInterop && cb.proxyType != model.Waypoint &&
+				(discoveryType == cluster.Cluster_STRICT_DNS || discoveryType == cluster.Cluster_LOGICAL_DNS) && clusterKey.hasWaypointServices {
+				discoveryType = cluster.Cluster_EDS
+			}
+			// END SOLO
+
 			defaultCluster := cb.buildCluster(clusterKey.clusterName, discoveryType, lbEndpoints, model.TrafficDirectionOutbound, port, service, nil, "")
 			if defaultCluster == nil {
 				continue

@@ -16,6 +16,7 @@
 package ambient
 
 import (
+	"fmt"
 	"net/netip"
 	"strconv"
 
@@ -40,6 +41,7 @@ import (
 	"istio.io/istio/pkg/config/schema/gvk"
 	"istio.io/istio/pkg/config/schema/kind"
 	kubeutil "istio.io/istio/pkg/kube"
+	"istio.io/istio/pkg/kube/controllers"
 	"istio.io/istio/pkg/kube/krt"
 	kubelabels "istio.io/istio/pkg/kube/labels"
 	"istio.io/istio/pkg/log"
@@ -48,6 +50,8 @@ import (
 	"istio.io/istio/pkg/slices"
 	"istio.io/istio/pkg/util/sets"
 	"istio.io/istio/pkg/workloadapi"
+	ecsplatform "istio.io/istio/platform/discovery/ecs"
+	"istio.io/istio/platform/discovery/peering"
 )
 
 // WorkloadsCollection builds out the core Workload object type used in ambient mode.
@@ -110,7 +114,9 @@ func (a *index) WorkloadsCollection(
 		opts.WithName("EndpointSliceWorkloads")...)
 
 	NetworkGatewayWorkloads := krt.NewManyFromNothing[model.WorkloadInfo](func(ctx krt.HandlerContext) []model.WorkloadInfo {
-		return slices.Map(a.LookupAllNetworkGateway(ctx), convertGateway)
+		return slices.Map(a.LookupAllNetworkGateway(ctx), func(gw NetworkGateway) model.WorkloadInfo {
+			return convertGateway(ctx, meshConfig, gw)
+		})
 	}, opts.WithName("NetworkGatewayWorkloads")...)
 
 	Workloads := krt.JoinCollection(
@@ -139,18 +145,38 @@ func (a *index) workloadEntryWorkloadBuilder(
 	return func(ctx krt.HandlerContext, wle *networkingclient.WorkloadEntry) *model.WorkloadInfo {
 		// WLE can put labels in multiple places; normalize this
 		wle = serviceentry.ConvertClientWorkloadEntry(wle)
+		var wasPeerObject bool
+		wle, wasPeerObject = convertWENamespace(wle)
 		meshCfg := krt.FetchOne(ctx, meshConfig.AsCollection())
 		policies := a.buildWorkloadPolicies(ctx, authorizationPolicies, peerAuths, meshCfg, wle.Labels, wle.Namespace)
 
 		appTunnel, targetWaypoint := computeWaypoint(ctx, waypoints, namespaces, wle.ObjectMeta)
 
-		fo := []krt.FetchOption{krt.FilterIndex(workloadServicesNamespaceIndex, wle.Namespace), krt.FilterSelectsNonEmpty(wle.GetLabels())}
-		if !a.Flags.EnableK8SServiceSelectWorkloadEntries {
-			fo = append(fo, krt.FilterGeneric(func(a any) bool {
+		var services []model.ServiceInfo
+
+		if wasPeerObject {
+			// This is a peering object, so this WE is a pointer to a remote cluster. Attach to the global service
+			svc := wle.Labels[peering.ParentServiceLabel]
+			svcKey := fmt.Sprintf("%s/%s.%s%s", wle.Namespace, svc, wle.Namespace, peering.DomainSuffix)
+			services = krt.Fetch(ctx, workloadServices, krt.FilterKey(svcKey), krt.FilterGeneric(func(a any) bool {
 				return a.(model.ServiceInfo).Source.Kind == kind.ServiceEntry
 			}))
+			if wle.Labels[peering.ServiceScopeLabel] == peering.ServiceScopeGlobalOnly {
+				// If we are taking over the Service, also attach to that
+				svcKey := fmt.Sprintf("%s/%s.%s.svc.%s", wle.Namespace, svc, wle.Namespace, a.DomainSuffix)
+				services = append(services, krt.Fetch(ctx, workloadServices, krt.FilterKey(svcKey), krt.FilterGeneric(func(a any) bool {
+					return a.(model.ServiceInfo).Source.Kind == kind.Service
+				}))...)
+			}
+		} else {
+			fo := []krt.FetchOption{krt.FilterIndex(workloadServicesNamespaceIndex, wle.Namespace), krt.FilterSelectsNonEmpty(wle.GetLabels())}
+			if !a.Flags.EnableK8SServiceSelectWorkloadEntries {
+				fo = append(fo, krt.FilterGeneric(func(a any) bool {
+					return a.(model.ServiceInfo).Source.Kind == kind.ServiceEntry
+				}))
+			}
+			services = krt.Fetch(ctx, workloadServices, fo...)
 		}
-		services := krt.Fetch(ctx, workloadServices, fo...)
 		network := a.Network(ctx).String()
 		if wle.Spec.Network != "" {
 			network = wle.Spec.Network
@@ -165,7 +191,7 @@ func (a *index) workloadEntryWorkloadBuilder(
 			Namespace:             wle.Namespace,
 			Network:               network,
 			NetworkGateway:        a.getNetworkGatewayAddress(ctx, network),
-			ClusterId:             string(a.ClusterID),
+			ClusterId:             model.GetOrDefault(wle.Labels[peering.SourceClusterLabel], string(a.ClusterID)),
 			ServiceAccount:        wle.Spec.ServiceAccount,
 			Services:              constructServicesFromWorkloadEntry(&wle.Spec, services),
 			AuthorizationPolicies: policies,
@@ -177,6 +203,8 @@ func (a *index) workloadEntryWorkloadBuilder(
 		}
 		if wle.Spec.Weight > 0 {
 			w.Capacity = wrappers.UInt32(wle.Spec.Weight)
+		} else if wle.Annotations[peering.ServiceEndpointStatus] == peering.ServiceEndpointStatusUnhealthy {
+			w.Capacity = wrappers.UInt32(0)
 		}
 
 		if addr, err := netip.ParseAddr(wle.Spec.Address); err == nil {
@@ -190,6 +218,12 @@ func (a *index) workloadEntryWorkloadBuilder(
 		w.CanonicalName, w.CanonicalRevision = kubelabels.CanonicalService(wle.Labels, w.WorkloadName)
 
 		setTunnelProtocol(wle.Labels, wle.Annotations, w)
+
+		// For ECS, use the ARN as the UID. This enables the Ztunnel serving the workload entry to identify it.
+		if arn, f := wle.Annotations[ecsplatform.ARNAnnotation]; f {
+			w.Uid = arn
+		}
+
 		return precomputeWorkloadPtr(&model.WorkloadInfo{
 			Workload:     w,
 			Labels:       wle.Labels,
@@ -221,6 +255,53 @@ func computeWaypoint(
 		targetWaypoint = waypoint
 	}
 	return appTunnel, targetWaypoint
+}
+
+func isPeeringObject(c controllers.Object) string {
+	if c.GetNamespace() != peering.PeeringNamespace {
+		return ""
+	}
+	if _, f := c.GetLabels()[peering.ParentServiceLabel]; !f {
+		return ""
+	}
+	if ns, f := c.GetLabels()[peering.ParentServiceNamespaceLabel]; f {
+		return ns
+	}
+	return ""
+}
+
+// nolint
+func convertWENamespace(wle *networkingclient.WorkloadEntry) (*networkingclient.WorkloadEntry, bool) {
+	if ns := isPeeringObject(wle); ns != "" {
+		// DeepCopy has a race (https://github.com/istio/api/issues/3019) and is more than we need (we don't need to copy Spec),
+		// so copy on the outer object
+		cpy := new(networkingclient.WorkloadEntry)
+		cpy.TypeMeta = wle.TypeMeta
+		cpy.ObjectMeta = wle.ObjectMeta
+		cpy.Spec = wle.Spec
+		cpy.Status = wle.Status
+
+		cpy.Namespace = ns
+		return cpy, true
+	}
+	return wle, false
+}
+
+// nolint
+func convertSENamespace(se *networkingclient.ServiceEntry) (*networkingclient.ServiceEntry, bool) {
+	if ns := isPeeringObject(se); ns != "" {
+		// DeepCopy has a race (https://github.com/istio/api/issues/3019) and is more than we need (we don't need to copy Spec),
+		// so copy on the outer object
+		cpy := new(networkingclient.ServiceEntry)
+		cpy.TypeMeta = se.TypeMeta
+		cpy.ObjectMeta = se.ObjectMeta
+		cpy.Spec = se.Spec
+		cpy.Status = se.Status
+
+		cpy.Namespace = ns
+		return cpy, true
+	}
+	return se, false
 }
 
 func (a *index) podWorkloadBuilder(
@@ -424,6 +505,7 @@ func (a *index) serviceEntryWorkloadBuilder(
 	namespaces krt.Collection[*v1.Namespace],
 ) krt.TransformationMulti[*networkingclient.ServiceEntry, model.WorkloadInfo] {
 	return func(ctx krt.HandlerContext, se *networkingclient.ServiceEntry) []model.WorkloadInfo {
+		se, _ = convertSENamespace(se) // TODO: do we need it?
 		eps := se.Spec.Endpoints
 		// If we have a DNS service, endpoints are not required
 		implicitEndpoints := len(eps) == 0 &&
@@ -434,7 +516,7 @@ func (a *index) serviceEntryWorkloadBuilder(
 		}
 		// here we don't care about the *service* waypoint (hence it is nil); we are only going to use a subset of the info in
 		// `allServices` (since we are building workloads here, not services).
-		allServices := a.serviceEntriesInfo(ctx, se, nil, nil)
+		allServices := a.serviceEntriesInfo(ctx, se, nil, nil, false)
 		if implicitEndpoints {
 			eps = slices.Map(allServices, func(si model.ServiceInfo) *networkingv1alpha3.WorkloadEntry {
 				return &networkingv1alpha3.WorkloadEntry{Address: si.Service.Hostname}
@@ -844,12 +926,20 @@ func gatewayUID(gw model.NetworkGateway) string {
 // convertGateway always converts a NetworkGateway into a Workload.
 // Workloads have a NetworkGateway field, which is effectively a pointer to another object (Service or Workload); in order
 // to facilitate this we need to translate our Gateway model down into a WorkloadInfo ztunnel can understand.
-func convertGateway(gw NetworkGateway) model.WorkloadInfo {
+func convertGateway(ctx krt.HandlerContext, meshConfig krt.Singleton[MeshConfig], gw NetworkGateway) model.WorkloadInfo {
+	td := gw.TrustDomain
+	if td == "" {
+		meshCfg := krt.FetchOne(ctx, meshConfig.AsCollection())
+		td = pickTrustDomain(meshCfg)
+	}
 	wl := &workloadapi.Workload{
 		Uid:            gatewayUID(gw.NetworkGateway),
 		ServiceAccount: gw.ServiceAccount.Name,
 		Namespace:      gw.ServiceAccount.Namespace,
 		Network:        gw.Network.String(),
+		TrustDomain:    td,
+		// Today we assume a 1:1 mapping between network and cluster
+		ClusterId: gw.Network.String(),
 	}
 
 	if ip, err := netip.ParseAddr(gw.Addr); err == nil {

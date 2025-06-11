@@ -35,6 +35,7 @@ import (
 	"istio.io/istio/pkg/config/protocol"
 	"istio.io/istio/pkg/test/echo/common/scheme"
 	"istio.io/istio/pkg/test/framework"
+	"istio.io/istio/pkg/test/framework/components/ambient"
 	"istio.io/istio/pkg/test/framework/components/echo"
 	"istio.io/istio/pkg/test/framework/components/echo/check"
 	"istio.io/istio/pkg/test/framework/components/echo/common/ports"
@@ -330,9 +331,6 @@ spec:
 					continue
 				}
 				t.NewSubTestf("from %s", src.ServiceName()).Run(func(t framework.TestContext) {
-					if src.Config().HasSidecar() {
-						t.Skip("TODO: sidecars don't properly handle use-waypoint")
-					}
 					for _, host := range apps.Captured.Config().HostnameVariants() {
 						t.NewSubTestf("to %s", host).Run(func(t framework.TestContext) {
 							src.CallOrFail(t, echo.CallOptions{
@@ -652,8 +650,7 @@ spec:
 						t.NewSubTestf("%v", opt.Scheme).Run(func(t framework.TestContext) {
 							opt = opt.DeepCopy()
 							opt.To = dst
-							// Sidecar does not currently traverse waypoint, so we expect to bypass it and get success
-							opt.Check = check.OK()
+							opt.Check = CheckDeny
 							src.CallOrFail(t, opt)
 						})
 					}
@@ -792,6 +789,99 @@ spec:
 					Scheme: scheme.HTTP,
 					Check:  CheckDeny,
 				})
+			})
+		})
+		t.NewSubTest("waypoint-waypoint").Run(func(t framework.TestContext) {
+			// Test traffic flows where we have (possibly) two waypoints in the path.
+			// `captured --> captured-waypoint --HTTPRoute--> <service with a waypoint>`
+			// Give captured a waypoint..
+			ambient.NewWaypointProxyOrFail(t, apps.Namespace, "captured-waypoint")
+			SetWaypoint(t, Captured, "captured-waypoint")
+			// Create a SE; one of our tests will use a DNS service.
+			// This is primarily to catch a specific regression (https://github.com/solo-io/istio/issues/1746).
+			t.ConfigIstio().Eval(apps.Namespace.Name(), map[string]string{
+				"Namespace": apps.Namespace.Name(),
+				"Waypoint":  echo.Waypoint,
+			}, `apiVersion: networking.istio.io/v1
+kind: ServiceEntry
+metadata:
+  name: dns-service
+  labels:
+    istio.io/use-waypoint: {{.Waypoint}}
+spec:
+  addresses:
+  - 240.240.240.238
+  endpoints:
+  - address: captured.{{.Namespace}}.svc.cluster.local
+  exportTo:
+  - .
+  hosts:
+  - dns-service.example.com
+  location: MESH_EXTERNAL
+  ports:
+  - name: http
+    number: 80
+    protocol: HTTP
+  resolution: DNS
+`).ApplyOrFail(t)
+			t.NewSubTest("service").Run(func(t framework.TestContext) {
+				// We will set up a route such that we call captured --> captured-waypoint --HTTPRoute--> service addressed waypoint.
+				t.ConfigIstio().YAML(apps.Namespace.Name(), `apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: reroute
+spec:
+  parentRefs:
+  - name: captured
+    kind: Service
+    group: ""
+    port: 80
+  rules:
+  - backendRefs:
+    - name: service-addressed-waypoint
+      port: 80`).ApplyOrFail(t)
+				// Pick a random workload that is captured as src.
+				for _, src := range apps.WorkloadAddressedWaypoint {
+					for _, dst := range apps.Captured {
+						src.CallOrFail(t, echo.CallOptions{
+							To:   dst,
+							Port: echo.Port{Name: "http"},
+						})
+					}
+				}
+			})
+			t.NewSubTest("serviceentry").Run(func(t framework.TestContext) {
+				// We will set up a route such that we call captured --> captured-waypoint --HTTPRoute--> service addressed waypoint.
+				t.ConfigIstio().YAML(apps.Namespace.Name(), `apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: reroute
+spec:
+  parentRefs:
+  - name: captured
+    kind: Service
+    group: ""
+    port: 80
+  rules:
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /foo
+    backendRefs:
+    - group: networking.istio.io
+      kind: Hostname
+      name: dns-service.example.com`).ApplyOrFail(t)
+				// Pick a random workload that is captured as src.
+				for _, src := range apps.WorkloadAddressedWaypoint {
+					for _, dst := range apps.Captured {
+						src.CallOrFail(t, echo.CallOptions{
+							To:   dst,
+							Port: echo.Port{Name: "http"},
+							// Mostly to make sure we are not hitting the stale route
+							HTTP: echo.HTTP{Path: "/foo"},
+						})
+					}
+				}
 			})
 		})
 	})

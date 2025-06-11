@@ -18,6 +18,9 @@ WD=$(dirname "$0")
 WD=$(cd "$WD" || exit; pwd)
 ROOT=$(dirname "$WD")
 
+KIND_REGISTRY_PORT="5000"
+KIND_REGISTRY_DIR="/etc/containerd/certs.d/localhost:${KIND_REGISTRY_PORT}"
+
 # shellcheck source=common/scripts/tracing.sh
 source "${ROOT}/common/scripts/tracing.sh"
 
@@ -126,6 +129,10 @@ function build_images() {
   if [[ "${SELECT_TEST}" == "test.integration.ambient.kube" || "${SELECT_TEST}" == "test.integration.kube"  || "${SELECT_TEST}" == "test.integration.helm.kube" || "${JOB_TYPE:-postsubmit}" == "postsubmit" ]]; then
     targets+="docker.ztunnel "
   fi
+  # SOLO: we deploy ambient in the pilot test too
+  if [[ "${SELECT_TEST}" == "test.integration.pilot.kube" ]]; then
+    targets+="docker.ztunnel "
+  fi
   targets+="docker.install-cni "
   # Integration tests are always running on local architecture (no cross compiling), so find out what that is.
   arch="linux/amd64"
@@ -142,6 +149,9 @@ function build_images() {
 
 # Creates a local registry for kind nodes to pull images from. Expects that the "kind" network already exists.
 function setup_kind_registry() {
+  # initialize DEVCONTAINER if not set
+  DEVCONTAINER="${DEVCONTAINER:-}"
+
   # create a registry container if it not running already
   running="$(docker inspect -f '{{.State.Running}}' "${KIND_REGISTRY_NAME}" 2>/dev/null || true)"
   if [[ "${running}" != 'true' ]]; then

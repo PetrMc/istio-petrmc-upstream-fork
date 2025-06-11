@@ -28,6 +28,7 @@ import (
 
 	"istio.io/istio/pkg/config"
 	"istio.io/istio/pkg/config/schema/gvk"
+	"istio.io/istio/pkg/config/schema/kubetypes"
 	istiolog "istio.io/istio/pkg/log"
 	"istio.io/istio/pkg/ptr"
 	"istio.io/istio/pkg/slices"
@@ -357,4 +358,16 @@ func OldestObject[T Object](configs []T) T {
 		}
 		return cmp.Compare(i.GetNamespace(), j.GetNamespace())
 	})
+}
+
+func OwnerReferences[T Object](o T) []metav1.OwnerReference {
+	gk := kubetypes.GvkFromObject(o)
+	return []metav1.OwnerReference{{
+		APIVersion:         gk.GroupVersion(),
+		Kind:               gk.Kind,
+		Name:               o.GetName(),
+		UID:                o.GetUID(),
+		Controller:         ptr.Of(true),
+		BlockOwnerDeletion: nil,
+	}}
 }

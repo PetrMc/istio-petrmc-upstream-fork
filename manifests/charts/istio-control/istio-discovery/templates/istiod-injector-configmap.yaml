@@ -17,7 +17,7 @@ data:
 {{ $vals := pick .Values "global" "sidecarInjectorWebhook" "revision" -}}
 {{ $pilotVals := pick .Values "cni" "env" -}}
 {{ $vals = set $vals "pilot" $pilotVals -}}
-{{ $gatewayVals := pick .Values.gateways "securityContext" "seccompProfile" -}}
+{{ $gatewayVals := pick .Values.gateways "securityContext" "seccompProfile" "spire" -}}
 {{ $vals = set $vals "gateways" $gatewayVals -}}
 {{ $vals | toPrettyJson | indent 4 }}
 
@@ -74,6 +74,10 @@ data:
 {{- if not (hasKey .Values.sidecarInjectorWebhook.templates "kube-gateway") }}
       kube-gateway: |
 {{ .Files.Get "files/kube-gateway.yaml" | trim | indent 8 }}
+{{- end }}
+{{- if not (hasKey .Values.sidecarInjectorWebhook.templates "kube-eastwest") }}
+      kube-eastwest: |
+{{ .Files.Get "files/kube-eastwest.yaml" | trim | indent 8 }}
 {{- end }}
 {{- with .Values.sidecarInjectorWebhook.templates }}
 {{ toYaml . | trim | indent 6 }}
