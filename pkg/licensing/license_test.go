@@ -207,7 +207,7 @@ func TestXDSLicense(t *testing.T) {
 		// Expire trial is not allowed
 		{"expired trial", StateExpired},
 		{"active support", StateOK},
-		// Expired enterprise is OK
+		// Expired support is OK
 		{"expired support", StateOK},
 		{"invalid support", StateInvalid},
 	}
