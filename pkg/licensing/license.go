@@ -202,12 +202,17 @@ func checkLicense(clientBuilder func() licenseClient, kcp *kubernetes.Interface)
 	if err := lc.AddLicenses(ctx, licenses); err != nil {
 		return invalidLicenseInfo(StateInvalid), fmt.Errorf("licenses could not be loaded: %v", err)
 	}
-	mainGlooProducts := []model.Product{model.Product_GlooMesh, model.Product_GlooCore, model.Product_GlooTrial}
-	license := foundLicenseForState(lc, client.LicenseStateOk, mainGlooProducts...)
+	mainSoloProducts := []model.Product{
+		model.Product_GlooMesh,
+		model.Product_GlooCore,
+		model.Product_GlooTrial,
+		model.Product_IstioSupportBasic,
+	}
+	license := foundLicenseForState(lc, client.LicenseStateOk, mainSoloProducts...)
 	if license != nil {
 		return LicenseInfo{State: StateOK, Product: license.Product}, nil
 	}
-	license = foundLicenseForState(lc, client.LicenseStateExpired, model.Product_GlooMesh, model.Product_GlooCore)
+	license = foundLicenseForState(lc, client.LicenseStateExpired, model.Product_GlooMesh, model.Product_GlooCore, model.Product_IstioSupportBasic)
 	if license != nil {
 		// For non-trial licenses, we let them expire but spam them with logs.
 		// We lie about a grace period; we may have one eventually but for now its "forever"
@@ -216,11 +221,11 @@ func checkLicense(clientBuilder func() licenseClient, kcp *kubernetes.Interface)
 		}
 		return LicenseInfo{State: StateOK, Product: license.Product}, nil
 	}
-	license = foundLicenseForState(lc, client.LicenseStateExpired, mainGlooProducts...)
+	license = foundLicenseForState(lc, client.LicenseStateExpired, mainSoloProducts...)
 	if license != nil {
 		return LicenseInfo{State: StateExpired, Product: license.Product}, fmt.Errorf("licenses found but expired: %v", license)
 	}
-	license = foundLicenseForState(lc, client.LicenseStateInvalid, mainGlooProducts...)
+	license = foundLicenseForState(lc, client.LicenseStateInvalid, mainSoloProducts...)
 	if license != nil {
 		return LicenseInfo{State: StateInvalid, Product: license.Product}, fmt.Errorf("licenses found but invalid: %v", license)
 	}
