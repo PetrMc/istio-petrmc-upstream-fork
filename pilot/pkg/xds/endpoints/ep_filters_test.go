@@ -994,25 +994,25 @@ func TestCrossNetworkHBONEEndpointUniqueIds(t *testing.T) {
 	cla := b.BuildClusterLoadAssignment(index)
 
 	// Extract EndpointIds and verify they are unique
-	endpointIds := make(map[string]bool)
+	endpointIDs := make(map[string]bool)
 	foundAddresses := make(map[string]bool)
 
 	for _, locEndpoints := range cla.Endpoints {
 		for _, lbEp := range locEndpoints.LbEndpoints {
 			if envoyAddr := lbEp.GetEndpoint().GetAddress().GetEnvoyInternalAddress(); envoyAddr != nil {
-				endpointId := envoyAddr.GetEndpointId()
-				if endpointId == "" {
+				endpointID := envoyAddr.GetEndpointId()
+				if endpointID == "" {
 					continue // Skip non-internal addresses
 				}
 
 				// Verify the EndpointId is unique
-				if endpointIds[endpointId] {
-					t.Errorf("Duplicate EndpointId found: %s", endpointId)
+				if endpointIDs[endpointID] {
+					t.Errorf("Duplicate EndpointId found: %s", endpointID)
 				}
-				endpointIds[endpointId] = true
+				endpointIDs[endpointID] = true
 
 				// Extract the gateway address from the EndpointId (should be after the last /)
-				parts := strings.Split(endpointId, "/")
+				parts := strings.Split(endpointID, "/")
 				if len(parts) >= 2 {
 					gatewayAddr := parts[len(parts)-1]
 					foundAddresses[gatewayAddr] = true
@@ -1033,7 +1033,7 @@ func TestCrossNetworkHBONEEndpointUniqueIds(t *testing.T) {
 	}
 
 	// Verify we have unique EndpointIds for each gateway
-	if len(endpointIds) < len(ewGateways) {
-		t.Errorf("Expected at least %d unique EndpointIds, got %d", len(ewGateways), len(endpointIds))
+	if len(endpointIDs) < len(ewGateways) {
+		t.Errorf("Expected at least %d unique EndpointIds, got %d", len(ewGateways), len(endpointIDs))
 	}
 }
