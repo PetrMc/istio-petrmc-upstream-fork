@@ -139,7 +139,7 @@ func TestLicense(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, state, StateOK)
 
-		assert.Equal(t, CheckLicense(FeatureMultiCluster, false), true)
+		assert.Equal(t, CheckLicense(FeatureMultiCluster, false), false)
 		assert.Equal(t, CheckLicense(FeatureLTS, false), true)
 	})
 	t.Run("expired support env", func(t *testing.T) {
@@ -149,7 +149,7 @@ func TestLicense(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, state, StateOK)
 
-		assert.Equal(t, CheckLicense(FeatureMultiCluster, false), true)
+		assert.Equal(t, CheckLicense(FeatureMultiCluster, false), false)
 		assert.Equal(t, CheckLicense(FeatureLTS, false), true)
 	})
 	t.Run("invalid support env", func(t *testing.T) {
@@ -203,13 +203,12 @@ func TestXDSLicense(t *testing.T) {
 		{"invalid enterprise", StateInvalid},
 		// Ztunnel currently requires a single value, and all features require enterprise
 		{"active core", StateInvalid},
+		{"active support", StateInvalid},
+		{"expired support", StateInvalid},
+		{"invalid support", StateInvalid},
 		{"active trial", StateOK},
 		// Expire trial is not allowed
 		{"expired trial", StateExpired},
-		{"active support", StateOK},
-		// Expired support is OK
-		{"expired support", StateOK},
-		{"invalid support", StateInvalid},
 	}
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {

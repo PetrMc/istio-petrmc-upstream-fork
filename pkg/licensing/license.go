@@ -48,9 +48,9 @@ func SetForTest() {
 // The current XDS interface only allows sending a single string, so doesn't have nuance like "enterprise expired" vs "trial expired".
 func GetXDSLicenseState() LicenseState {
 	state, _ := licenseState.Get()
-	if state.Product == model.Product_GlooCore {
+	if state.Product == model.Product_GlooCore || state.Product == model.Product_IstioSupportBasic {
 		// Ztunnel isn't product-aware, but all features currently require enterprise.
-		// Mark GMC as 'invalid'
+		// Mark non-Enterprise licenses as 'invalid'
 		return StateInvalid
 	}
 	return state.State
@@ -65,9 +65,9 @@ func CheckLicense(name LicenseFeature, verbose bool) bool {
 	state := info.State
 	valid := (state == StateBypassed || state == StateOK) && err == nil
 	if valid {
-		if !glooMeshCoreLicenses.Contains(name) && info.Product == model.Product_GlooCore {
+		if lf, ok := licenseFeatures[info.Product]; ok && !lf.Contains(name) {
 			if verbose {
-				message := fmt.Sprintf("SKIPPING FEATURE %s due to licensing issue: detected Gloo Mesh Core license, but feature requires enterprise", name)
+				message := fmt.Sprintf("SKIPPING FEATURE %s due to licensing issue: detected non-enterprise license, but feature requires enterprise", name)
 				for range 10 {
 					// Log 10x for good measure
 					log.Error(message)
@@ -101,10 +101,16 @@ const (
 	FeatureLTS          LicenseFeature = "LTS"
 )
 
-var glooMeshCoreLicenses = sets.New[LicenseFeature](
-	FeatureFIPS,
-	FeatureLTS,
-)
+var licenseFeatures = map[model.Product]sets.Set[LicenseFeature]{
+	model.Product_GlooCore: sets.New[LicenseFeature](
+		FeatureFIPS,
+		FeatureLTS,
+	),
+	model.Product_IstioSupportBasic: sets.New[LicenseFeature](
+		FeatureFIPS,
+		FeatureLTS,
+	),
+}
 
 type LicenseState string
 

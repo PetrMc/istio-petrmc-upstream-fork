@@ -94,16 +94,12 @@ func newDiscoveryCommand() *cobra.Command {
 			cmd.PrintFlags(c.Flags())
 
 			if err := licensing.ValidateLTS(); err != nil {
-				// TODO: in 1.27+ move to an error (delayed from 1.26)
-				for range 10 {
-					log.Warnf("%v (this warning may change to an error in future releases)", err)
-				}
+				log.Errorf("%v", err)
+				return err
 			}
 			if err := licensing.ValidateFIPS(); err != nil {
-				// TODO: in 1.27+ move to an error (delayed from 1.26)
-				for range 10 {
-					log.Warnf("%v (this warning may change to an error in future releases)", err)
-				}
+				log.Errorf("%v", err)
+				return err
 			}
 
 			// Create the stop channel for all the servers.
