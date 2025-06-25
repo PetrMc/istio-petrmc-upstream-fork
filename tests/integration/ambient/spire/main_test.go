@@ -52,18 +52,8 @@ spire-agent:
             enabled: true
             mountOnHost: true
         hostBasePath: /run/spire/agent/sockets
-    image:
-        registry: ghcr.io
-        repository: spiffe/spire-agent
-        pullPolicy: IfNotPresent
-        tag: 1.12.1
 
 spire-server:
-    image:
-        registry: ghcr.io
-        repository: spire/spire-server
-        pullPolicy: IfNotPresent
-        tag: 1.12.1
     persistence:
         type: emptyDir
 `
