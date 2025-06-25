@@ -1,4 +1,3 @@
-# Testing
 # Istio
 
 [![CII Best Practices](https://bestpractices.coreinfrastructure.org/projects/1395/badge)](https://bestpractices.coreinfrastructure.org/projects/1395)
