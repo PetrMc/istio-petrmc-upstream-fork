@@ -140,6 +140,15 @@ if [[ -f "${HOME}/.netrc" ]]; then
   CONDITIONAL_HOST_MOUNTS+="--mount type=bind,source=${HOME}/.netrc,destination=/home/.netrc,readonly "
 fi
 
+# SOLO: This file does not change often... but we do some private imports so let's bring SSH information into the container
+# Expose SSH_AUTH_SOCK if set
+if [[ -n "${SSH_AUTH_SOCK:-}" ]]; then
+    CONDITIONAL_HOST_MOUNTS+="--mount type=bind,source=$SSH_AUTH_SOCK,destination=$SSH_AUTH_SOCK "
+fi
+
+# Bring in the SSH known_hosts
+CONDITIONAL_HOST_MOUNTS+="--mount type=bind,source=${HOME}/.ssh/known_hosts,destination=/home/ubuntu/.ssh/known_hosts,readonly "
+
 # echo ${CONDITIONAL_HOST_MOUNTS}
 
 # This function checks if the file exists. If it does, it creates a randomly named host location
@@ -212,6 +221,9 @@ LOCAL_GO_ARCH=${go_os_arch##*_}
 
 BUILD_WITH_CONTAINER=0
 
+# SOLO: We should set GOPRIVATE if it's not already for our private imports
+GOPRIVATE="${GOPRIVATE:-github.com/solo-io/}"
+
 VARS=(
       CONTAINER_TARGET_OUT
       CONTAINER_TARGET_OUT_LINUX
@@ -235,6 +247,7 @@ VARS=(
       IMAGE_VERSION
       REPO_ROOT
       BUILD_WITH_CONTAINER
+      GOPRIVATE
 )
 
 # For non container build, we need to write env to file
