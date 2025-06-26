@@ -60,7 +60,7 @@ func (b *EndpointBuilder) buildCrossNetworkHBONEEndpoint(
 	gwEp := &endpoint.LbEndpoint{
 		HostIdentifier: &endpoint.LbEndpoint_Endpoint{
 			Endpoint: &endpoint.Endpoint{
-				Address: util.BuildInternalAddressWithIdentifier("connect_network_originate_inner", fmt.Sprintf("%s:%d", b.hostname, b.port)),
+				Address: util.BuildInternalAddressWithIdentifier("connect_network_originate_inner", fmt.Sprintf("%s:%d/%s", b.hostname, b.port, gw.Addr)),
 			},
 		},
 		LoadBalancingWeight: &wrappers.UInt32Value{
