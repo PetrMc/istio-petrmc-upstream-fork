@@ -140,6 +140,19 @@ if [[ -f "${HOME}/.netrc" ]]; then
   CONDITIONAL_HOST_MOUNTS+="--mount type=bind,source=${HOME}/.netrc,destination=/home/.netrc,readonly "
 fi
 
+# SOLO: This file does not change often... but we do some private imports so let's bring SSH information into the container
+# Expose SSH_AUTH_SOCK if set
+if [[ -n "${SSH_AUTH_SOCK:-}" ]]; then
+    CONDITIONAL_HOST_MOUNTS+="--mount type=bind,source=$SSH_AUTH_SOCK,destination=$SSH_AUTH_SOCK "
+fi
+
+# Bring in the SSH known_hosts
+# Allow a HOME_DIR_OVERRIDE to be set. The justification here is, in instances where a UID that is neither
+# 0 and 1000 on the host is used, that is the UID given to the container. However, Ubuntu reserves the username
+# ubuntu for UID 1000, and upstream creates a user with the $UID as "user". Not sure of the implications just yet
+# of changing this, so for now, allow an environment variable override.
+CONDITIONAL_HOST_MOUNTS+="--mount type=bind,source=${HOME}/.ssh/known_hosts,destination=${HOME_DIR_OVERRIDE:-/home/ubuntu}/.ssh/known_hosts,readonly "
+
 # echo ${CONDITIONAL_HOST_MOUNTS}
 
 # This function checks if the file exists. If it does, it creates a randomly named host location
@@ -212,6 +225,9 @@ LOCAL_GO_ARCH=${go_os_arch##*_}
 
 BUILD_WITH_CONTAINER=0
 
+# SOLO: We should set GOPRIVATE if it's not already for our private imports
+GOPRIVATE="${GOPRIVATE:-github.com/solo-io/}"
+
 VARS=(
       CONTAINER_TARGET_OUT
       CONTAINER_TARGET_OUT_LINUX
@@ -235,6 +251,7 @@ VARS=(
       IMAGE_VERSION
       REPO_ROOT
       BUILD_WITH_CONTAINER
+      GOPRIVATE
 )
 
 # For non container build, we need to write env to file
