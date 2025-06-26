@@ -40,7 +40,6 @@ type EchoDeployments struct {
 }
 
 // TODO best way to get the systemnamespace before we actually install Istio? this is weirdly non-obvious
-// TODO BML drop the bleggett image overrides when the next SPIRE release hits
 var spireOverrides = `
 global:
   spire:
@@ -53,18 +52,8 @@ spire-agent:
             enabled: true
             mountOnHost: true
         hostBasePath: /run/spire/agent/sockets
-    image:
-        registry: gcr.io
-        repository: solo-oss/bleggett/spire-agent
-        pullPolicy: IfNotPresent
-        tag: 08-02-2024-bbranch
 
 spire-server:
-    image:
-        registry: gcr.io
-        repository: solo-oss/bleggett/spire-server
-        pullPolicy: IfNotPresent
-        tag: 08-02-2024-bbranch
     persistence:
         type: emptyDir
 `

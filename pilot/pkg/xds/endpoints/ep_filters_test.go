@@ -16,6 +16,7 @@ package endpoints_test
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -915,4 +916,124 @@ func testShards() *model.EndpointIndex {
 		svc.Unlock()
 	}
 	return index
+}
+
+// TestCrossNetworkHBONEEndpointUniqueIds tests that the unique endpoint ids are generated for cross-network HBONE endpoints.
+// Without this uniqueness, corresponding endpoints from different networks would be merged into a single endpoint, resulting
+// in load balancing to one cluster/network, rather than all N
+func TestCrossNetworkHBONEEndpointUniqueIds(t *testing.T) {
+	test.SetForTest(t, &features.EnableEnvoyMultiNetworkHBONE, true)
+
+	// Create multiple gateways with different addresses but same service/port
+	ewGateways := []model.NetworkGateway{
+		{
+			Network:   "network2",
+			Cluster:   "cluster2",
+			Addr:      "2.2.2.2",
+			HBONEPort: 15008,
+		},
+		{
+			Network:   "network3",
+			Cluster:   "cluster3",
+			Addr:      "3.3.3.3",
+			HBONEPort: 15008,
+		},
+		{
+			Network:   "network4",
+			Cluster:   "cluster4",
+			Addr:      "4.4.4.4",
+			HBONEPort: 15008,
+		},
+	}
+
+	// Set up an environment with all gateways and endpoints that can reach them
+	ds := xds.NewFakeDiscoveryServer(t, xds.FakeOptions{
+		Services: []*model.Service{{
+			Hostname:   "example.ns.svc.cluster.local",
+			Attributes: model.ServiceAttributes{Name: "example", Namespace: "ns"},
+			Ports:      model.PortList{{Port: 80, Protocol: protocol.HTTP, Name: "http"}},
+		}},
+		Gateways: ewGateways,
+	})
+
+	// Create endpoints in the remote networks that will use HBONE
+	shards := &model.EndpointShards{Shards: map[model.ShardKey][]*model.IstioEndpoint{}}
+	for _, gw := range ewGateways {
+		shards.Shards[model.ShardKey{Cluster: gw.Cluster}] = []*model.IstioEndpoint{{
+			Network:         gw.Network,
+			Addresses:       []string{"10.0.0.1"}, // Use a different address than the gateway
+			ServicePortName: "http",
+			Namespace:       "ns",
+			HostName:        "example.ns.svc.cluster.local",
+			EndpointPort:    8080,
+			TLSMode:         "istio",
+			Labels:          map[string]string{model.TunnelLabel: model.TunnelHTTP},
+			Locality:        model.Locality{ClusterID: gw.Cluster},
+		}}
+	}
+
+	// Convert to EndpointIndex
+	index := model.NewEndpointIndex(model.NewXdsCache())
+	for shardKey, testEps := range shards.Shards {
+		svc, _ := index.GetOrCreateEndpointShard("example.ns.svc.cluster.local", "ns")
+		svc.Shards[shardKey] = testEps
+	}
+
+	// Create a waypoint proxy in network1 that will see all the remote endpoints
+	proxy := &model.Proxy{
+		Type: model.Waypoint,
+		Metadata: &model.NodeMetadata{
+			Network:   "network1",
+			ClusterID: "cluster1",
+		},
+	}
+	testProxy := ds.SetupProxy(proxy)
+
+	cn := "outbound|80||example.ns.svc.cluster.local"
+	b := endpoints.NewEndpointBuilder(cn, testProxy, ds.PushContext())
+	cla := b.BuildClusterLoadAssignment(index)
+
+	// Extract EndpointIds and verify they are unique
+	endpointIDs := make(map[string]bool)
+	foundAddresses := make(map[string]bool)
+
+	for _, locEndpoints := range cla.Endpoints {
+		for _, lbEp := range locEndpoints.LbEndpoints {
+			if envoyAddr := lbEp.GetEndpoint().GetAddress().GetEnvoyInternalAddress(); envoyAddr != nil {
+				endpointID := envoyAddr.GetEndpointId()
+				if endpointID == "" {
+					continue // Skip non-internal addresses
+				}
+
+				// Verify the EndpointId is unique
+				if endpointIDs[endpointID] {
+					t.Errorf("Duplicate EndpointId found: %s", endpointID)
+				}
+				endpointIDs[endpointID] = true
+
+				// Extract the gateway address from the EndpointId (should be after the last /)
+				parts := strings.Split(endpointID, "/")
+				if len(parts) >= 2 {
+					gatewayAddr := parts[len(parts)-1]
+					foundAddresses[gatewayAddr] = true
+				}
+			}
+		}
+	}
+
+	expectedAddresses := make(map[string]bool)
+	for _, gw := range ewGateways {
+		expectedAddresses[gw.Addr] = true
+	}
+
+	for expectedAddr := range expectedAddresses {
+		if !foundAddresses[expectedAddr] {
+			t.Errorf("Expected to find EndpointId with gateway address %s, but didn't", expectedAddr)
+		}
+	}
+
+	// Verify we have unique EndpointIds for each gateway
+	if len(endpointIDs) < len(ewGateways) {
+		t.Errorf("Expected at least %d unique EndpointIds, got %d", len(ewGateways), len(endpointIDs))
+	}
 }
