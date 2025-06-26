@@ -64,8 +64,8 @@ require (
 	github.com/prometheus/prometheus v0.303.1
 	github.com/quic-go/quic-go v0.51.0
 	github.com/ryanuber/go-glob v1.0.0
-	github.com/solo-io/go-utils v0.27.3
-	github.com/solo-io/licensing v0.6.0
+	github.com/solo-io/go-utils v0.28.4
+	github.com/solo-io/licensing v0.7.2
 	github.com/spf13/cobra v1.9.1
 	github.com/spf13/pflag v1.0.6
 	github.com/spf13/viper v1.20.1

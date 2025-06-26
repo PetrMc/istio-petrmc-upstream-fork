@@ -31,6 +31,9 @@ var licenses = map[string]mockLicenseResponse{
 	"active core":        {state: client.LicenseStateOk, product: model.Product_GlooCore},
 	"active trial":       {state: client.LicenseStateOk, product: model.Product_GlooTrial},
 	"expired trial":      {state: client.LicenseStateExpired, product: model.Product_GlooTrial},
+	"active support":     {state: client.LicenseStateOk, product: model.Product_IstioSupportBasic},
+	"expired support":    {state: client.LicenseStateExpired, product: model.Product_IstioSupportBasic},
+	"invalid support":    {state: client.LicenseStateInvalid, product: model.Product_IstioSupportBasic},
 }
 
 type MockClient struct {
@@ -130,6 +133,35 @@ func TestLicense(t *testing.T) {
 		assert.Equal(t, CheckLicense(FeatureLTS, false), true)
 		assert.Equal(t, CheckLicense(FeatureFIPS, false), true)
 	})
+	t.Run("active support env", func(t *testing.T) {
+		test.SetEnvForTest(t, envInlineLicense, "active support")
+		state, err := setupTest(nil)
+		assert.NoError(t, err)
+		assert.Equal(t, state, StateOK)
+
+		assert.Equal(t, CheckLicense(FeatureMultiCluster, false), false)
+		assert.Equal(t, CheckLicense(FeatureLTS, false), true)
+	})
+	t.Run("expired support env", func(t *testing.T) {
+		// For support, even when expired, it is still valid
+		test.SetEnvForTest(t, envInlineLicense, "expired support")
+		state, err := setupTest(nil)
+		assert.NoError(t, err)
+		assert.Equal(t, state, StateOK)
+
+		assert.Equal(t, CheckLicense(FeatureMultiCluster, false), false)
+		assert.Equal(t, CheckLicense(FeatureLTS, false), true)
+	})
+	t.Run("invalid support env", func(t *testing.T) {
+		// For support, invalid is not allowed
+		test.SetEnvForTest(t, envInlineLicense, "invalid support")
+		state, err := setupTest(nil)
+		assert.Error(t, err)
+		assert.Equal(t, state, StateInvalid)
+
+		assert.Equal(t, CheckLicense(FeatureMultiCluster, false), false)
+		assert.Equal(t, CheckLicense(FeatureLTS, false), false)
+	})
 	t.Run("bypass env", func(t *testing.T) {
 		// Test builds should always be allowed to bypass
 		test.SetEnvForTest(t, envBypassCheck, "true")
@@ -171,6 +203,9 @@ func TestXDSLicense(t *testing.T) {
 		{"invalid enterprise", StateInvalid},
 		// Ztunnel currently requires a single value, and all features require enterprise
 		{"active core", StateInvalid},
+		{"active support", StateInvalid},
+		{"expired support", StateInvalid},
+		{"invalid support", StateInvalid},
 		{"active trial", StateOK},
 		// Expire trial is not allowed
 		{"expired trial", StateExpired},

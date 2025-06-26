@@ -427,10 +427,10 @@ github.com/shopspring/decimal v1.4.0/go.mod h1:gawqmDU56v4yIKSwfBSFip1HdCCXN8/+D
 github.com/sirupsen/logrus v1.4.2/go.mod h1:tLMulIdttU9McNUspp0xgXVQah82FyeX6MwdIuYE2rE=
 github.com/sirupsen/logrus v1.9.3 h1:dueUQJ1C2q9oE3F7wvmSGAaVtTmUizReu6fjN8uqzbQ=
 github.com/sirupsen/logrus v1.9.3/go.mod h1:naHLuLoDiP4jHNo9R0sCBMtWGeIprob74mVsIT4qYEQ=
-github.com/solo-io/go-utils v0.27.3 h1:1LxErw8pisPAuH1Vk6FKRgnvkwgm7mHrpjZow0hvfnA=
-github.com/solo-io/go-utils v0.27.3/go.mod h1:cwbQIYO1/BeU4aPB0Yy8WzzS77dfVTZyCVqbA4YsRSY=
-github.com/solo-io/licensing v0.6.0 h1:i9n6djalk8m7udHbDNFVJZtFV1CpFIYjaCDTmOjep+s=
-github.com/solo-io/licensing v0.6.0/go.mod h1:SCnulCUOgrPmMuHzNO+hQLijFp3TtY+E80et0M5R7Uc=
+github.com/solo-io/go-utils v0.28.4 h1:IH3p/CttV5kzRgxBgk+beynbdFBQyxNFN2bOsgK1nGs=
+github.com/solo-io/go-utils v0.28.4/go.mod h1:/V0ovlR+tGhb4+QNYIffKscuhtUIEoN29mJhWjYLYA4=
+github.com/solo-io/licensing v0.7.2 h1:I1AZlS46mMuYJ3o0hhDZTWwr89Ajw5XuN5FOm7DZZwU=
+github.com/solo-io/licensing v0.7.2/go.mod h1:iAx9/UjtuNYVhJecRLi1YiN2U91fTQu7z3v3S/YL8ZI=
 github.com/sourcegraph/conc v0.3.0 h1:OQTbbt6P72L20UqAkXXuLOj79LfEanQ+YQFNpLA9ySo=
 github.com/sourcegraph/conc v0.3.0/go.mod h1:Sdozi7LEKbFPqYX2/J+iBAM6HpqSLTASQIKqDmF7Mt0=
 github.com/spf13/afero v1.14.0 h1:9tH6MapGnn/j0eb0yIXiLjERO8RB6xIVZRDCX7PtqWA=
