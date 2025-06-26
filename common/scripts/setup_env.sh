@@ -147,7 +147,11 @@ if [[ -n "${SSH_AUTH_SOCK:-}" ]]; then
 fi
 
 # Bring in the SSH known_hosts
-CONDITIONAL_HOST_MOUNTS+="--mount type=bind,source=${HOME}/.ssh/known_hosts,destination=/home/ubuntu/.ssh/known_hosts,readonly "
+# Allow a HOME_DIR_OVERRIDE to be set. The justification here is, in instances where a UID that is neither
+# 0 and 1000 on the host is used, that is the UID given to the container. However, Ubuntu reserves the username
+# ubuntu for UID 1000, and upstream creates a user with the $UID as "user". Not sure of the implications just yet
+# of changing this, so for now, allow an environment variable override.
+CONDITIONAL_HOST_MOUNTS+="--mount type=bind,source=${HOME}/.ssh/known_hosts,destination=${HOME_DIR_OVERRIDE:-/home/ubuntu}/.ssh/known_hosts,readonly "
 
 # echo ${CONDITIONAL_HOST_MOUNTS}
 
