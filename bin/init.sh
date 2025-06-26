@@ -192,18 +192,27 @@ ISTIO_ENVOY_NATIVE_PATH=${ISTIO_ENVOY_LINUX_RELEASE_PATH}
 
 # Dropped in favor of upstream Envoy, see https://solo-io-corp.slack.com/archives/C04T298GD28/p1689866392407009
 # **SOLO** Add our libsaxon/modsecurity stuff
-SOLO_LIBSAXON_PATH="${ISTIO_ENVOY_LINUX_RELEASE_DIR}/libsaxon-solo.so"
+#
+# @TODO: Uncomment this when 1.27 is branched
+#
+# SOLO_LIBSAXON_PATH="${ISTIO_ENVOY_LINUX_RELEASE_DIR}/libsaxon-solo.so"
 
 # Download the Modsecurity core rule set to the envoy release dir
-SOLO_CRS_DIR="${ISTIO_ENVOY_LINUX_RELEASE_DIR}/solo-crs"
-echo "Downloading core rule set to ${SOLO_CRS_DIR}"
-download_crs "${SOLO_CRS_DIR}"
+#
+# @TODO: Uncomment this when 1.27 is branched
+#
+#SOLO_CRS_DIR="${ISTIO_ENVOY_LINUX_RELEASE_DIR}/solo-crs"
+#echo "Downloading core rule set to ${SOLO_CRS_DIR}"
+#download_crs "${SOLO_CRS_DIR}"
 
 # Dropped in favor of upstream Envoy, see https://solo-io-corp.slack.com/archives/C04T298GD28/p1689866392407009
 # Download the libsaxon shared object to the envoy release dir
-SOLO_LIBSAXON_BINARY_URL="${ISTIO_ENVOY_BASE_URL}/libsaxon-solo-${ISTIO_ENVOY_VERSION}${ISTIO_ENVOY_ARCH_SUFFIX}.so"
-echo "Downloading libsaxon: ${SOLO_LIBSAXON_BINARY_URL} to ${SOLO_LIBSAXON_PATH}"
-download_libsaxon "${SOLO_LIBSAXON_BINARY_URL}" "${SOLO_LIBSAXON_PATH}"
+#
+# @TODO: Uncomment this when 1.27 is branched
+#
+#SOLO_LIBSAXON_BINARY_URL="${ISTIO_ENVOY_BASE_URL}/libsaxon-solo-${ISTIO_ENVOY_VERSION}${ISTIO_ENVOY_ARCH_SUFFIX}.so"
+#echo "Downloading libsaxon: ${SOLO_LIBSAXON_BINARY_URL} to ${SOLO_LIBSAXON_PATH}"
+#download_libsaxon "${SOLO_LIBSAXON_BINARY_URL}" "${SOLO_LIBSAXON_PATH}"
 
 # Copy native envoy binary to TARGET_OUT
 echo "Copying ${ISTIO_ENVOY_NATIVE_PATH} to ${TARGET_OUT}/${SIDECAR}"
@@ -211,6 +220,6 @@ cp -f "${ISTIO_ENVOY_NATIVE_PATH}" "${TARGET_OUT}/${SIDECAR}"
 
 # Copy the envoy binary to TARGET_OUT_LINUX if the local OS is not Linux
 if [[ "$GOOS_LOCAL" != "linux" ]]; then
-   echo "Copying ${ISTIO_ENVOY_LINUX_RELEASE_PATH} to ${TARGET_OUT_LINUX}/${SIDECAR}"
+  echo "Copying ${ISTIO_ENVOY_LINUX_RELEASE_PATH} to ${TARGET_OUT_LINUX}/${SIDECAR}"
   cp -f "${ISTIO_ENVOY_LINUX_RELEASE_PATH}" "${TARGET_OUT_LINUX}/${SIDECAR}"
 fi
