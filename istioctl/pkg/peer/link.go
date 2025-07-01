@@ -7,7 +7,6 @@ package peer
 import (
 	"context"
 	"fmt"
-	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -22,6 +21,7 @@ import (
 	"istio.io/istio/pkg/config/schema/gvk"
 	"istio.io/istio/pkg/kube"
 	"istio.io/istio/pkg/ptr"
+	"istio.io/istio/pkg/slices"
 	"istio.io/istio/pkg/util/sets"
 )
 
@@ -62,10 +62,7 @@ func Link(ctx cli.Context) *cobra.Command {
 			if ((len(contexts) + len(to) + len(from)) > 0) && generate {
 				return fmt.Errorf("--generate cannot be used with --contexts, --to, or --from")
 			}
-			ctxCopy := contexts[:]
-			slices.Sort(ctxCopy)
-			ctxCopy = slices.Compact(ctxCopy)
-			if len(ctxCopy) < len(contexts) {
+			if len(slices.FilterDuplicates(contexts)) < len(contexts) {
 				return fmt.Errorf("--contexts cannot contain duplicate contexts")
 			}
 			return nil
