@@ -65,8 +65,10 @@ function trace() {
 function setup_gcloud_credentials() {
   if [[ $(command -v gcloud) ]]; then
     gcloud auth configure-docker us-docker.pkg.dev -q
+    gcloud auth configure-docker us-east1-docker.pkg.dev -q
   elif [[ $(command -v docker-credential-gcr) ]]; then
     docker-credential-gcr configure-docker --registries=-us-docker.pkg.dev
+    docker-credential-gcr configure-docker --registries=-us-east1-docker.pkg.dev
   else
     echo "No credential helpers found, push to docker may not function properly"
   fi
@@ -176,7 +178,7 @@ function setup_kind_registry() {
       cat <<EOF | docker exec -i "${node}" cp /dev/stdin "${KIND_REGISTRY_DIR}/hosts.toml"
 [host."http://${KIND_REGISTRY_NAME}:5000"]
 EOF
-    
+
       kubectl annotate node "${node}" "kind.x-k8s.io/registry=kind-registry:${KIND_REGISTRY_PORT}" --overwrite;
     done
 
