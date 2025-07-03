@@ -21,6 +21,7 @@ import (
 	"istio.io/istio/pkg/config/schema/gvk"
 	"istio.io/istio/pkg/kube"
 	"istio.io/istio/pkg/ptr"
+	"istio.io/istio/pkg/slices"
 	"istio.io/istio/pkg/util/sets"
 )
 
@@ -50,7 +51,7 @@ func Link(ctx cli.Context) *cobra.Command {
 				return fmt.Errorf("expected zero args")
 			}
 			if len(contexts) > 0 && (len(to) > 0 || len(from) > 0) {
-				return fmt.Errorf("--context and --to/--from cannot be used together")
+				return fmt.Errorf("--contexts and --to/--from cannot be used together")
 			}
 			if (len(to) > 0) != (len(from) > 0) {
 				return fmt.Errorf("--to requires --from")
@@ -60,6 +61,9 @@ func Link(ctx cli.Context) *cobra.Command {
 			}
 			if ((len(contexts) + len(to) + len(from)) > 0) && generate {
 				return fmt.Errorf("--generate cannot be used with --contexts, --to, or --from")
+			}
+			if len(slices.FilterDuplicates(contexts)) < len(contexts) {
+				return fmt.Errorf("--contexts cannot contain duplicate contexts")
 			}
 			return nil
 		},
