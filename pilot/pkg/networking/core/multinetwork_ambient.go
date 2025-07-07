@@ -407,13 +407,20 @@ func applyMultinetworkSubset(c *cluster.Cluster) {
 	if c.GetType() != cluster.Cluster_EDS {
 		return
 	}
+	// Conditionally enable localityWeightAware based on if we are using locality weighting
+	// If we set localityWeightAware without locality weighting, Envoy rejects.
+	// If we don't set it, envoy ignores the locality weights.
+	localityWeightAware := false
+	if c.GetCommonLbConfig().GetLocalityWeightedLbConfig() != nil {
+		localityWeightAware = true
+	}
 	c.LbSubsetConfig = &cluster.Cluster_LbSubsetConfig{
 		SubsetSelectors: []*cluster.Cluster_LbSubsetConfig_LbSubsetSelector{
 			{Keys: []string{"cross-network"}},
 		},
 		// We want to be able to filter to cross-network=false, but not require it
-		FallbackPolicy: cluster.Cluster_LbSubsetConfig_ANY_ENDPOINT,
-		// LocalityWeightAware: true, // This seems to make things crash
+		FallbackPolicy:      cluster.Cluster_LbSubsetConfig_ANY_ENDPOINT,
+		LocalityWeightAware: localityWeightAware,
 	}
 }
 
