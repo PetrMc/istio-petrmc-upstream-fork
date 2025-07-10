@@ -1688,6 +1688,50 @@ func TestServiceEntryWorkloads(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "global service without local k8s service",
+			inputs: []any{
+				Waypoint{
+					Named: krt.Named{Name: "waypoint", Namespace: "ns"},
+					Address: &workloadapi.GatewayAddress{
+						Destination: &workloadapi.GatewayAddress_Hostname{
+							Hostname: &workloadapi.NamespacedHostname{
+								Namespace: "ns",
+								Hostname:  "waypoint.example.com",
+							},
+						},
+					},
+					TrafficType: constants.AllTraffic,
+				},
+			},
+			se: &networkingclient.ServiceEntry{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "autogen.ns.name",
+					Namespace: "istio-system",
+				},
+				Spec: networking.ServiceEntry{
+					Hosts: []string{"name.ns.mesh.internal"},
+					Ports: []*networking.ServicePort{{
+						Number:     80,
+						Name:       "port-80",
+						Protocol:   "TCP",
+						TargetPort: 80,
+					}},
+					Resolution: networking.ServiceEntry_STATIC,
+					SubjectAltNames: []string{
+						"spiffe://cluster0/ns/ns/sa/ns-name",
+						"spiffe://cluster0/ns/ns/sa/waypoint",
+					},
+					WorkloadSelector: &networking.WorkloadSelector{
+						Labels: map[string]string{
+							peering.ParentServiceLabel:          "name",
+							peering.ParentServiceNamespaceLabel: "ns",
+						},
+					},
+				},
+			},
+			result: []*workloadapi.Workload{},
+		},
 	}
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
