@@ -791,6 +791,7 @@ func TestPodWorkloads(t *testing.T) {
 				EndpointSlicesAddressIndex,
 				krttest.GetMockCollection[*v1.Namespace](mock),
 				krttest.GetMockCollection[Node](mock),
+				krttest.GetMockCollection[*v1.Service](mock),
 			)
 			wrapper := builder(krt.TestingDummyContext{}, tt.pod)
 			var res *workloadapi.Workload
@@ -1516,6 +1517,7 @@ func TestWorkloadEntryWorkloads(t *testing.T) {
 				WorkloadServices,
 				WorkloadServicesNamespaceIndex,
 				krttest.GetMockCollection[*v1.Namespace](mock),
+				krttest.GetMockCollection[*v1.Service](mock),
 			)
 			wrapper := builder(krt.TestingDummyContext{}, tt.we)
 			var res *workloadapi.Workload
@@ -1697,6 +1699,7 @@ func TestServiceEntryWorkloads(t *testing.T) {
 				krttest.GetMockCollection[*securityclient.PeerAuthentication](mock),
 				krttest.GetMockCollection[Waypoint](mock),
 				krttest.GetMockCollection[*v1.Namespace](mock),
+				krttest.GetMockCollection[*v1.Service](mock),
 			)
 			res := builder(krt.TestingDummyContext{}, tt.se)
 			wl := slices.Map(res, func(e model.WorkloadInfo) *workloadapi.Workload {

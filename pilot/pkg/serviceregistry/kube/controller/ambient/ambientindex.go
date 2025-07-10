@@ -396,6 +396,7 @@ func New(options Options) Index {
 		ServiceEntries,
 		EndpointSlices,
 		Namespaces,
+		Services,
 		opts,
 	)
 
