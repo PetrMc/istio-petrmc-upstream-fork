@@ -95,7 +95,16 @@ func (a *index) WorkloadsCollection(
 	// Workloads coming from workloadEntries. These are 1:1 with WorkloadEntry.
 	WorkloadEntryWorkloads := krt.NewCollection(
 		workloadEntries,
-		a.workloadEntryWorkloadBuilder(meshConfig, authorizationPolicies, peerAuths, waypoints, workloadServices, WorkloadServicesNamespaceIndex, namespaces, services),
+		a.workloadEntryWorkloadBuilder(
+			meshConfig,
+			authorizationPolicies,
+			peerAuths,
+			waypoints,
+			workloadServices,
+			WorkloadServicesNamespaceIndex,
+			namespaces,
+			services,
+		),
 		opts.WithName("WorkloadEntryWorkloads")...,
 	)
 	// Workloads coming from serviceEntries. These are inlined workloadEntries (under `spec.endpoints`); these serviceEntries will
@@ -352,7 +361,17 @@ func (a *index) podWorkloadBuilder(
 			}))
 		}
 		fetchedWorkloadServices := krt.Fetch(ctx, workloadServices, fo...)
-		fetchedWorkloadServices = append(fetchedWorkloadServices, a.matchingServicesWithoutSelectors(ctx, p, fetchedWorkloadServices, workloadServices, endpointSlices, endpointSlicesAddressIndex)...)
+		fetchedWorkloadServices = append(
+			fetchedWorkloadServices,
+			a.matchingServicesWithoutSelectors(
+				ctx,
+				p,
+				fetchedWorkloadServices,
+				workloadServices,
+				endpointSlices,
+				endpointSlicesAddressIndex,
+			)...,
+		)
 		// Logic from https://github.com/kubernetes/kubernetes/blob/7c873327b679a70337288da62b96dd610858181d/staging/src/k8s.io/endpointslice/utils.go#L37
 		// Kubernetes has Ready, Serving, and Terminating. We only have a boolean, which is sufficient for our cases
 		status := workloadapi.WorkloadStatus_HEALTHY
