@@ -1,0 +1,9 @@
+apiVersion: release-notes/v2
+kind: bug-fix
+area: security
+issue:
+  - https://github.com/solo-io/istio/issues/2843
+releaseNotes:
+  - |
+    **Fixed** Traffic to a global service routed through a local waypoint can bypass remote waypoint (where policy is applied) when the global service does not has a local k8s service.
+    Adds a new attachment-denied-for-global-service status message to the waypoint policy status.
