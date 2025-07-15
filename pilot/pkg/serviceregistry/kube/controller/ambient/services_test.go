@@ -1073,11 +1073,8 @@ func TestServiceServices(t *testing.T) {
 			builder := a.serviceServiceBuilder(
 				krttest.GetMockCollection[Waypoint](mock),
 				krttest.GetMockCollection[*v1.Namespace](mock),
-				// <<<<<<< HEAD
 				krttest.GetMockCollection[*networkingclient.ServiceEntry](mock),
-				// =======
 				krttest.GetMockSingleton[MeshConfig](mock),
-				// >>>>>>> upstream/master
 			)
 			res := builder(krt.TestingDummyContext{}, tt.svc)
 			if res == nil {
@@ -1209,20 +1206,12 @@ func TestServiceConditions(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			mock := krttest.NewMock(t, tt.inputs)
 			a := newAmbientUnitTest(t)
-			// <<<<<<< HEAD
-			// 			builder := a.serviceServiceBuilder(
-			// 				krttest.GetMockCollection[Waypoint](mock),
-			// 				krttest.GetMockCollection[*v1.Namespace](mock),
-			// 				nil
-			// 			)
-			// =======
 			builder := a.serviceServiceBuilder(
 				krttest.GetMockCollection[Waypoint](mock),
 				krttest.GetMockCollection[*v1.Namespace](mock),
 				krttest.GetMockCollection[*networkingclient.ServiceEntry](mock),
 				krttest.GetMockSingleton[MeshConfig](mock),
 			)
-			// >>>>>>> upstream/master
 			res := builder(krt.TestingDummyContext{}, tt.svc)
 			assert.Equal(t, res.GetConditions(), tt.conditions)
 		})
