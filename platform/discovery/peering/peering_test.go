@@ -23,6 +23,7 @@ import (
 	klabels "k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	k8s "sigs.k8s.io/gateway-api/apis/v1"
 	k8sbeta "sigs.k8s.io/gateway-api/apis/v1beta1"
 
@@ -59,35 +60,118 @@ func TestPeering(t *testing.T) {
 		c1.ConnectTo(c2)
 		return c1, c2
 	}
+
+	ports1 := []corev1.ServicePort{
+		{
+			Port:     80,
+			Protocol: "TCP",
+			Name:     "http",
+		},
+		{
+			Port:       81,
+			Name:       "81",
+			Protocol:   "TCP",
+			TargetPort: intstr.FromInt(8081),
+		},
+		{
+			Port:       82,
+			Name:       "82",
+			Protocol:   "TCP",
+			TargetPort: intstr.FromString("target-821"),
+		},
+		{
+			Port:     91,
+			Protocol: "TCP",
+			Name:     "extra1",
+		},
+	}
+	ports2 := []corev1.ServicePort{
+		{
+			Port:     80,
+			Protocol: "TCP",
+			Name:     "http",
+		},
+		{
+			Port:       81,
+			Name:       "81",
+			Protocol:   "TCP",
+			TargetPort: intstr.FromInt(8082),
+		},
+		{
+			Port:       82,
+			Name:       "82",
+			Protocol:   "TCP",
+			TargetPort: intstr.FromString("target-822"),
+		},
+		{
+			Port:     92,
+			Protocol: "TCP",
+			Name:     "extra2",
+		},
+	}
+
+	defaultSvc1Name := "autogen.default.svc1"
+	defaultSvc2Name := "autogen.default.svc2"
+	defaultSvc3Name := "autogen.default.svc3"
+	c1Svc1Name := "autogen.c1.default.svc1"
+	c2Svc1Name := "autogen.c2.default.svc1"
+	c2Svc2Name := "autogen.c2.default.svc2"
+	c2Svc3Name := "autogen.c2.default.svc3"
+
 	t.Run("both exported", func(t *testing.T) {
 		c1, c2 := setup(t)
-		c1.CreateService("svc1", true)
-		c2.CreateService("svc1", true)
+		c1.CreateService("svc1", true, ports1)
+		c2.CreateService("svc1", true, ports2)
 
-		AssertWE(c1, DesiredWE{Name: "autogen.c2.default.svc1"})
-		AssertSE(c1, DesiredSE{Name: "autogen.default.svc1"})
+		AssertWE(c1, DesiredWE{Name: c2Svc1Name})
+		AssertWEPorts(c1, c2Svc1Name, map[string]uint32{"port-80": 80, "port-81": 81, "port-92": 92, "target-821": 82})
+		AssertSE(c1, DesiredSE{Name: defaultSvc1Name})
+		AssertSEPorts(c1, defaultSvc1Name, []*networking.ServicePort{
+			{Name: "http", Protocol: "HTTP", Number: 80},
+			{Name: "81", Number: 81, TargetPort: 8081},
+			{Name: "target-821", Number: 82},
+			{Name: "extra1", Number: 91},
+		})
 
 		AssertWE(c2)
-		AssertSE(c2, DesiredSE{Name: "autogen.default.svc1"})
+		AssertSE(c2, DesiredSE{Name: defaultSvc1Name})
+		AssertSEPorts(c2, defaultSvc1Name, []*networking.ServicePort{
+			{Name: "http", Protocol: "HTTP", Number: 80},
+			{Name: "81", Number: 81, TargetPort: 8082},
+			{Name: "target-822", Number: 82},
+			{Name: "extra2", Number: 92},
+		})
 	})
 	t.Run("local exported", func(t *testing.T) {
 		c1, c2 := setup(t)
-		c1.CreateService("svc1", true)
-		c2.CreateService("svc1", false)
+		c1.CreateService("svc1", true, ports1)
+		c2.CreateService("svc1", false, ports2)
 
 		AssertWE(c1)
-		AssertSE(c1, DesiredSE{Name: "autogen.default.svc1"})
+		AssertSE(c1, DesiredSE{Name: defaultSvc1Name})
+		AssertSEPorts(c1, defaultSvc1Name, []*networking.ServicePort{
+			{Name: "http", Protocol: "HTTP", Number: 80},
+			{Name: "81", Number: 81, TargetPort: 8081},
+			{Name: "target-821", Number: 82},
+			{Name: "extra1", Number: 91},
+		})
 
 		AssertWE(c2)
 		AssertSE(c2)
 	})
 	t.Run("local only", func(t *testing.T) {
 		c1, c2 := setup(t)
-		c1.CreateService("svc1", true)
+		c1.CreateService("svc1", true, ports1)
 		// No service in c2 at all
 
 		AssertWE(c1)
-		AssertSE(c1, DesiredSE{Name: "autogen.default.svc1"})
+		AssertSE(c1, DesiredSE{Name: defaultSvc1Name})
+		AssertSEPorts(c1, defaultSvc1Name, []*networking.ServicePort{
+			{Name: "http", Protocol: "HTTP", Number: 80},
+			{Name: "81", Number: 81, TargetPort: 8081},
+			{Name: "target-821", Number: 82},
+			{Name: "extra1", Number: 91},
+		})
 
 		AssertWE(c2)
 		AssertSE(c2)
@@ -95,80 +179,154 @@ func TestPeering(t *testing.T) {
 	t.Run("remote only", func(t *testing.T) {
 		c1, c2 := setup(t)
 		// No service in c1 at all
-		c2.CreateService("svc1", true)
+		c2.CreateService("svc1", true, ports2)
 
-		AssertWE(c1, DesiredWE{Name: "autogen.c2.default.svc1"})
-		AssertSE(c1, DesiredSE{Name: "autogen.default.svc1"})
+		AssertWE(c1, DesiredWE{Name: c2Svc1Name})
+		AssertWEPorts(c1, c2Svc1Name, map[string]uint32{"port-80": 80, "port-81": 81, "port-92": 92, "port-82": 82})
+		AssertSE(c1, DesiredSE{Name: defaultSvc1Name})
+		AssertSEPorts(c1, defaultSvc1Name, []*networking.ServicePort{
+			{Name: "port-80", Number: 80, Protocol: "TCP", TargetPort: 80},
+			{Name: "port-81", Number: 81, Protocol: "TCP", TargetPort: 81},
+			{Name: "port-82", Number: 82, Protocol: "TCP", TargetPort: 82},
+			{Name: "port-92", Number: 92, Protocol: "TCP", TargetPort: 92},
+		})
 
 		AssertWE(c2)
-		AssertSE(c2, DesiredSE{Name: "autogen.default.svc1"})
+		AssertSE(c2, DesiredSE{Name: defaultSvc1Name})
+		AssertSEPorts(c2, defaultSvc1Name, []*networking.ServicePort{
+			{Name: "http", Protocol: "HTTP", Number: 80},
+			{Name: "81", Number: 81, TargetPort: 8082},
+			{Name: "target-822", Number: 82},
+			{Name: "extra2", Number: 92},
+		})
 	})
 	t.Run("fully bidirection", func(t *testing.T) {
 		c1, c2 := setup(t)
 		c2.ConnectTo(c1)
-		c1.CreateService("svc1", true)
-		c2.CreateService("svc1", true)
+		c1.CreateService("svc1", true, ports1)
+		c2.CreateService("svc1", true, ports2)
 
-		AssertWE(c1, DesiredWE{Name: "autogen.c2.default.svc1"})
-		AssertSE(c1, DesiredSE{Name: "autogen.default.svc1"})
+		AssertWE(c1, DesiredWE{Name: c2Svc1Name})
+		AssertWEPorts(c1, c2Svc1Name, map[string]uint32{"port-80": 80, "port-81": 81, "port-92": 92, "target-821": 82})
+		AssertSE(c1, DesiredSE{Name: defaultSvc1Name})
+		AssertSEPorts(c1, defaultSvc1Name, []*networking.ServicePort{
+			{Name: "http", Protocol: "HTTP", Number: 80},
+			{Name: "81", Number: 81, TargetPort: 8081},
+			{Name: "target-821", Number: 82},
+			{Name: "extra1", Number: 91},
+		})
 
-		AssertWE(c2, DesiredWE{Name: "autogen.c1.default.svc1"})
-		AssertSE(c2, DesiredSE{Name: "autogen.default.svc1"})
+		AssertWE(c2, DesiredWE{Name: c1Svc1Name})
+		AssertWEPorts(c2, c1Svc1Name, map[string]uint32{"port-80": 80, "port-81": 81, "port-91": 91, "target-822": 82})
+		AssertSE(c2, DesiredSE{Name: defaultSvc1Name})
+		AssertSEPorts(c2, defaultSvc1Name, []*networking.ServicePort{
+			{Name: "http", Protocol: "HTTP", Number: 80},
+			{Name: "81", Number: 81, TargetPort: 8082},
+			{Name: "target-822", Number: 82},
+			{Name: "extra2", Number: 92},
+		})
 	})
 	t.Run("service accounts", func(t *testing.T) {
 		c1, c2 := setup(t)
 		c2.ConnectTo(c1)
-		c1.CreateService("svc1", true)
-		c1.CreateWorkload("svc1", "we1", "sa-1")
-		c1.CreateWorkload("svc1", "we2", "sa-1")
-		c1.CreateWorkload("svc1", "we3", "sa-2")
-		c2.CreateService("svc1", true)
+		c1.CreateService("svc1", true, ports1)
+		c1.CreateWorkload("svc1", "we1", "sa-1", nil)
+		c1.CreateWorkload("svc1", "we2", "sa-1", nil)
+		c1.CreateWorkload("svc1", "we3", "sa-2", nil)
+		c2.CreateService("svc1", true, ports2)
 
-		AssertWE(c1, DesiredWE{Name: "autogen.c2.default.svc1"})
-		AssertSE(c1, DesiredSE{Name: "autogen.default.svc1"})
+		AssertWE(c1, DesiredWE{Name: c2Svc1Name})
+		AssertWEPorts(c2, c1Svc1Name, map[string]uint32{"port-80": 80, "port-81": 81, "port-91": 91, "target-822": 82})
+		AssertSE(c1, DesiredSE{Name: defaultSvc1Name})
+		AssertSEPorts(c1, defaultSvc1Name, []*networking.ServicePort{
+			{Name: "http", Protocol: "HTTP", Number: 80},
+			{Name: "81", Number: 81, TargetPort: 8081},
+			{Name: "target-821", Number: 82},
+			{Name: "extra1", Number: 91},
+		})
 
-		AssertWE(c2, DesiredWE{Name: "autogen.c1.default.svc1"})
-		AssertSE(c2, DesiredSE{Name: "autogen.default.svc1", ServiceAccounts: []string{
+		AssertWE(c2, DesiredWE{Name: c1Svc1Name})
+		AssertWEPorts(c2, c1Svc1Name, map[string]uint32{"port-80": 80, "port-81": 81, "port-91": 91, "target-822": 82})
+		AssertSE(c2, DesiredSE{Name: defaultSvc1Name, ServiceAccounts: []string{
 			"spiffe://cluster.local/ns/default/sa/sa-1",
 			"spiffe://cluster.local/ns/default/sa/sa-2",
 		}})
+		AssertSEPorts(c2, defaultSvc1Name, []*networking.ServicePort{
+			{Name: "http", Protocol: "HTTP", Number: 80},
+			{Name: "81", Number: 81, TargetPort: 8082},
+			{Name: "target-822", Number: 82},
+			{Name: "extra2", Number: 92},
+		})
 	})
 	t.Run("add and remove gateway", func(t *testing.T) {
 		c1, c2 := setup(t)
 		c2.ConnectTo(c1)
-		c1.CreateService("svc1", true)
-		c2.CreateService("svc1", true)
+		c1.CreateService("svc1", true, ports1)
+		c2.CreateService("svc1", true, ports2)
 
-		AssertWE(c1, DesiredWE{Name: "autogen.c2.default.svc1"})
-		AssertSE(c1, DesiredSE{Name: "autogen.default.svc1"})
+		AssertWE(c1, DesiredWE{Name: c2Svc1Name})
+		AssertSE(c1, DesiredSE{Name: defaultSvc1Name})
 
-		AssertWE(c2, DesiredWE{Name: "autogen.c1.default.svc1"})
-		AssertSE(c2, DesiredSE{Name: "autogen.default.svc1"})
+		AssertWE(c2, DesiredWE{Name: c1Svc1Name})
+		AssertSE(c2, DesiredSE{Name: defaultSvc1Name})
 
 		// Removal of gateway is a permanent drop, not an ephemeral one -- should cleanup resources.
 		c2.DisconnectFrom(c1)
 		AssertWE(c2)
-		AssertSE(c2, DesiredSE{Name: "autogen.default.svc1"})
+		AssertSE(c2, DesiredSE{Name: defaultSvc1Name})
+		AssertSEPorts(c2, defaultSvc1Name, []*networking.ServicePort{
+			{Name: "http", Protocol: "HTTP", Number: 80},
+			{Name: "81", Number: 81, TargetPort: 8082},
+			{Name: "target-822", Number: 82},
+			{Name: "extra2", Number: 92},
+		})
 	})
 	t.Run("add and remove service", func(t *testing.T) {
 		c1, c2 := setup(t)
 		c2.ConnectTo(c1)
-		c1.CreateService("svc1", true)
-		c2.CreateService("svc1", true)
+		c1.CreateService("svc1", true, ports1)
+		c2.CreateService("svc1", true, ports2)
 
-		AssertWE(c1, DesiredWE{Name: "autogen.c2.default.svc1"})
-		AssertSE(c1, DesiredSE{Name: "autogen.default.svc1"})
+		AssertWE(c1, DesiredWE{Name: c2Svc1Name})
+		AssertWEPorts(c1, c2Svc1Name, map[string]uint32{"port-80": 80, "port-81": 81, "port-92": 92, "target-821": 82})
+		AssertSE(c1, DesiredSE{Name: defaultSvc1Name})
+		AssertSEPorts(c1, defaultSvc1Name, []*networking.ServicePort{
+			{Name: "http", Protocol: "HTTP", Number: 80},
+			{Name: "81", Number: 81, TargetPort: 8081},
+			{Name: "target-821", Number: 82},
+			{Name: "extra1", Number: 91},
+		})
 
-		AssertWE(c2, DesiredWE{Name: "autogen.c1.default.svc1"})
-		AssertSE(c2, DesiredSE{Name: "autogen.default.svc1"})
+		AssertWE(c2, DesiredWE{Name: c1Svc1Name})
+		AssertWEPorts(c2, c1Svc1Name, map[string]uint32{"port-80": 80, "port-81": 81, "port-91": 91, "target-822": 82})
+		AssertSE(c2, DesiredSE{Name: defaultSvc1Name})
+		AssertSEPorts(c2, defaultSvc1Name, []*networking.ServicePort{
+			{Name: "http", Protocol: "HTTP", Number: 80},
+			{Name: "81", Number: 81, TargetPort: 8082},
+			{Name: "target-822", Number: 82},
+			{Name: "extra2", Number: 92},
+		})
 
 		// Delete from one cluster...
 		c1.DeleteService("svc1")
-		AssertWE(c1, DesiredWE{Name: "autogen.c2.default.svc1"})
-		AssertSE(c1, DesiredSE{Name: "autogen.default.svc1"})
+		AssertWE(c1, DesiredWE{Name: c2Svc1Name})
+		AssertWEPorts(c1, c2Svc1Name, map[string]uint32{"port-80": 80, "port-81": 81, "port-82": 82, "port-92": 92})
+		AssertSE(c1, DesiredSE{Name: defaultSvc1Name})
+		AssertSEPorts(c1, defaultSvc1Name, []*networking.ServicePort{
+			{Name: "port-80", Number: 80, Protocol: "TCP", TargetPort: 80},
+			{Name: "port-81", Number: 81, Protocol: "TCP", TargetPort: 81},
+			{Name: "port-82", Number: 82, Protocol: "TCP", TargetPort: 82},
+			{Name: "port-92", Number: 92, Protocol: "TCP", TargetPort: 92},
+		})
 
 		AssertWE(c2)
-		AssertSE(c2, DesiredSE{Name: "autogen.default.svc1"})
+		AssertSE(c2, DesiredSE{Name: defaultSvc1Name})
+		AssertSEPorts(c2, defaultSvc1Name, []*networking.ServicePort{
+			{Name: "http", Protocol: "HTTP", Number: 80},
+			{Name: "81", Number: 81, TargetPort: 8082},
+			{Name: "target-822", Number: 82},
+			{Name: "extra2", Number: 92},
+		})
 
 		// Delete from other cluster...
 		c2.DeleteService("svc1")
@@ -183,15 +341,22 @@ func TestPeering(t *testing.T) {
 		c2 := NewCluster(t, "c2")
 
 		c1.ConnectTo(c2)
-		c1.CreateService("svc1", true)
+		c1.CreateService("svc1", true, ports1)
 
 		AssertWE(c1)
-		AssertSE(c1, DesiredSE{Name: "autogen.default.svc1"})
+		AssertSE(c1, DesiredSE{Name: defaultSvc1Name})
+		AssertSEPorts(c1, defaultSvc1Name, []*networking.ServicePort{
+			{Name: "http", Protocol: "HTTP", Number: 80},
+			{Name: "81", Number: 81, TargetPort: 8081},
+			{Name: "target-821", Number: 82},
+			{Name: "extra1", Number: 91},
+		})
 
 		c1.Outage.setOutage(true)
-		c2.CreateService("svc1", true)
+		c2.CreateService("svc1", true, ports2)
 		c1.Outage.setOutage(false)
-		AssertWE(c1, DesiredWE{Name: "autogen.c2.default.svc1"})
+		AssertWE(c1, DesiredWE{Name: c2Svc1Name})
+		AssertWEPorts(c1, c2Svc1Name, map[string]uint32{"port-80": 80, "port-81": 81, "port-92": 92, "target-821": 82})
 	})
 	t.Run("restarts", func(t *testing.T) {
 		features.RemoteClusterTimeout = time.Millisecond * 100
@@ -206,24 +371,70 @@ func TestPeering(t *testing.T) {
 		c2 := NewCluster(t, "c2")
 		c1.ConnectTo(c2)
 
+		c1ports2 := []corev1.ServicePort{
+			{
+				Port:       2001,
+				TargetPort: intstr.FromInt(2001),
+				Protocol:   "TCP",
+				Name:       "2001",
+			},
+		}
+		c1ports3 := []corev1.ServicePort{
+			{
+				Port:       3001,
+				TargetPort: intstr.FromInt(3001),
+				Protocol:   "TCP",
+				Name:       "3001",
+			},
+		}
+		c2ports2 := []corev1.ServicePort{
+			{
+				Port:       2002,
+				TargetPort: intstr.FromInt(2002),
+				Protocol:   "TCP",
+				Name:       "2002",
+			},
+		}
+		c2ports3 := []corev1.ServicePort{
+			{
+				Port:       2003,
+				TargetPort: intstr.FromInt(2003),
+				Protocol:   "TCP",
+				Name:       "2003",
+			},
+		}
 		// 1-3 exist in c1
 		// 1 and 2 exist in c2
-		c1.CreateService("svc1", true)
-		c1.CreateService("svc2", true)
-		c1.CreateService("svc3", true)
-		c2.CreateService("svc1", true)
-		c2.CreateService("svc2", true)
-		c2.CreateWorkload("svc1", "we1", "sa-1")
-		c2.CreateWorkload("svc1", "we2", "sa-1")
-		c2.CreateWorkload("svc1", "we3", "sa-2")
+		c1.CreateService("svc1", true, ports1)
+		c1.CreateService("svc2", true, c1ports2)
+		c1.CreateService("svc3", true, c1ports3)
+		c2.CreateService("svc1", true, ports2)
+		c2.CreateService("svc2", true, c2ports2)
+		c2.CreateWorkload("svc1", "we1", "sa-1", nil)
+		c2.CreateWorkload("svc1", "we2", "sa-1", nil)
+		c2.CreateWorkload("svc1", "we3", "sa-2", nil)
 
 		// we have pointers for the 2 services that exist remotely
-		AssertWE(c1, DesiredWE{Name: "autogen.c2.default.svc1"}, DesiredWE{Name: "autogen.c2.default.svc2"})
+		AssertWE(c1, DesiredWE{Name: c2Svc1Name}, DesiredWE{Name: c2Svc2Name})
+		AssertWEPorts(c1, c2Svc1Name, map[string]uint32{"port-80": 80, "port-81": 81, "port-92": 92, "target-821": 82})
+		AssertWEPorts(c1, c2Svc2Name, map[string]uint32{"port-2002": 2002})
 		// svc1 has some remote workloads so should have those SAs included
-		AssertSE(c1, DesiredSE{Name: "autogen.default.svc1", ServiceAccounts: []string{
+		AssertSE(c1, DesiredSE{Name: defaultSvc1Name, ServiceAccounts: []string{
 			"spiffe://cluster.local/ns/default/sa/sa-1",
 			"spiffe://cluster.local/ns/default/sa/sa-2",
-		}}, DesiredSE{Name: "autogen.default.svc2"}, DesiredSE{Name: "autogen.default.svc3"})
+		}}, DesiredSE{Name: defaultSvc2Name}, DesiredSE{Name: defaultSvc3Name})
+		AssertSEPorts(c1, defaultSvc1Name, []*networking.ServicePort{
+			{Name: "http", Protocol: "HTTP", Number: 80},
+			{Name: "81", Number: 81, TargetPort: 8081},
+			{Name: "target-821", Number: 82},
+			{Name: "extra1", Number: 91},
+		})
+		AssertSEPorts(c1, defaultSvc2Name, []*networking.ServicePort{
+			{Name: "2001", Number: 2001, TargetPort: 2001},
+		})
+		AssertSEPorts(c1, defaultSvc3Name, []*networking.ServicePort{
+			{Name: "3001", Number: 3001, TargetPort: 3001},
+		})
 
 		// c1 "restarts"
 		close(initialStop)
@@ -234,24 +445,52 @@ func TestPeering(t *testing.T) {
 		c1 = newCluster(t, c1k, secondStop, true, "c1")
 		c1k.RunAndWait(fullStop)
 		// We should NOT clean things up
-		AssertWE(c1, DesiredWE{Name: "autogen.c2.default.svc1"}, DesiredWE{Name: "autogen.c2.default.svc2"})
+		AssertWE(c1, DesiredWE{Name: c2Svc1Name}, DesiredWE{Name: "autogen.c2.default.svc2"})
+		AssertWEPorts(c1, c2Svc1Name, map[string]uint32{"port-80": 80, "port-81": 81, "port-92": 92, "target-821": 82})
+		AssertWEPorts(c1, c2Svc2Name, map[string]uint32{"port-2002": 2002})
 		AssertSE(c1, DesiredSE{Name: "autogen.default.svc1", ServiceAccounts: []string{
 			"spiffe://cluster.local/ns/default/sa/sa-1",
 			"spiffe://cluster.local/ns/default/sa/sa-2",
 		}}, DesiredSE{Name: "autogen.default.svc2"}, DesiredSE{Name: "autogen.default.svc3"})
+		AssertSEPorts(c1, defaultSvc1Name, []*networking.ServicePort{
+			{Name: "http", Protocol: "HTTP", Number: 80},
+			{Name: "81", Number: 81, TargetPort: 8081},
+			{Name: "target-821", Number: 82},
+			{Name: "extra1", Number: 91},
+		})
+		AssertSEPorts(c1, defaultSvc2Name, []*networking.ServicePort{
+			{Name: "2001", Number: 2001, TargetPort: 2001},
+		})
+		AssertSEPorts(c1, defaultSvc3Name, []*networking.ServicePort{
+			{Name: "3001", Number: 3001, TargetPort: 3001},
+		})
 
 		// While disconnected, make some changes
 		c2.DeleteService("svc2")
-		c2.CreateService("svc3", true)
+		c2.CreateService("svc3", true, c2ports3)
 		c2.DeleteWorkload("we3")
 
 		// Reconnect... we should see the changes
 		c1.Outage.setOutage(false)
 		// svc2 removed, svc3 added
-		AssertWE(c1, DesiredWE{Name: "autogen.c2.default.svc1"}, DesiredWE{Name: "autogen.c2.default.svc3"})
-		AssertSE(c1, DesiredSE{Name: "autogen.default.svc1", ServiceAccounts: []string{
+		AssertWE(c1, DesiredWE{Name: c2Svc1Name}, DesiredWE{Name: c2Svc3Name})
+		AssertWEPorts(c1, c2Svc1Name, map[string]uint32{"port-80": 80, "port-81": 81, "port-92": 92, "target-821": 82})
+		AssertWEPorts(c1, c2Svc3Name, map[string]uint32{"port-2003": 2003})
+		AssertSE(c1, DesiredSE{Name: defaultSvc1Name, ServiceAccounts: []string{
 			"spiffe://cluster.local/ns/default/sa/sa-1",
 		}}, DesiredSE{Name: "autogen.default.svc2"}, DesiredSE{Name: "autogen.default.svc3"})
+		AssertSEPorts(c1, defaultSvc1Name, []*networking.ServicePort{
+			{Name: "http", Protocol: "HTTP", Number: 80},
+			{Name: "81", Number: 81, TargetPort: 8081},
+			{Name: "target-821", Number: 82},
+			{Name: "extra1", Number: 91},
+		})
+		AssertSEPorts(c1, defaultSvc2Name, []*networking.ServicePort{
+			{Name: "2001", Number: 2001, TargetPort: 2001},
+		})
+		AssertSEPorts(c1, defaultSvc3Name, []*networking.ServicePort{
+			{Name: "3001", Number: 3001, TargetPort: 3001},
+		})
 
 		// c1 "restarts" again
 		close(secondStop)
@@ -263,15 +502,28 @@ func TestPeering(t *testing.T) {
 		c1k.RunAndWait(fullStop)
 		// We should cleanup everything
 		AssertWE(c1)
-		AssertSE(c1, DesiredSE{Name: "autogen.default.svc1"}, DesiredSE{Name: "autogen.default.svc2"}, DesiredSE{Name: "autogen.default.svc3"})
+		AssertSE(c1, DesiredSE{Name: defaultSvc1Name}, DesiredSE{Name: defaultSvc2Name}, DesiredSE{Name: defaultSvc3Name})
+		AssertSEPorts(c1, defaultSvc1Name, []*networking.ServicePort{
+			{Name: "http", Protocol: "HTTP", Number: 80},
+			{Name: "81", Number: 81, TargetPort: 8081},
+			{Name: "target-821", Number: 82},
+			{Name: "extra1", Number: 91},
+		})
+		AssertSEPorts(c1, defaultSvc2Name, []*networking.ServicePort{
+			{Name: "2001", Number: 2001, TargetPort: 2001},
+		})
+		AssertSEPorts(c1, defaultSvc3Name, []*networking.ServicePort{
+			{Name: "3001", Number: 3001, TargetPort: 3001},
+		})
 	})
 	t.Run("local service changes", func(t *testing.T) {
 		c1, c2 := setup(t)
-		c1.CreateServiceLabel("svc1", peering.ServiceScopeGlobal)
-		c2.CreateServiceLabel("svc1", peering.ServiceScopeGlobal)
+		c1.CreateServiceLabel("svc1", peering.ServiceScopeGlobal, ports1)
+		c2.CreateServiceLabel("svc1", peering.ServiceScopeGlobal, ports2)
 
-		AssertWE(c1, DesiredWE{Name: "autogen.c2.default.svc1"})
-		AssertSE(c1, DesiredSE{Name: "autogen.default.svc1"})
+		AssertWE(c1, DesiredWE{Name: c2Svc1Name})
+		AssertWEPorts(c1, c2Svc1Name, map[string]uint32{"port-80": 80, "port-81": 81, "port-92": 92, "target-821": 82})
+		AssertSE(c1, DesiredSE{Name: defaultSvc1Name})
 		lbls := map[string]string{
 			"app":                               "svc1",
 			peering.ParentServiceLabel:          "svc1",
@@ -280,12 +532,97 @@ func TestPeering(t *testing.T) {
 			peering.SourceClusterLabel:          "c2",
 			model.TunnelLabel:                   model.TunnelHTTP,
 		}
-		AssertWELabels(c1, "autogen.c2.default.svc1", lbls)
+		AssertSEPorts(c1, defaultSvc1Name, []*networking.ServicePort{
+			{Name: "http", Protocol: "HTTP", Number: 80},
+			{Name: "81", Number: 81, TargetPort: 8081},
+			{Name: "target-821", Number: 82},
+			{Name: "extra1", Number: 91},
+		})
+		AssertWELabels(c1, c2Svc1Name, lbls)
+		AssertWEPorts(c1, c2Svc1Name, map[string]uint32{"port-80": 80, "port-81": 81, "port-92": 92, "target-821": 82})
 
 		// Switch the label
-		c1.CreateServiceLabel("svc1", peering.ServiceScopeGlobalOnly)
+		c1.CreateServiceLabel("svc1", peering.ServiceScopeGlobalOnly, ports1)
 		lbls[peering.ServiceScopeLabel] = peering.ServiceScopeGlobalOnly
-		AssertWELabels(c1, "autogen.c2.default.svc1", lbls)
+		AssertWELabels(c1, c2Svc1Name, lbls)
+	})
+	t.Run("merge service ports", func(t *testing.T) {
+		ports3 := []corev1.ServicePort{
+			{
+				Port:     80,
+				Protocol: "TCP",
+				Name:     "http",
+			},
+			{
+				Port:       81,
+				Name:       "81",
+				Protocol:   "TCP",
+				TargetPort: intstr.FromInt(8083),
+			},
+			{
+				Port:       82,
+				Name:       "82",
+				Protocol:   "TCP",
+				TargetPort: intstr.FromString("target-823"),
+			},
+			{
+				Port:     93,
+				Protocol: "TCP",
+				Name:     "extra3",
+			},
+		}
+		c1, c2 := setup(t)
+		c3 := NewCluster(t, "c3")
+		c1.ConnectTo(c3)
+		c2.CreateService("svc1", true, ports2)
+		c3.CreateService("svc1", true, ports3)
+
+		c3Svc1Name := "autogen.c3.default.svc1"
+
+		AssertWE(c1, DesiredWE{Name: c2Svc1Name}, DesiredWE{Name: c3Svc1Name})
+		AssertWEPorts(c1, c2Svc1Name, map[string]uint32{"port-80": 80, "port-81": 81, "port-82": 82, "port-92": 92})
+		AssertWEPorts(c1, c3Svc1Name, map[string]uint32{"port-80": 80, "port-81": 81, "port-82": 82, "port-93": 93})
+		AssertSE(c1, DesiredSE{Name: defaultSvc1Name})
+		AssertSEPorts(c1, defaultSvc1Name, []*networking.ServicePort{
+			{Name: "port-80", Number: 80, Protocol: "TCP", TargetPort: 80},
+			{Name: "port-81", Number: 81, Protocol: "TCP", TargetPort: 81},
+			{Name: "port-82", Number: 82, Protocol: "TCP", TargetPort: 82},
+			{Name: "port-92", Number: 92, Protocol: "TCP", TargetPort: 92},
+			{Name: "port-93", Number: 93, Protocol: "TCP", TargetPort: 93},
+		})
+		AssertWE(c2)
+		AssertWE(c3)
+
+		// c1 local
+		c1.CreateService("svc1", false, ports1)
+		AssertWE(c1, DesiredWE{Name: c2Svc1Name}, DesiredWE{Name: c3Svc1Name})
+		AssertWEPorts(c1, c2Svc1Name, map[string]uint32{"port-80": 80, "port-81": 81, "port-82": 82, "port-92": 92})
+		AssertWEPorts(c1, c3Svc1Name, map[string]uint32{"port-80": 80, "port-81": 81, "port-82": 82, "port-93": 93})
+		AssertSE(c1, DesiredSE{Name: defaultSvc1Name})
+		AssertSEPorts(c1, defaultSvc1Name, []*networking.ServicePort{
+			{Name: "port-80", Number: 80, Protocol: "TCP", TargetPort: 80},
+			{Name: "port-81", Number: 81, Protocol: "TCP", TargetPort: 81},
+			{Name: "port-82", Number: 82, Protocol: "TCP", TargetPort: 82},
+			{Name: "port-92", Number: 92, Protocol: "TCP", TargetPort: 92},
+			{Name: "port-93", Number: 93, Protocol: "TCP", TargetPort: 93},
+		})
+		AssertWE(c2)
+		AssertWE(c3)
+
+		// c1 global
+		c1.CreateService("svc1", true, ports1)
+		AssertWE(c1, DesiredWE{Name: c2Svc1Name}, DesiredWE{Name: c3Svc1Name})
+		AssertWEPorts(c1, c2Svc1Name, map[string]uint32{"port-80": 80, "port-81": 81, "port-92": 92, "target-821": 82})
+		AssertWEPorts(c1, c3Svc1Name, map[string]uint32{"port-80": 80, "port-81": 81, "port-93": 93, "target-821": 82})
+		AssertSE(c1, DesiredSE{Name: defaultSvc1Name})
+		AssertSEPorts(c1, defaultSvc1Name, []*networking.ServicePort{
+			{Name: "http", Protocol: "HTTP", Number: 80},
+			{Name: "81", Number: 81, TargetPort: 8081},
+			{Name: "target-821", Number: 82},
+			{Name: "extra1", Number: 91},
+		})
+		AssertWE(c2)
+		AssertWE(c3)
 	})
 }
 
@@ -298,7 +635,7 @@ func TestAutomatedPeering(t *testing.T) {
 	t.Run("creates and removes gme peer gateway", func(t *testing.T) {
 		c1 := NewCluster(t, "c1")
 		c2 := NewCluster(t, "c2")
-		c1.CreateService("svc1", true)
+		c1.CreateService("svc1", true, nil)
 
 		ewGw := c1.CreateOrUpdateEastWestGateway(
 			"istio-eastwest",
@@ -392,7 +729,7 @@ func TestAutomatedPeering(t *testing.T) {
 	t.Run("istioctl link gw equals generated peer gateway", func(t *testing.T) {
 		c1 := NewCluster(t, "c1")
 		c2 := NewCluster(t, "c2")
-		c1.CreateService("svc1", true)
+		c1.CreateService("svc1", true, nil)
 
 		ewGw := c1.CreateOrUpdateEastWestGateway(
 			"istio-eastwest",
@@ -586,15 +923,15 @@ type Cluster struct {
 	Outage          *OutageInjector
 }
 
-func (c *Cluster) CreateService(name string, global bool) {
+func (c *Cluster) CreateService(name string, global bool, ports []corev1.ServicePort) {
 	if global {
-		c.CreateServiceLabel(name, peering.ServiceScopeGlobal)
+		c.CreateServiceLabel(name, peering.ServiceScopeGlobal, ports)
 	} else {
-		c.CreateServiceLabel(name, "")
+		c.CreateServiceLabel(name, "", ports)
 	}
 }
 
-func (c *Cluster) CreateServiceLabel(name string, lbl string) {
+func (c *Cluster) CreateServiceLabel(name string, lbl string, ports []corev1.ServicePort) {
 	labels := map[string]string{}
 	if lbl != "" {
 		labels[peering.ServiceScopeLabel] = lbl
@@ -609,11 +946,7 @@ func (c *Cluster) CreateServiceLabel(name string, lbl string) {
 			Selector: map[string]string{
 				"app": name,
 			},
-			Ports: []corev1.ServicePort{{
-				Port:     80,
-				Protocol: "HTTP",
-				Name:     "http",
-			}},
+			Ports: ports,
 		},
 	})
 }
@@ -622,7 +955,7 @@ func (c *Cluster) DeleteService(name string) {
 	clienttest.NewWriter[*corev1.Service](c.t, c.Kube).Delete(name, "default")
 }
 
-func (c *Cluster) CreateWorkload(serviceName string, workloadName string, serviceAccount string) {
+func (c *Cluster) CreateWorkload(serviceName string, workloadName string, serviceAccount string, ports map[string]uint32) {
 	clienttest.NewWriter[*networkingclient.WorkloadEntry](c.t, c.Kube).CreateOrUpdate(&networkingclient.WorkloadEntry{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      workloadName,
@@ -631,7 +964,10 @@ func (c *Cluster) CreateWorkload(serviceName string, workloadName string, servic
 				"app": serviceName,
 			},
 		},
-		Spec: networking.WorkloadEntry{ServiceAccount: serviceAccount},
+		Spec: networking.WorkloadEntry{
+			ServiceAccount: serviceAccount,
+			Ports:          ports,
+		},
 	})
 }
 
@@ -931,7 +1267,7 @@ func AssertWE(c *Cluster, we ...DesiredWE) {
 	fetch := func() []DesiredWE {
 		return slices.SortBy(
 			slices.MapFilter(c.WorkloadEntries.List(peering.PeeringNamespace, klabels.Everything()), func(a *networkingclient.WorkloadEntry) *DesiredWE {
-				return &DesiredWE{a.Name}
+				return &DesiredWE{Name: a.Name}
 			}),
 			func(a DesiredWE) string {
 				return a.Name
@@ -948,6 +1284,18 @@ func AssertWELabels(c *Cluster, name string, labels map[string]string) {
 		return we.GetLabels()
 	}
 	assert.EventuallyEqual(c.t, fetch, labels)
+}
+
+func AssertWEPorts(c *Cluster, name string, ports map[string]uint32) {
+	c.t.Helper()
+	fetch := func() map[string]uint32 {
+		we := c.WorkloadEntries.Get(name, peering.PeeringNamespace)
+		if we == nil {
+			return nil
+		}
+		return we.Spec.GetPorts()
+	}
+	assert.EventuallyEqual(c.t, fetch, ports)
 }
 
 type DesiredSE struct {
@@ -971,6 +1319,15 @@ func AssertSE(c *Cluster, we ...DesiredSE) {
 		)
 	}
 	assert.EventuallyEqual(c.t, fetch, have, retry.Timeout(time.Second*5))
+}
+
+func AssertSEPorts(c *Cluster, name string, ports []*networking.ServicePort) {
+	c.t.Helper()
+	fetch := func() []*networking.ServicePort {
+		we := c.ServiceEntries.Get(name, peering.PeeringNamespace)
+		return we.Spec.GetPorts()
+	}
+	assert.EventuallyEqual(c.t, fetch, ports)
 }
 
 type OutageInjector struct {
