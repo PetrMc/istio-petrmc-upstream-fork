@@ -35,6 +35,7 @@ import (
 
 	"istio.io/api/label"
 	"istio.io/istio/pilot/pkg/util/protoconv"
+	"istio.io/istio/pkg/cluster"
 	"istio.io/istio/pkg/maps"
 	"istio.io/istio/pkg/ptr"
 	"istio.io/istio/pkg/slices"
@@ -108,6 +109,23 @@ type Config struct {
 
 	// Status holds long-running status.
 	Status Status
+
+	// Extra holds additional, non-spec information for internal processing.
+	Extra map[string]any
+}
+
+type ObjectWithCluster[T any] struct {
+	ClusterID cluster.ID
+	Object    *T
+}
+
+// We can't refer to krt directly without causing an import cycle, but this function
+// implements an interface that allows the krt helper to know how to get the object key
+func (o ObjectWithCluster[T]) GetObjectKeyable() any {
+	if o.Object == nil {
+		return nil
+	}
+	return *o.Object
 }
 
 func LabelsInRevision(lbls map[string]string, rev string) bool {
@@ -392,6 +410,10 @@ func (c *Config) Equals(other *Config) bool {
 	if !equals(c.Status, other.Status) {
 		return false
 	}
+	// Can't use map.Equal because store maps as the value
+	if !equals(c.Extra, other.Extra) {
+		return false
+	}
 	return true
 }
 
@@ -461,6 +483,10 @@ func (c Config) DeepCopy() Config {
 	clone.Spec = DeepCopy(c.Spec)
 	if c.Status != nil {
 		clone.Status = DeepCopy(c.Status)
+	}
+	// Note that this is effectively a shallow clone, but this is fine as it is not manipulated.
+	if c.Extra != nil {
+		clone.Extra = maps.Clone(c.Extra)
 	}
 	return clone
 }

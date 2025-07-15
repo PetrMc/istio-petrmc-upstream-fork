@@ -24,6 +24,10 @@ _internal_defaults_do_not_set:
   cniConfFileName: ""
   cniNetnsDir: "/var/run/netns"
 
+  # If Istio owned CNI config is enabled, defaults to 02-istio-cni.conflist
+  istioOwnedCNIConfigFileName: "" 
+  istioOwnedCNIConfig: false
+
   excludeNamespaces:
     - kube-system
 
@@ -166,6 +170,9 @@ _internal_defaults_do_not_set:
       requests:
         cpu: 100m
         memory: 100Mi
+
+    # In order to use native nftable rules instead of iptable rules, set this flag to true.
+    nativeNftables: false
 
   # A `key: value` mapping of environment variables to add to the pod
   env: {}

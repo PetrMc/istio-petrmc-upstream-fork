@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/netip"
 	"os"
 	"strings"
 	"sync"
@@ -235,7 +236,8 @@ func NewServer(args *PilotArgs, initFuncs ...func(*Server)) (*Server, error) {
 	e.DomainSuffix = args.RegistryOptions.KubeOptions.DomainSuffix
 
 	ac := aggregate.NewController(aggregate.Options{
-		MeshHolder: e,
+		MeshHolder:      e,
+		ConfigClusterID: getClusterID(args),
 	})
 	e.ServiceDiscovery = ac
 
@@ -799,6 +801,7 @@ func (s *Server) initSecureDiscoveryService(args *PilotArgs, trustDomain string)
 		return nil
 	}
 	log.Info("initializing secure discovery service")
+
 	cfg := &tls.Config{
 		GetCertificate: s.getIstiodCertificate,
 		ClientAuth:     tls.VerifyClientCertIfGiven,
@@ -1178,6 +1181,13 @@ func (s *Server) initControllers(args *PilotArgs) error {
 	// END SOLO
 
 	if features.EnableIPAutoallocate {
+		// validate the IP autoallocate CIDR prefixes for IPv4 and IPv6
+		if _, err := netip.ParsePrefix(features.IPAutoallocateIPv4Prefix); err != nil {
+			return fmt.Errorf("invalid IPv4 prefix %s: %v", features.IPAutoallocateIPv4Prefix, err)
+		}
+		if _, err := netip.ParsePrefix(features.IPAutoallocateIPv6Prefix); err != nil {
+			return fmt.Errorf("invalid IPv6 prefix %s: %v", features.IPAutoallocateIPv6Prefix, err)
+		}
 		s.initIPAutoallocateController(args)
 	}
 	s.initPlatformIntegrations(args)

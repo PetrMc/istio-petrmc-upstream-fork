@@ -11,18 +11,19 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-package capture
+package tproxy
 
 import (
 	"fmt"
 	"net"
 	"strconv"
+	"strings"
 
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
 
 	"istio.io/istio/pkg/log"
-	"istio.io/istio/tools/istio-iptables/pkg/config"
+	"istio.io/istio/tools/common/config"
 )
 
 // configureTProxyRoutes configures ip firewall rules to enable TPROXY support.
@@ -30,7 +31,7 @@ import (
 func configureTProxyRoutes(cfg *config.Config) error {
 	if cfg.InboundPortsInclude != "" {
 		if cfg.InboundInterceptionMode == "TPROXY" {
-			link, err := netlink.LinkByName("lo")
+			link, err := config.LinkByNameWithRetries("lo")
 			if err != nil {
 				return fmt.Errorf("failed to find 'lo' link: %v", err)
 			}
@@ -108,7 +109,7 @@ func configureIPv6Addresses(cfg *config.Config) error {
 	if !cfg.EnableIPv6 {
 		return nil
 	}
-	link, err := netlink.LinkByName("lo")
+	link, err := config.LinkByNameWithRetries("lo")
 	if err != nil {
 		return fmt.Errorf("failed to find 'lo' link: %v", err)
 	}
@@ -124,4 +125,14 @@ func configureIPv6Addresses(cfg *config.Config) error {
 	}
 	log.Infof("Added ::6 address on the loopback iface")
 	return nil
+}
+
+func ignoreExists(err error) error {
+	if err == nil {
+		return nil
+	}
+	if strings.Contains(strings.ToLower(err.Error()), "file exists") {
+		return nil
+	}
+	return err
 }

@@ -21,6 +21,7 @@ import (
 	"istio.io/istio/pkg/config/constants"
 	"istio.io/istio/pkg/env"
 	"istio.io/istio/pkg/jwt"
+	"istio.io/istio/pkg/log"
 	"istio.io/istio/pkg/util/sets"
 )
 
@@ -162,6 +163,18 @@ var (
 		"If enabled, pilot will start a controller that assigns IP addresses to ServiceEntry which do not have a user-supplied IP. "+
 			"This, when combined with DNS capture allows for tcp routing of traffic sent to the ServiceEntry.").Get()
 
+	IPAutoallocateIPv4Prefix = env.Register(
+		"PILOT_IP_AUTOALLOCATE_IPV4_PREFIX",
+		"240.240.0.0/16",
+		"The CIDR range/prefix to use for auto-allocated IPv4 addresses. "+
+			"This should be a private range, and not conflict with any other IPs in the cluster.").Get()
+
+	IPAutoallocateIPv6Prefix = env.Register(
+		"PILOT_IP_AUTOALLOCATE_IPV6_PREFIX",
+		"2001:2::/48",
+		"The CIDR range/prefix to use for auto-allocated IPv6 addresses. "+
+			"This should be a private range, and not conflict with any other IPs in the cluster.").Get()
+
 	// EnableUnsafeAssertions enables runtime checks to test assertions in our code. This should never be enabled in
 	// production; when assertions fail Istio will panic.
 	EnableUnsafeAssertions = env.Register(
@@ -282,19 +295,45 @@ var (
 	EnableLazySidecarEvaluation = env.Register("ENABLE_LAZY_SIDECAR_EVALUATION", true,
 		"If enabled, pilot will only compute sidecar resources when actually used").Get()
 
-	// EnableCACRL ToDo (nilekh): remove this feature flag once https://github.com/istio/istio/issues/56529 is closed
+	// EnableCACRL ToDo (nilekh): remove this feature flag once it's stable
 	EnableCACRL = env.Register(
 		"PILOT_ENABLE_CA_CRL",
-		false, // Default value (false = feature disabled by default)
-		"If set to true, Istio will watch for ca-crl.pem file in /etc/cacerts directory "+
-			"and will distribute crl data in each namespace in the cluster for proxies to consume. ",
+		true, // Default value (true = feature enabled by default)
+		"If set to false, Istio will not watch for the ca-crl.pem file in the /etc/cacerts directory "+
+			"and will not distribute CRL data to namespaces for proxies to consume.",
 	).Get()
 
 	EnableSoloAutoWaypoint = env.Register("PILOT_SOLO_ENABLE_AUTO_WAYPOINT", true,
 		"If true, pilot will automatically create a waypoint for namespaces that have the `istio.io/use-waypoint` label set to `auto`.").Get()
+
+	EnableNativeSidecars = func() NativeSidecarMode {
+		v := env.Register("ENABLE_NATIVE_SIDECARS", "auto",
+			"If set to true, use Kubernetes native sidecar container support. Requires SidecarContainer feature flag. "+
+				"Set to true to unconditionally enable, false to unconditionally disable. "+
+				"Set to auto to automatically enable for supported scenarios").Get()
+		switch v {
+		case "false":
+			return NativeSidecarModeDisabled
+		case "true":
+			return NativeSidecarModeEnabled
+		case "auto":
+			return NativeSidecarModeAuto
+		default:
+			log.Warnf("Unknown value for ENABLE_NATIVE_SIDECARS: %s, defaulting to false", v)
+			return NativeSidecarModeDisabled
+		}
+	}()
 )
 
 // UnsafeFeaturesEnabled returns true if any unsafe features are enabled.
 func UnsafeFeaturesEnabled() bool {
 	return EnableUnsafeAdminEndpoints || EnableUnsafeAssertions || EnableUnsafeDeltaTest
 }
+
+type NativeSidecarMode int
+
+const (
+	NativeSidecarModeEnabled  NativeSidecarMode = iota
+	NativeSidecarModeDisabled                   = iota
+	NativeSidecarModeAuto                       = iota
+)
