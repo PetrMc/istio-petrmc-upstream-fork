@@ -2293,13 +2293,6 @@ type MergedEnvoyFilterWrapper struct {
 
 // WaypointEnvoyFilters return the merged EnvoyFilterWrapper of a proxy matching the WorkloadPolicyMatcher
 func (ps *PushContext) WaypointEnvoyFilters(proxy *Proxy, opts WorkloadPolicyMatcher) *MergedEnvoyFilterWrapper {
-	if len(opts.Services) > 1 {
-		// Currently, listing multiple services is unnecessary.
-		// To simplify, this function allows at most one service.
-		// The restriction can be lifted if future needs arise.
-		panic("WaypointEnvoyFilters expects at most 1 service in WorkloadPolicyMatcher")
-	}
-
 	lookupInNamespaces := []string{opts.RootNamespace, opts.WorkloadNamespace}
 	for _, svc := range opts.Services {
 		lookupInNamespaces = append(lookupInNamespaces, svc.Namespace)
@@ -2338,7 +2331,9 @@ func (ps *PushContext) WaypointEnvoyFilters(proxy *Proxy, opts WorkloadPolicyMat
 	if len(matchedEnvoyFilters) > 0 {
 		out = &MergedEnvoyFilterWrapper{
 			// no need populate workloadSelector, as it is not used later.
-			Patches: make(map[networking.EnvoyFilter_ApplyTo][]*EnvoyFilterConfigPatchWrapper),
+			Patches:                      make(map[networking.EnvoyFilter_ApplyTo][]*EnvoyFilterConfigPatchWrapper),
+			ReferencedServices:           sets.New[string](),
+			ReferencedNamespacedServices: sets.New[NamespacedHostname](),
 		}
 		// merge EnvoyFilterWrapper
 		for _, efw := range matchedEnvoyFilters {
@@ -2346,6 +2341,8 @@ func (ps *PushContext) WaypointEnvoyFilters(proxy *Proxy, opts WorkloadPolicyMat
 				for _, cp := range cps {
 					if proxyMatch(proxy, cp) {
 						out.Patches[applyTo] = append(out.Patches[applyTo], cp)
+						out.ReferencedServices.InsertAll(efw.ReferencedServices.UnsortedList()...)
+						out.ReferencedNamespacedServices.InsertAll(efw.ReferencedNamespacedServices.UnsortedList()...)
 					}
 				}
 			}

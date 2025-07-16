@@ -16,7 +16,9 @@ package core
 
 import (
 	"fmt"
+	"maps"
 	"net"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -257,9 +259,10 @@ func (configgen *ConfigGeneratorImpl) buildClusters(proxy *model.Proxy, req *mod
 			// OSS has some half-implemented EnvoyFilter... for compat, keep it around when the flag is disabled
 			// When we do enable the flag, though, use the proper semantics
 			// We will match based on targetRefs.
-			efm := model.PolicyMatcherForProxy(proxy)
-			wrapper := req.Push.WaypointEnvoyFilters(proxy, efm)
-			outboundPatcher = clusterPatcher{efw: wrapper, pctx: networking.EnvoyFilter_GATEWAY}
+			efm := model.PolicyMatcherForProxy(proxy).WithServices(slices.Collect(maps.Values(wps.services)))
+			envoyFilterPatches = req.Push.WaypointEnvoyFilters(proxy, efm)
+
+			outboundPatcher = clusterPatcher{efw: envoyFilterPatches, pctx: networking.EnvoyFilter_GATEWAY}
 			inboundPatcher = outboundPatcher
 		}
 
