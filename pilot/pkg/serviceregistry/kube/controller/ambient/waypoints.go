@@ -30,12 +30,14 @@ import (
 	"istio.io/api/annotation"
 	"istio.io/api/label"
 	"istio.io/istio/pilot/pkg/model"
+	"istio.io/istio/pkg/config"
 	"istio.io/istio/pkg/config/constants"
 	"istio.io/istio/pkg/kube/krt"
 	"istio.io/istio/pkg/log"
 	"istio.io/istio/pkg/ptr"
 	"istio.io/istio/pkg/slices"
 	"istio.io/istio/pkg/workloadapi"
+	"istio.io/istio/platform/discovery/peering"
 )
 
 type InboundBinding struct {
@@ -92,6 +94,7 @@ func fetchWaypointForTarget(
 	ctx krt.HandlerContext,
 	waypoints krt.Collection[Waypoint],
 	namespaces krt.Collection[*v1.Namespace],
+	services krt.Collection[*v1.Service],
 	o metav1.ObjectMeta,
 ) (*Waypoint, *model.StatusMessage) {
 	// namespace to be used when the annotation doesn't include a namespace
@@ -125,6 +128,16 @@ func fetchWaypointForTarget(
 		// toss isNone, we don't need to know /why/ we got nil
 		wp, _ := getUseWaypoint(namespace.ObjectMeta, fallbackNamespace)
 		if wp != nil {
+			// check if this is a global service
+			if peering.IsPeerObject(&config.Config{Meta: config.FromObjectMeta(o)}) {
+				// a k8s service local to the waypoint must exist, otherwise policy applied at a remote waypoint for this service is skipped
+				parentSvcName, parentSvcNs := o.Labels[peering.ParentServiceLabel], o.Labels[peering.ParentServiceNamespaceLabel]
+				if ptr.OrEmpty(krt.FetchOne[*v1.Service](ctx, services, krt.FilterKey(parentSvcNs+"/"+parentSvcName))) == nil {
+					// local service does not exist for global service so waypoint attachment denied
+					return nil, ReportWaypointAttachmentDeniedForGlobalService(wp.ResourceName(), o.Name)
+				}
+			}
+
 			w := krt.FetchOne[Waypoint](ctx, waypoints, krt.FilterKey(wp.ResourceName()))
 			if w != nil {
 				if !w.AllowsAttachmentFromNamespace(namespace) {
@@ -140,8 +153,12 @@ func fetchWaypointForTarget(
 	return nil, nil
 }
 
-func fetchWaypointForService(ctx krt.HandlerContext, Waypoints krt.Collection[Waypoint],
-	Namespaces krt.Collection[*v1.Namespace], o metav1.ObjectMeta,
+func fetchWaypointForService(
+	ctx krt.HandlerContext,
+	Waypoints krt.Collection[Waypoint],
+	Namespaces krt.Collection[*v1.Namespace],
+	services krt.Collection[*v1.Service],
+	o metav1.ObjectMeta,
 ) (*Waypoint, *model.StatusMessage) {
 	// This is a waypoint, so it cannot have a waypoint
 	if o.Labels[label.GatewayManaged.Name] == constants.ManagedGatewayMeshControllerLabel {
@@ -151,7 +168,7 @@ func fetchWaypointForService(ctx krt.HandlerContext, Waypoints krt.Collection[Wa
 	if o.Labels[label.GatewayManaged.Name] == constants.ManagedGatewayEastWestControllerLabel {
 		return nil, nil
 	}
-	w, err := fetchWaypointForTarget(ctx, Waypoints, Namespaces, o)
+	w, err := fetchWaypointForTarget(ctx, Waypoints, Namespaces, services, o)
 	if err != nil || w == nil {
 		return nil, err
 	}
@@ -164,10 +181,14 @@ func fetchWaypointForService(ctx krt.HandlerContext, Waypoints krt.Collection[Wa
 	return nil, ReportWaypointUnsupportedTrafficType(w.ResourceName(), constants.ServiceTraffic)
 }
 
-func fetchWaypointForWorkload(ctx krt.HandlerContext, Waypoints krt.Collection[Waypoint],
-	Namespaces krt.Collection[*v1.Namespace], o metav1.ObjectMeta,
+func fetchWaypointForWorkload(
+	ctx krt.HandlerContext,
+	Waypoints krt.Collection[Waypoint],
+	Namespaces krt.Collection[*v1.Namespace],
+	services krt.Collection[*v1.Service],
+	o metav1.ObjectMeta,
 ) (*Waypoint, *model.StatusMessage) {
-	w, err := fetchWaypointForTarget(ctx, Waypoints, Namespaces, o)
+	w, err := fetchWaypointForTarget(ctx, Waypoints, Namespaces, services, o)
 	if err != nil || w == nil {
 		return nil, err
 	}

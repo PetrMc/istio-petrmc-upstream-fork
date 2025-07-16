@@ -49,9 +49,9 @@ func (a *index) ServicesCollection(
 	namespaces krt.Collection[*v1.Namespace],
 	opts krt.OptionsBuilder,
 ) krt.Collection[model.ServiceInfo] {
-	ServiceEntriesInfo := krt.NewManyCollection(serviceEntries, a.serviceEntryServiceBuilder(waypoints, namespaces),
+	ServiceEntriesInfo := krt.NewManyCollection(serviceEntries, a.serviceEntryServiceBuilder(waypoints, namespaces, services),
 		opts.WithName("ServiceEntriesInfo")...)
-	ServicesInfo := krt.NewCollection(services, a.serviceServiceBuilder(waypoints, namespaces, serviceEntries),
+	ServicesInfo := krt.NewCollection(services, a.serviceServiceBuilder(waypoints, namespaces, services, serviceEntries),
 		opts.WithName("ServicesInfo")...)
 	WorkloadServices := krt.JoinCollection([]krt.Collection[model.ServiceInfo]{ServicesInfo, ServiceEntriesInfo}, opts.WithName("WorkloadService")...)
 	return WorkloadServices
@@ -60,6 +60,7 @@ func (a *index) ServicesCollection(
 func (a *index) serviceServiceBuilder(
 	waypoints krt.Collection[Waypoint],
 	namespaces krt.Collection[*v1.Namespace],
+	services krt.Collection[*v1.Service],
 	serviceEntries krt.Collection[*networkingclient.ServiceEntry],
 ) krt.TransformationSingle[*v1.Service, model.ServiceInfo] {
 	return func(ctx krt.HandlerContext, s *v1.Service) *model.ServiceInfo {
@@ -79,7 +80,7 @@ func (a *index) serviceServiceBuilder(
 			}
 		}
 		waypointStatus := model.WaypointBindingStatus{}
-		waypoint, wperr := fetchWaypointForService(ctx, waypoints, namespaces, s.ObjectMeta)
+		waypoint, wperr := fetchWaypointForService(ctx, waypoints, namespaces, services, s.ObjectMeta)
 		if waypoint != nil {
 			waypointStatus.ResourceName = waypoint.ResourceName()
 
@@ -115,11 +116,12 @@ func MakeSource(o controllers.Object) model.TypedObject {
 func (a *index) serviceEntryServiceBuilder(
 	waypoints krt.Collection[Waypoint],
 	namespaces krt.Collection[*v1.Namespace],
+	services krt.Collection[*v1.Service],
 ) krt.TransformationMulti[*networkingclient.ServiceEntry, model.ServiceInfo] {
 	return func(ctx krt.HandlerContext, s *networkingclient.ServiceEntry) []model.ServiceInfo {
 		var wasPeerObject bool
 		s, wasPeerObject = convertSENamespace(s)
-		waypoint, waypointError := fetchWaypointForService(ctx, waypoints, namespaces, s.ObjectMeta)
+		waypoint, waypointError := fetchWaypointForService(ctx, waypoints, namespaces, services, s.ObjectMeta)
 		return a.serviceEntriesInfo(ctx, s, waypoint, waypointError, wasPeerObject)
 	}
 }
