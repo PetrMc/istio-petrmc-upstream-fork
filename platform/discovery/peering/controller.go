@@ -10,9 +10,11 @@ import (
 	"strings"
 
 	"google.golang.org/protobuf/proto"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	klabels "k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	k8s "sigs.k8s.io/gateway-api/apis/v1"
 	gateway "sigs.k8s.io/gateway-api/apis/v1beta1"
 
@@ -173,6 +175,7 @@ func (c *NetworkWatcher) reconcileWorkloadEntry(tn types.NamespacedName) error {
 
 	localService := c.services.Get(name, ns)
 	weScope := ServiceScopeGlobal
+	var localPorts []corev1.ServicePort
 	if localService != nil && !HasGlobalLabel(localService.Labels) {
 		// It's not global, so ignore it
 		localService = nil
@@ -185,6 +188,7 @@ func (c *NetworkWatcher) reconcileWorkloadEntry(tn types.NamespacedName) error {
 		if labels == nil {
 			labels = map[string]string{}
 		}
+		localPorts = localService.Spec.Ports
 	}
 	// Add our identification labels always. If there is no labels this will be used as the selector in the SE
 	labels[ParentServiceLabel] = name
@@ -199,7 +203,13 @@ func (c *NetworkWatcher) reconcileWorkloadEntry(tn types.NamespacedName) error {
 
 	ports := map[string]uint32{}
 	for _, p := range fs.Ports {
-		ports[fmt.Sprintf("port-%d", p.ServicePort)] = p.ServicePort
+		if sp := slices.FindFunc(localPorts, func(port corev1.ServicePort) bool {
+			return uint32(port.Port) == p.ServicePort && port.TargetPort.Type == intstr.String
+		}); sp != nil {
+			ports[sp.TargetPort.StrVal] = p.ServicePort
+		} else {
+			ports[fmt.Sprintf("port-%d", p.ServicePort)] = p.ServicePort
+		}
 	}
 	annos := map[string]string{
 		ServiceSubjectAltNamesAnnotation: strings.Join(slices.Sort(fs.SubjectAltNames), ","),

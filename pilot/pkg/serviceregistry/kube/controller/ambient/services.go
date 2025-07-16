@@ -59,15 +59,14 @@ func (a *index) ServicesCollection(
 	meshConfig krt.Singleton[MeshConfig],
 	opts krt.OptionsBuilder,
 ) krt.Collection[model.ServiceInfo] {
-
-	ServicesInfo := krt.NewCollection(services, a.serviceServiceBuilder(waypoints, namespaces, serviceEntries, meshConfig),
+	ServicesInfo := krt.NewCollection(services, a.serviceServiceBuilder(waypoints, namespaces, services, serviceEntries, meshConfig),
 		append(
 			opts.WithName("ServicesInfo"),
 			krt.WithMetadata(krt.Metadata{
 				multicluster.ClusterKRTMetadataKey: clusterID,
 			}),
 		)...)
-	ServiceEntriesInfo := krt.NewManyCollection(serviceEntries, a.serviceEntryServiceBuilder(waypoints, namespaces),
+	ServiceEntriesInfo := krt.NewManyCollection(serviceEntries, a.serviceEntryServiceBuilder(waypoints, namespaces, services),
 		append(
 			opts.WithName("ServiceEntriesInfo"),
 			krt.WithMetadata(krt.Metadata{
@@ -127,6 +126,7 @@ func GlobalMergedWorkloadServicesCollection(
 			servicesInfo := krt.NewCollection(services, serviceServiceBuilder(
 				waypoints,
 				namespaces,
+				services,
 				localServiceEntries,
 				meshConfig,
 				domainSuffix,
@@ -167,6 +167,7 @@ func GlobalMergedWorkloadServicesCollection(
 func serviceServiceBuilder(
 	waypoints krt.Collection[Waypoint],
 	namespaces krt.Collection[*v1.Namespace],
+	services krt.Collection[*v1.Service],
 	serviceEntries krt.Collection[*networkingclient.ServiceEntry],
 	meshConfig krt.Singleton[MeshConfig],
 	domainSuffix string,
@@ -204,7 +205,7 @@ func serviceServiceBuilder(
 			}
 		}
 		waypointStatus := model.WaypointBindingStatus{}
-		waypoint, wperr := fetchWaypointForService(ctx, waypoints, namespaces, s.ObjectMeta)
+		waypoint, wperr := fetchWaypointForService(ctx, waypoints, namespaces, services, s.ObjectMeta)
 		if waypoint != nil {
 			waypointStatus.ResourceName = waypoint.ResourceName()
 
@@ -322,12 +323,14 @@ func matchServiceScope(meshCfg *MeshConfig, namespaces krt.Collection[*v1.Namesp
 func (a *index) serviceServiceBuilder(
 	waypoints krt.Collection[Waypoint],
 	namespaces krt.Collection[*v1.Namespace],
+	services krt.Collection[*v1.Service],
 	serviceEntries krt.Collection[*networkingclient.ServiceEntry],
 	meshConfig krt.Singleton[MeshConfig],
 ) krt.TransformationSingle[*v1.Service, model.ServiceInfo] {
 	return serviceServiceBuilder(
 		waypoints,
 		namespaces,
+		services,
 		serviceEntries,
 		meshConfig,
 		a.DomainSuffix,
@@ -350,11 +353,12 @@ func MakeSource(o controllers.Object) model.TypedObject {
 func (a *index) serviceEntryServiceBuilder(
 	waypoints krt.Collection[Waypoint],
 	namespaces krt.Collection[*v1.Namespace],
+	services krt.Collection[*v1.Service],
 ) krt.TransformationMulti[*networkingclient.ServiceEntry, model.ServiceInfo] {
 	return func(ctx krt.HandlerContext, s *networkingclient.ServiceEntry) []model.ServiceInfo {
 		var wasPeerObject bool
 		s, wasPeerObject = convertSENamespace(s)
-		waypoint, waypointError := fetchWaypointForService(ctx, waypoints, namespaces, s.ObjectMeta)
+		waypoint, waypointError := fetchWaypointForService(ctx, waypoints, namespaces, services, s.ObjectMeta)
 		nwGetter := func(ctx krt.HandlerContext) network.ID {
 			return a.Network(ctx)
 		}

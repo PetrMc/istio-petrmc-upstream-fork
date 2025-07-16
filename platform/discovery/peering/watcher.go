@@ -268,9 +268,9 @@ func convertPorts(ports []corev1.ServicePort) []*networking.ServicePort {
 		if e.Protocol != corev1.ProtocolTCP {
 			return nil
 		}
+		name := e.Name
 		if e.TargetPort.Type == intstr.String {
-			// TODO: report some status
-			return nil
+			name = e.TargetPort.StrVal
 		}
 		p := kubeconfig.ConvertProtocol(e.Port, e.Name, e.Protocol, e.AppProtocol)
 		proto := p.String()
@@ -280,7 +280,7 @@ func convertPorts(ports []corev1.ServicePort) []*networking.ServicePort {
 		return ptr.Of(&networking.ServicePort{
 			Number:     uint32(e.Port),
 			Protocol:   proto,
-			Name:       e.Name,
+			Name:       name,
 			TargetPort: uint32(e.TargetPort.IntVal),
 		})
 	})

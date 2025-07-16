@@ -40,3 +40,10 @@ func ReportWaypointUnsupportedTrafficType(waypoint string, ttype string) *model.
 		Message: fmt.Sprintf("attempting to bind to traffic type %q which the waypoint %q does not support", ttype, waypoint),
 	}
 }
+
+func ReportWaypointAttachmentDeniedForGlobalService(waypoint string, globalService string) *model.StatusMessage {
+	return &model.StatusMessage{
+		Reason:  "AttachmentDeniedForGlobalService",
+		Message: fmt.Sprintf("we are not permitted to attach to waypoint %q, global service %q does not have a local Service resource", waypoint, globalService),
+	}
+}

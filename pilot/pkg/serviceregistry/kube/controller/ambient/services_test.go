@@ -625,6 +625,7 @@ func TestServiceEntryServices(t *testing.T) {
 			builder := a.serviceEntryServiceBuilder(
 				krttest.GetMockCollection[Waypoint](mock),
 				krttest.GetMockCollection[*v1.Namespace](mock),
+				krttest.GetMockCollection[*v1.Service](mock),
 			)
 			wrapper := builder(krt.TestingDummyContext{}, tt.se)
 			res := slices.Map(wrapper, func(e model.ServiceInfo) *workloadapi.Service {
@@ -1073,6 +1074,7 @@ func TestServiceServices(t *testing.T) {
 			builder := a.serviceServiceBuilder(
 				krttest.GetMockCollection[Waypoint](mock),
 				krttest.GetMockCollection[*v1.Namespace](mock),
+				krttest.GetMockCollection[*v1.Service](mock),
 				krttest.GetMockCollection[*networkingclient.ServiceEntry](mock),
 				krttest.GetMockSingleton[MeshConfig](mock),
 			)
@@ -1209,6 +1211,7 @@ func TestServiceConditions(t *testing.T) {
 			builder := a.serviceServiceBuilder(
 				krttest.GetMockCollection[Waypoint](mock),
 				krttest.GetMockCollection[*v1.Namespace](mock),
+				krttest.GetMockCollection[*v1.Service](mock),
 				krttest.GetMockCollection[*networkingclient.ServiceEntry](mock),
 				krttest.GetMockSingleton[MeshConfig](mock),
 			)

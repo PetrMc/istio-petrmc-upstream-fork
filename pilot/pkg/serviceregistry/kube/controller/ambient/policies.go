@@ -107,7 +107,7 @@ func WaypointPolicyStatusCollection(
 				case gvk.Service.Kind:
 					fetchedServices := krt.Fetch(ctx, services, krt.FilterKey(key))
 					if len(fetchedServices) == 1 {
-						w, _ := fetchWaypointForService(ctx, waypoints, namespaces, fetchedServices[0].ObjectMeta)
+						w, _ := fetchWaypointForService(ctx, waypoints, namespaces, services, fetchedServices[0].ObjectMeta)
 						if w != nil {
 							bound = true
 							reason = model.WaypointPolicyReasonAccepted
@@ -123,7 +123,7 @@ func WaypointPolicyStatusCollection(
 				case gvk.ServiceEntry.Kind:
 					fetchedServiceEntries := krt.Fetch(ctx, serviceEntries, krt.FilterKey(key))
 					if len(fetchedServiceEntries) == 1 {
-						w, _ := fetchWaypointForService(ctx, waypoints, namespaces, fetchedServiceEntries[0].ObjectMeta)
+						w, _ := fetchWaypointForService(ctx, waypoints, namespaces, services, fetchedServiceEntries[0].ObjectMeta)
 						if w != nil {
 							bound = true
 							reason = model.WaypointPolicyReasonAccepted
