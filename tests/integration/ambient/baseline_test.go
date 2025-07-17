@@ -679,8 +679,8 @@ spec:
 			opt.Check = check.And(
 				check.OK(),
 				check.RequestHeaders(map[string]string{
-					"X-Lua-Inbound":   "hello world",
-					"X-Vhost-Inbound": "hello world",
+					"X-Lua-Inbound":   "",
+					"X-Vhost-Inbound": "",
 				}))
 			src.CallOrFail(t, opt)
 		})
