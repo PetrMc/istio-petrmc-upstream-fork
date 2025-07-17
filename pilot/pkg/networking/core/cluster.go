@@ -16,9 +16,7 @@ package core
 
 import (
 	"fmt"
-	"maps"
 	"net"
-	"slices"
 	"strconv"
 	"strings"
 
@@ -255,7 +253,7 @@ func (configgen *ConfigGeneratorImpl) buildClusters(proxy *model.Proxy, req *mod
 		outboundPatcher := clusterPatcher{efw: envoyFilterPatches, pctx: networking.EnvoyFilter_SIDECAR_OUTBOUND}
 		inboundPatcher := clusterPatcher{efw: envoyFilterPatches, pctx: networking.EnvoyFilter_SIDECAR_INBOUND}
 
-		var allEnvoyFilters = envoyFilterPatches
+		allEnvoyFilters := envoyFilterPatches
 		if AmbientEnvoyFilterLicensed() {
 			// OSS has some half-implemented EnvoyFilter... for compat, keep it around when the flag is disabled
 			// When we do enable the flag, though, use the proper semantics
@@ -268,7 +266,11 @@ func (configgen *ConfigGeneratorImpl) buildClusters(proxy *model.Proxy, req *mod
 
 			// allEnvoyFilters may contain envoy filters that won't get applied on every cluster, but we need
 			// to know about them for filterWaypointOutboundServices (targetRef to Service/ServiceEntry).
-			allEnvoyFilters = req.Push.WaypointEnvoyFilters(proxy, efm.WithServices(slices.Collect(maps.Values(wps.services))))
+			wpServices := make([]*model.Service, 0, len(wps.services))
+			for _, s := range wps.services {
+				wpServices = append(wpServices, s)
+			}
+			allEnvoyFilters = req.Push.WaypointEnvoyFilters(proxy, efm.WithServices(wpServices))
 		}
 
 		extraNamespacedHosts, extraHosts := req.Push.ExtraWaypointServices(proxy, allEnvoyFilters)
