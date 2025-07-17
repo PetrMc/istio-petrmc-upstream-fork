@@ -255,18 +255,23 @@ func (configgen *ConfigGeneratorImpl) buildClusters(proxy *model.Proxy, req *mod
 		outboundPatcher := clusterPatcher{efw: envoyFilterPatches, pctx: networking.EnvoyFilter_SIDECAR_OUTBOUND}
 		inboundPatcher := clusterPatcher{efw: envoyFilterPatches, pctx: networking.EnvoyFilter_SIDECAR_INBOUND}
 
+		var allEnvoyFilters = envoyFilterPatches
 		if AmbientEnvoyFilterLicensed() {
 			// OSS has some half-implemented EnvoyFilter... for compat, keep it around when the flag is disabled
 			// When we do enable the flag, though, use the proper semantics
 			// We will match based on targetRefs.
-			efm := model.PolicyMatcherForProxy(proxy).WithServices(slices.Collect(maps.Values(wps.services)))
-			envoyFilterPatches = req.Push.WaypointEnvoyFilters(proxy, efm)
+			efm := model.PolicyMatcherForProxy(proxy)
 
-			outboundPatcher = clusterPatcher{efw: envoyFilterPatches, pctx: networking.EnvoyFilter_GATEWAY}
+			waypointEfw := req.Push.WaypointEnvoyFilters(proxy, efm)
+			outboundPatcher = clusterPatcher{efw: waypointEfw, pctx: networking.EnvoyFilter_GATEWAY}
 			inboundPatcher = outboundPatcher
+
+			// allEnvoyFilters may contain envoy filters that won't get applied on every cluster, but we need
+			// to know about them for filterWaypointOutboundServices (targetRef to Service/ServiceEntry).
+			allEnvoyFilters = req.Push.WaypointEnvoyFilters(proxy, efm.WithServices(slices.Collect(maps.Values(wps.services))))
 		}
 
-		extraNamespacedHosts, extraHosts := req.Push.ExtraWaypointServices(proxy, envoyFilterPatches)
+		extraNamespacedHosts, extraHosts := req.Push.ExtraWaypointServices(proxy, allEnvoyFilters)
 		ob, cs := configgen.buildOutboundClusters(cb, proxy, outboundPatcher, filterWaypointOutboundServices(
 			req.Push.ServicesAttachedToMesh(), wps.services, extraNamespacedHosts, extraHosts, services))
 
