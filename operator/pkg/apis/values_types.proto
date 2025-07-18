@@ -628,7 +628,13 @@ message GlobalConfig {
 
   // Select a custom name for istiod's CA Root Cert ConfigMap.
   string trustBundleName = 73;
-  // The next available key is 74
+
+  // Specifies whether native nftables rules should be used instead of iptables rules for traffic redirection.
+  google.protobuf.BoolValue nativeNftables = 74;
+
+  // Settings related to Kubernetes NetworkPolicy.
+  NetworkPolicyConfig networkPolicy = 75;
+  // The next available key is 76
 }
 
 // Configuration for Security Token Service (STS) server.
@@ -1352,7 +1358,9 @@ message IstiodRemoteConfig {
   string injectionCABundle = 3;
   // Indicates if this cluster/install should consume a "remote" istiod instance,
   google.protobuf.BoolValue enabled = 5;
-
+  // If `true`, indicates that this cluster/install should consume a "local istiod" installation,
+  // local istiod inject sidecars
+  google.protobuf.BoolValue enabledLocalInjectorIstiod = 6;
 }
 
 message Values {
@@ -1475,4 +1483,10 @@ message WaypointConfig {
   //
   // See https://kubernetes.io/docs/concepts/configuration/taint-and-toleration/
   repeated k8s.io.api.core.v1.Toleration toleration = 5;
+}
+
+// Configuration for NetworkPolicy
+message NetworkPolicyConfig {
+  // Controls whether default NetworkPolicy resources will be created.
+  google.protobuf.BoolValue enabled = 1;
 }

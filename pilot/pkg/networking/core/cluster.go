@@ -253,17 +253,27 @@ func (configgen *ConfigGeneratorImpl) buildClusters(proxy *model.Proxy, req *mod
 		outboundPatcher := clusterPatcher{efw: envoyFilterPatches, pctx: networking.EnvoyFilter_SIDECAR_OUTBOUND}
 		inboundPatcher := clusterPatcher{efw: envoyFilterPatches, pctx: networking.EnvoyFilter_SIDECAR_INBOUND}
 
+		allEnvoyFilters := envoyFilterPatches
 		if AmbientEnvoyFilterLicensed() {
 			// OSS has some half-implemented EnvoyFilter... for compat, keep it around when the flag is disabled
 			// When we do enable the flag, though, use the proper semantics
 			// We will match based on targetRefs.
 			efm := model.PolicyMatcherForProxy(proxy)
-			wrapper := req.Push.WaypointEnvoyFilters(proxy, efm)
-			outboundPatcher = clusterPatcher{efw: wrapper, pctx: networking.EnvoyFilter_GATEWAY}
+
+			waypointEfw := req.Push.WaypointEnvoyFilters(proxy, efm)
+			outboundPatcher = clusterPatcher{efw: waypointEfw, pctx: networking.EnvoyFilter_GATEWAY}
 			inboundPatcher = outboundPatcher
+
+			// allEnvoyFilters may contain envoy filters that won't get applied on every cluster, but we need
+			// to know about them for filterWaypointOutboundServices (targetRef to Service/ServiceEntry).
+			wpServices := make([]*model.Service, 0, len(wps.services))
+			for _, s := range wps.services {
+				wpServices = append(wpServices, s)
+			}
+			allEnvoyFilters = req.Push.WaypointEnvoyFilters(proxy, efm.WithServices(wpServices))
 		}
 
-		extraNamespacedHosts, extraHosts := req.Push.ExtraWaypointServices(proxy, envoyFilterPatches)
+		extraNamespacedHosts, extraHosts := req.Push.ExtraWaypointServices(proxy, allEnvoyFilters)
 		ob, cs := configgen.buildOutboundClusters(cb, proxy, outboundPatcher, filterWaypointOutboundServices(
 			req.Push.ServicesAttachedToMesh(), wps.services, extraNamespacedHosts, extraHosts, services))
 
@@ -400,6 +410,9 @@ func (configgen *ConfigGeneratorImpl) buildOutboundClusters(cb *ClusterBuilder, 
 			subsetClusters := cb.applyDestinationRule(defaultCluster, DefaultClusterMode, service, port,
 				clusterKey.endpointBuilder, clusterKey.destinationRule.GetRule(), clusterKey.serviceAccounts)
 
+			if service.UseInferenceSemantics() && proxy.Type == model.Router {
+				cb.applyOverrideHostPolicy(defaultCluster)
+			}
 			if patched := cp.patch(nil, defaultCluster.build()); patched != nil {
 				resources = append(resources, patched)
 				if features.EnableCDSCaching {
@@ -436,9 +449,6 @@ func (p clusterPatcher) patch(hosts []host.Name, c *cluster.Cluster) *discovery.
 }
 
 func (p clusterPatcher) doPatch(hosts []host.Name, c *cluster.Cluster) *cluster.Cluster {
-	if !envoyfilter.ShouldKeepCluster(p.pctx, p.efw, c, hosts) {
-		return nil
-	}
 	return envoyfilter.ApplyClusterMerge(p.pctx, p.efw, c, hosts)
 }
 
