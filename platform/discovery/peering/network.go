@@ -14,25 +14,31 @@ import (
 
 	"istio.io/istio/pilot/pkg/status"
 	"istio.io/istio/pkg/adsc"
-	"istio.io/istio/pkg/config/schema/kind"
+	"istio.io/istio/pkg/cluster"
 	"istio.io/istio/pkg/kube/controllers"
 	"istio.io/istio/pkg/kube/krt"
+	networkid "istio.io/istio/pkg/network"
 	"istio.io/istio/pkg/workloadapi"
 )
 
-type network struct {
+type peerCluster struct {
 	queue controllers.Queue
 
-	cluster    string
-	xds        *adsc.Client
-	mu         sync.Mutex
-	stop       chan struct{}
-	stopped    bool
-	collection krt.StaticCollection[RemoteFederatedService]
-	synced     *atomic.Bool
+	networkName networkid.ID
+	clusterID   cluster.ID
+	xds         *adsc.Client
+	mu          sync.Mutex
+	stop        chan struct{}
+	stopped     bool
+
+	federatedServices krt.StaticCollection[RemoteFederatedService]
+	workloads         krt.StaticCollection[RemoteWorkload]
+
+	synced   *atomic.Bool
+	locality string
 }
 
-func (s *network) run() {
+func (s *peerCluster) run() {
 	// TODO: wait for this to sync
 	ctx := status.NewIstioContext(s.stop)
 	s.xds.Run(ctx)
@@ -40,7 +46,7 @@ func (s *network) run() {
 	s.resync()
 }
 
-func (s *network) shutdownNow() {
+func (s *peerCluster) shutdownNow() {
 	s.mu.Lock()
 	if s.stopped {
 		return
@@ -51,40 +57,55 @@ func (s *network) shutdownNow() {
 	s.resync()
 }
 
-func (s *network) resync() {
+func (s *peerCluster) resync() {
 	s.queue.Add(typedNamespace{
-		NamespacedName: types.NamespacedName{Name: s.cluster},
-		kind:           kind.MeshNetworks,
+		NamespacedName: types.NamespacedName{Name: s.clusterID.String()},
+		kind:           Cluster,
 	})
 }
 
-func (s *network) HasSynced() bool {
+func (s *peerCluster) HasSynced() bool {
 	return s.synced.Load()
 }
 
-func newNetwork(
-	networkName string,
-	address string,
+func newPeerCluster(
+	localNetwork networkid.ID,
+	gateway PeerGateway,
 	cfg *adsc.DeltaADSConfig,
 	debugger *krt.DebugHandler,
 	queue controllers.Queue,
-	handler func(o krt.Event[RemoteFederatedService]),
+	serviceHandler func(o krt.Event[RemoteFederatedService]),
+	workloadHandler func(o krt.Event[RemoteWorkload]),
 	statusUpdateFunc func(),
-) *network {
+) *peerCluster {
+	networkName := gateway.Network.String()
 	stop := make(chan struct{})
 	opts := krt.NewOptionsBuilder(stop, "peering", debugger)
-	name := "RemoteFederatedService/" + networkName
-	collection := krt.NewStaticCollection[RemoteFederatedService](nil, nil, opts.WithName(name)...)
-	log := log.WithLabels("network", networkName)
-	log.Infof("starting network watch to %v", address)
-	c := &network{
-		cluster:    networkName,
-		stop:       stop,
-		queue:      queue,
-		collection: collection,
-		synced:     atomic.NewBool(false),
+
+	svcCollection := krt.NewStaticCollection[RemoteFederatedService](nil, nil,
+		opts.WithName("RemoteFederatedService/"+gateway.Cluster.String())...)
+	workloadCollection := krt.NewStaticCollection[RemoteWorkload](nil, nil,
+		opts.WithName("RemoteWorkload/"+gateway.Cluster.String())...)
+
+	mode := "gateway"
+	if EnableFlatNetworks && gateway.Network == localNetwork {
+		mode = "flat"
 	}
-	federatedServiceHandler := adsc.Register(func(
+	log := log.WithLabels("cluster", gateway.Cluster, "network", networkName, "mode", mode)
+	log.Infof("starting cluster watch to %v", gateway.Address)
+
+	c := &peerCluster{
+		clusterID:         gateway.Cluster,
+		networkName:       gateway.Network,
+		stop:              stop,
+		queue:             queue,
+		federatedServices: svcCollection,
+		workloads:         workloadCollection,
+		synced:            atomic.NewBool(false),
+		locality:          gateway.Locality,
+	}
+
+	federatedServiceAdscHandler := adsc.Register(func(
 		ctx adsc.HandlerContext,
 		resourceName string,
 		resourceVersion string,
@@ -101,25 +122,56 @@ func newNetwork(
 		}
 		switch event {
 		case adsc.EventAdd:
-			c.collection.UpdateObject(RemoteFederatedService{
-				FederatedService: val,
-				Cluster:          networkName,
+			c.federatedServices.UpdateObject(RemoteFederatedService{
+				Service: val,
+				Cluster: gateway.Cluster.String(),
 			})
 		case adsc.EventDelete:
 			// FSDS key is ns/hostname. We are currently only supporting Service, and use ns/name in the rest of the code.
 			// Translate it.
 			ns, hostname, _ := strings.Cut(resourceName, "/")
 			name, _, _ := strings.Cut(hostname, ".")
-			c.collection.DeleteObject(fmt.Sprintf("%s/%s/%s", networkName, ns, name))
+			c.federatedServices.DeleteObject(fmt.Sprintf("%s/%s/%s", networkName, ns, name))
+		}
+	})
+	workloadsAdscHandler := adsc.Register(func(
+		ctx adsc.HandlerContext,
+		resourceName string,
+		resourceVersion string,
+		val *workloadapi.Workload,
+		event adsc.Event,
+	) {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		select {
+		case <-stop:
+			// We are stopped, do not process any events
+			return
+		default:
+		}
+		switch event {
+		case adsc.EventAdd:
+			c.workloads.UpdateObject(RemoteWorkload{
+				Workload: val,
+				Cluster:  gateway.Cluster.String(),
+			})
+		case adsc.EventDelete:
+			c.workloads.DeleteObject(resourceName)
 		}
 	})
 
 	handlers := []adsc.Option{
-		federatedServiceHandler,
+		federatedServiceAdscHandler,
 		adsc.Watch[*workloadapi.FederatedService]("*"),
 	}
 
-	c.xds = adsc.NewDelta(address, cfg, handlers...)
+	if EnableFlatNetworks && gateway.Network == localNetwork {
+		handlers = append(handlers,
+			workloadsAdscHandler,
+			adsc.Watch[*workloadapi.Workload]("*"))
+	}
+
+	c.xds = adsc.NewDelta(gateway.Address, cfg, handlers...)
 	go c.run()
 	go func() {
 		select {
@@ -130,7 +182,8 @@ func newNetwork(
 		log.Infof("sync complete")
 		c.synced.Store(true)
 		statusUpdateFunc()
-		c.collection.Register(handler)
+		c.federatedServices.Register(serviceHandler)
+		c.workloads.Register(workloadHandler)
 		// Trigger a sync to cleanup any stale resources
 		c.resync()
 	}()

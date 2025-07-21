@@ -23,8 +23,14 @@ import (
 )
 
 const (
-	LocalCluster  = "primary"
-	RemoteCluster = "cross-network-primary"
+	LocalCluster         = "primary"
+	RemoteFlatCluster    = "remote"
+	RemoteNetworkCluster = "cross-network-primary"
+
+	// used by most services in all clusters
+	WaypointDefault = "waypoint"
+	// only used by ServiceCrossNetworkOnlyWaypoint in the RemoteNetworkCluster
+	WaypointXNet = "x-net-waypoint"
 )
 
 type EchoDeployments struct {
@@ -52,10 +58,19 @@ func SetupApps(t resource.Context, apps *EchoDeployments) error {
 		return err
 	}
 
-	localBuilder := deployment.New(t).DeployServicesOnlyToCluster().WithClusters(t.Clusters().GetByName(LocalCluster))
-	remoteBuilder := deployment.New(t).DeployServicesOnlyToCluster().WithClusters(t.Clusters().GetByName(RemoteCluster))
+	localBuilder := deployment.New(t).DeployServicesOnlyToCluster().WithClusters(
+		t.Clusters().GetByName(LocalCluster),
+	)
+	remoteBuilder := deployment.New(t).DeployServicesOnlyToCluster().WithClusters(
+		t.Clusters().GetByName(RemoteFlatCluster),
+		t.Clusters().GetByName(RemoteNetworkCluster),
+	)
 
-	deployToBothClusters := func(name string, localSettings ServiceSettings, remoteSettings ServiceSettings) {
+	deployToAllClusters := func(
+		name string,
+		localSettings ServiceSettings,
+		remoteSettings ServiceSettings,
+	) {
 		localSettings.Name = name
 		localSettings.Namespace = apps.Namespace
 		remoteSettings.Name = name
@@ -65,20 +80,29 @@ func SetupApps(t resource.Context, apps *EchoDeployments) error {
 	}
 
 	gbl := peering.ServiceScopeGlobal
-	deployToBothClusters(ServiceLocal, ServiceSettings{}, ServiceSettings{})
-	deployToBothClusters(ServiceRemoteGlobal, ServiceSettings{}, ServiceSettings{Scope: gbl})
-	deployToBothClusters(ServiceLocalGlobal, ServiceSettings{Scope: gbl}, ServiceSettings{})
-	deployToBothClusters(ServiceBothGlobal, ServiceSettings{Scope: gbl}, ServiceSettings{Scope: gbl})
-	deployToBothClusters(ServiceSidecar, ServiceSettings{Scope: gbl, Sidecar: true}, ServiceSettings{Scope: gbl, Sidecar: true})
-	deployToBothClusters(ServiceLocalWaypoint, ServiceSettings{Scope: gbl, Waypoint: true}, ServiceSettings{Scope: gbl})
-	deployToBothClusters(ServiceRemoteWaypoint, ServiceSettings{Scope: gbl}, ServiceSettings{Scope: gbl, Waypoint: true})
-	deployToBothClusters(ServiceBothWaypoint, ServiceSettings{Scope: gbl, Waypoint: true}, ServiceSettings{Scope: gbl, Waypoint: true})
-	deployToBothClusters(ServiceGlobalTakeover, ServiceSettings{Scope: peering.ServiceScopeGlobalOnly}, ServiceSettings{Scope: peering.ServiceScopeGlobalOnly})
-	remoteBuilder.WithConfig(ServiceSettings{
-		Name:      ServiceRemoteOnlyWaypoint,
+	deployToAllClusters(ServiceLocal, ServiceSettings{}, ServiceSettings{})
+	deployToAllClusters(ServiceRemoteGlobal, ServiceSettings{}, ServiceSettings{Scope: gbl})
+	deployToAllClusters(ServiceLocalGlobal, ServiceSettings{Scope: gbl}, ServiceSettings{})
+	deployToAllClusters(ServiceAllGlobal, ServiceSettings{Scope: gbl}, ServiceSettings{Scope: gbl})
+	deployToAllClusters(ServiceSidecar, ServiceSettings{Scope: gbl, Sidecar: true}, ServiceSettings{Scope: gbl, Sidecar: true})
+
+	deployToAllClusters(ServiceLocalWaypoint, ServiceSettings{Scope: gbl, Waypoint: true}, ServiceSettings{Scope: gbl})
+	deployToAllClusters(ServiceRemoteWaypoint, ServiceSettings{Scope: gbl}, ServiceSettings{Scope: gbl, Waypoint: true})
+	deployToAllClusters(ServiceAllWaypoint, ServiceSettings{Scope: gbl, Waypoint: true}, ServiceSettings{Scope: gbl, Waypoint: true})
+	deployToAllClusters(ServiceGlobalTakeover, ServiceSettings{Scope: peering.ServiceScopeGlobalOnly}, ServiceSettings{Scope: peering.ServiceScopeGlobalOnly})
+
+	remoteNetworkBuilder := deployment.New(t).DeployServicesOnlyToCluster().WithClusters(
+		t.Clusters().GetByName(RemoteNetworkCluster),
+	)
+	remoteNetworkBuilder.WithConfig(ServiceSettings{
+		Name:      ServiceCrossNetworkOnlyWaypoint,
 		Namespace: apps.Namespace,
 		Scope:     gbl,
 		Waypoint:  true,
+		// HACK: right now, the way remote-waypoints are implemented will merge all of this same Waypoint service
+		// meaning we have waypoint instances in the flat-network that route to pods that only exist for this service
+		// on the other network. To test the "waypoint only in the remote network case" we need a distinct waypoint here.
+		WaypointName: WaypointXNet,
 	}.ToConfig())
 
 	scopes.Framework.Infof("deploying to local cluster...")
@@ -87,18 +111,27 @@ func SetupApps(t resource.Context, apps *EchoDeployments) error {
 	if err != nil {
 		return err
 	}
-	scopes.Framework.Infof("deploying to remote cluster...")
+	scopes.Framework.Infof("deploying to remote clusters...")
 	if _, err := remoteBuilder.Build(); err != nil {
+		return err
+	}
+	scopes.Framework.Infof("deploying to remote network cluster...")
+	if _, err := remoteNetworkBuilder.Build(); err != nil {
 		return err
 	}
 	apps.LocalApp = match.ServiceName(echo.NamespacedName{Name: ServiceLocal, Namespace: apps.Namespace}).GetMatches(localApps)
 	apps.Sidecar = match.ServiceName(echo.NamespacedName{Name: ServiceSidecar, Namespace: apps.Namespace}).GetMatches(localApps)
 
+	if _, err := ambient.NewWaypointProxyForCluster(t, apps.Namespace, WaypointXNet, t.Clusters().GetByName(RemoteNetworkCluster)); err != nil {
+		return err
+	}
+
 	for _, c := range t.Clusters() {
-		if _, err := ambient.NewWaypointProxyForCluster(t, apps.Namespace, "waypoint", c); err != nil {
+		if _, err := ambient.NewWaypointProxyForCluster(t, apps.Namespace, WaypointDefault, c); err != nil {
 			return err
 		}
-		for _, svc := range []string{ServiceLocalWaypoint, ServiceRemoteWaypoint, ServiceRemoteOnlyWaypoint, ServiceBothWaypoint} {
+
+		for _, svc := range []string{ServiceLocalWaypoint, ServiceRemoteWaypoint, ServiceCrossNetworkOnlyWaypoint, ServiceAllWaypoint} {
 
 			err := t.ConfigKube(c).Eval(
 				apps.Namespace.Name(),
@@ -144,32 +177,35 @@ const (
 	ServiceRemoteGlobal = "remote-global"
 	// ServiceLocalGlobal is a service that is marked as global only on the local side
 	ServiceLocalGlobal = "local-global"
-	// ServiceBothGlobal is a service that is marked as global
-	ServiceBothGlobal = "both-global"
+	// ServiceAllGlobal is a service that is marked as global
+	ServiceAllGlobal = "all-global"
+
 	// ServiceSidecar is a service that has a sidecar
 	ServiceSidecar = "sidecar"
 	// ServiceLocalWaypoint is a service that has a waypoint locally
 	ServiceLocalWaypoint = "local-waypoint"
 	// ServiceRemoteWaypoint is a service that has a waypoint remotely
 	ServiceRemoteWaypoint = "remote-waypoint"
-	// ServiceRemoteOnlyWaypoint is a service that has a waypoint remotely and does not exist locally
-	ServiceRemoteOnlyWaypoint = "remote-only-waypoint"
-	// ServiceBothWaypoint is a service that has a waypoint both locally and remote
-	ServiceBothWaypoint = "both-waypoint"
+	// ServiceCrossNetworkOnlyWaypoint is a service that has a waypoint in the cross-network cluster and does not exist
+	// in either of the flat network or local network clusters.
+	ServiceCrossNetworkOnlyWaypoint = "cross-net-only-waypoint"
+	// ServiceAllWaypoint is a service that has a waypoint in all clusters
+	ServiceAllWaypoint = "all-waypoint"
 	// ServiceGlobalTakeover is a service that is marked as global-only, taking over the .cluster.local DNS name
 	ServiceGlobalTakeover = "global-takeover"
 )
 
 var AllServices = []string{
 	ServiceLocal,
-	ServiceLocalGlobal,
 	ServiceRemoteGlobal,
-	ServiceBothGlobal,
+	ServiceLocalGlobal,
+	ServiceAllGlobal,
+
+	ServiceSidecar,
 	ServiceLocalWaypoint,
 	ServiceRemoteWaypoint,
-	ServiceRemoteOnlyWaypoint,
-	ServiceBothWaypoint,
-	ServiceSidecar,
+	ServiceCrossNetworkOnlyWaypoint,
+	ServiceAllWaypoint,
 	ServiceGlobalTakeover,
 }
 
@@ -186,6 +222,8 @@ type ServiceSettings struct {
 	Sidecar bool
 	// Waypoint, if true, will attach the service to a waypoint
 	Waypoint bool
+	// WaypointName, if non-empty when Waypoint is true, overrides the name of the waypoint for this service
+	WaypointName string
 }
 
 func (s ServiceSettings) ToConfig() echo.Config {
@@ -210,8 +248,12 @@ func (s ServiceSettings) ToConfig() echo.Config {
 	}
 	var svcWaypoint string
 	if s.Waypoint {
-		labels[label.IoIstioUseWaypoint.Name] = "waypoint"
-		svcWaypoint = "waypoint"
+		waypointName := WaypointDefault
+		if s.WaypointName != "" {
+			waypointName = s.WaypointName
+		}
+		labels[label.IoIstioUseWaypoint.Name] = waypointName
+		svcWaypoint = waypointName
 	}
 	return echo.Config{
 		ServiceWaypointProxy: svcWaypoint,

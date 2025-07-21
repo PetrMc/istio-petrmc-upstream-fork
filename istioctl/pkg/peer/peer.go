@@ -13,9 +13,12 @@ import (
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	"istio.io/api/label"
 	"istio.io/istio/istioctl/pkg/cli"
+	"istio.io/istio/pkg/cluster"
 	"istio.io/istio/pkg/config/mesh"
 	"istio.io/istio/pkg/kube"
+	networkid "istio.io/istio/pkg/network"
 )
 
 func Cmd(ctx cli.Context) *cobra.Command {
@@ -38,16 +41,47 @@ func Cmd(ctx cli.Context) *cobra.Command {
 	return cmd
 }
 
-func fetchNetwork(istioNamespace string, kc kube.CLIClient) (string, error) {
+func fetchNetwork(istioNamespace string, kc kube.CLIClient) (networkid.ID, error) {
 	systemNS, err := kc.Kube().CoreV1().Namespaces().Get(context.Background(), istioNamespace, metav1.GetOptions{})
 	if err != nil {
 		return "", err
 	}
-	network := systemNS.Labels["topology.istio.io/network"]
+	network := systemNS.Labels[label.TopologyNetwork.Name]
 	if network == "" {
-		return "", fmt.Errorf("no 'topology.istio.io/network' label found")
+		return "", fmt.Errorf("no %q label found", label.TopologyNetwork.Name)
 	}
-	return network, nil
+	return networkid.ID(network), nil
+}
+
+func fetchCluster(istioNamespace string, kc kube.CLIClient, revision string) (cluster.ID, error) {
+	ls := "app=istiod"
+	if revision != "" {
+		ls += label.IoIstioRev.Name + "=" + revision
+	}
+	istiodDeployment, err := kc.Kube().AppsV1().Deployments(istioNamespace).List(context.Background(), metav1.ListOptions{
+		LabelSelector: ls,
+	})
+	if err != nil {
+		return "", err
+	}
+	for _, deployment := range istiodDeployment.Items {
+		for _, c := range deployment.Spec.Template.Spec.Containers {
+			if c.Name != "discovery" {
+				continue
+			}
+			for _, env := range c.Env {
+				if env.Name == "CLUSTER_ID" {
+					if env.Value == "Kubernetes" {
+						// Do not let them use the default name, else we would likely end up with duplicates
+						continue
+					}
+					return cluster.ID(env.Value), nil
+				}
+			}
+		}
+	}
+
+	return "", fmt.Errorf("no cluster found")
 }
 
 func fetchTrustDomain(kc kube.CLIClient, istioNamespace string, revision string) (string, error) {

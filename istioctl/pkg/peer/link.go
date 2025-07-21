@@ -16,8 +16,12 @@ import (
 	gateway "sigs.k8s.io/gateway-api/apis/v1"
 	"sigs.k8s.io/yaml"
 
+	"istio.io/api/label"
 	"istio.io/istio/istioctl/pkg/bootstrap"
 	"istio.io/istio/istioctl/pkg/cli"
+	labelutil "istio.io/istio/pilot/pkg/serviceregistry/util/label"
+	"istio.io/istio/pkg/cluster"
+	"istio.io/istio/pkg/config/constants"
 	"istio.io/istio/pkg/config/schema/gvk"
 	"istio.io/istio/pkg/kube"
 	"istio.io/istio/pkg/ptr"
@@ -81,13 +85,26 @@ func Link(ctx cli.Context) *cobra.Command {
 			}
 			for _, dstName := range to {
 				dst := clusterClients[dstName]
-				gwName, addr, err := findGateway(dst)
+				gw, err := findGateway(ctx.IstioNamespace(), dst, revision)
 				if err != nil {
 					return fmt.Errorf("in cluster %v: %v", dstName, err)
 				}
-				network, err := fetchNetwork(ctx.IstioNamespace(), dst)
-				if err != nil {
-					return fmt.Errorf("in cluster %v: %v", dstName, err)
+				// If no network set on Service object, try to find from cluster state...
+				if gw.network == "" {
+					network, err := fetchNetwork(ctx.IstioNamespace(), dst)
+					if err != nil {
+						return fmt.Errorf("in cluster %v: %v", dstName, err)
+					}
+					gw.network = string(network)
+				}
+				// If no cluster set on Service object, try to find from cluster state...
+				if gw.cluster == "" {
+					cls, err := fetchCluster(ctx.IstioNamespace(), dst, revision)
+					if err != nil {
+						// Fallback to network name as cluster name
+						cls = cluster.ID(gw.network)
+					}
+					gw.cluster = string(cls)
 				}
 				td, err := fetchTrustDomain(dst, ctx.IstioNamespace(), revision)
 				if err != nil {
@@ -99,13 +116,13 @@ func Link(ctx cli.Context) *cobra.Command {
 						// Do not link to ourselves
 						continue
 					}
-					gw := makeLinkGateway(ctx, gwName, addr, network, td, true)
+					finalGW := makeLinkGateway(ctx, gw, td, true)
 					gwc := src.GatewayAPI().GatewayV1().Gateways(ctx.NamespaceOrDefault(ctx.Namespace()))
-					b, err := yaml.Marshal(gw)
+					b, err := yaml.Marshal(finalGW)
 					if err != nil {
 						return err
 					}
-					_, err = gwc.Patch(context.Background(), gw.Name, types.ApplyPatchType, b, metav1.PatchOptions{
+					_, err = gwc.Patch(context.Background(), finalGW.Name, types.ApplyPatchType, b, metav1.PatchOptions{
 						Force:        nil,
 						FieldManager: "istioctl",
 					})
@@ -117,7 +134,7 @@ func Link(ctx cli.Context) *cobra.Command {
 					}
 					fmt.Fprintf(cmd.OutOrStdout(),
 						"Gateway %v/%v applied to cluster %q pointing to cluster %q (network %q)\n",
-						gw.Namespace, gw.Name, srcName, dstName, network)
+						finalGW.Namespace, finalGW.Name, srcName, gw.cluster, gw.network)
 				}
 			}
 			return nil
@@ -136,11 +153,7 @@ func linkGenerate(ctx cli.Context, cmd *cobra.Command, revision string) error {
 	if err != nil {
 		return err
 	}
-	gwName, addr, err := findGateway(clt)
-	if err != nil {
-		return err
-	}
-	network, err := fetchNetwork(ctx.IstioNamespace(), clt)
+	rgw, err := findGateway(ctx.IstioNamespace(), clt, revision)
 	if err != nil {
 		return err
 	}
@@ -148,7 +161,7 @@ func linkGenerate(ctx cli.Context, cmd *cobra.Command, revision string) error {
 	if err != nil {
 		return err
 	}
-	gw := makeLinkGateway(ctx, gwName, addr, network, td, false)
+	gw := makeLinkGateway(ctx, rgw, td, false)
 	b, err := yaml.Marshal(gw)
 	if err != nil {
 		return err
@@ -180,31 +193,40 @@ func buildClients(from []string, to []string, ctx cli.Context) (map[string]kube.
 	return clusterClients, nil
 }
 
-func makeLinkGateway(ctx cli.Context, gwName string, addr gateway.GatewaySpecAddress, network string, trustDomain string, forApply bool) *gateway.Gateway {
+func makeLinkGateway(ctx cli.Context, rgw remoteGateway, trustDomain string, forApply bool) *gateway.Gateway {
 	ns := ctx.NamespaceOrDefault(ctx.Namespace())
 	if ctx.Namespace() == "" && !forApply {
 		ns = ""
 	}
+	lbls := map[string]string{
+		label.TopologyNetwork.Name: rgw.network,
+		label.TopologyCluster.Name: rgw.cluster,
+	}
+	if rgw.region != "" {
+		lbls[labelutil.LabelTopologyRegion] = rgw.region
+	}
+	if rgw.zone != "" {
+		lbls[labelutil.LabelTopologyZone] = rgw.zone
+	}
+
 	gw := gateway.Gateway{
 		TypeMeta: metav1.TypeMeta{
 			Kind:       gvk.KubernetesGateway_v1.Kind,
 			APIVersion: gvk.KubernetesGateway_v1.GroupVersion(),
 		},
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "istio-remote-peer-" + network,
+			Name:      "istio-remote-peer-" + rgw.cluster,
 			Namespace: ns,
 			Annotations: map[string]string{
 				// TODO: more precise fetching...
-				"gateway.istio.io/service-account": gwName,
-				"gateway.istio.io/trust-domain":    trustDomain,
+				constants.GatewayServiceAccountAnnotation: rgw.name,
+				constants.TrustDomainAnnotation:           trustDomain,
 			},
-			Labels: map[string]string{
-				"topology.istio.io/network": network,
-			},
+			Labels: lbls,
 		},
 		Spec: gateway.GatewaySpec{
 			GatewayClassName: "istio-remote",
-			Addresses:        []gateway.GatewaySpecAddress{addr},
+			Addresses:        []gateway.GatewaySpecAddress{rgw.address},
 			Listeners: []gateway.Listener{
 				{
 					Name:     "cross-network",
@@ -225,31 +247,69 @@ func makeLinkGateway(ctx cli.Context, gwName string, addr gateway.GatewaySpecAdd
 	return &gw
 }
 
-func findGateway(src kube.CLIClient) (string, gateway.GatewaySpecAddress, error) {
-	svcs, err := src.Kube().CoreV1().Services(metav1.NamespaceAll).List(context.Background(), metav1.ListOptions{
+type remoteGateway struct {
+	name    string
+	address gateway.GatewaySpecAddress
+	region  string
+	zone    string
+	cluster string
+	network string
+}
+
+func findGateway(istioNamespace string, kc kube.CLIClient, revision string) (remoteGateway, error) {
+	svcs, err := kc.Kube().CoreV1().Services(metav1.NamespaceAll).List(context.Background(), metav1.ListOptions{
 		LabelSelector: bootstrap.ExposeIstiodLabel,
 	})
 	if err != nil {
-		return "", gateway.GatewaySpecAddress{}, err
+		return remoteGateway{}, err
 	}
 	if len(svcs.Items) == 0 {
-		return "", gateway.GatewaySpecAddress{}, fmt.Errorf("no services with %q label", bootstrap.ExposeIstiodLabel)
+		return remoteGateway{}, fmt.Errorf("no services with %q label", bootstrap.ExposeIstiodLabel)
 	}
 	for _, svc := range svcs.Items {
 		if lb := svc.Status.LoadBalancer.Ingress; len(lb) > 0 {
+			var addr *gateway.GatewaySpecAddress
 			if lb[0].IP != "" {
-				return svc.Name, gateway.GatewaySpecAddress{
+				addr = &gateway.GatewaySpecAddress{
 					Type:  ptr.Of(gateway.IPAddressType),
 					Value: lb[0].IP,
-				}, nil
-			}
-			if lb[0].Hostname != "" {
-				return svc.Name, gateway.GatewaySpecAddress{
+				}
+			} else if lb[0].Hostname != "" {
+				addr = &gateway.GatewaySpecAddress{
 					Type:  ptr.Of(gateway.HostnameAddressType),
 					Value: lb[0].Hostname,
-				}, nil
+				}
 			}
+			if addr == nil {
+				continue
+			}
+
+			gw := remoteGateway{
+				name:    svc.Name,
+				address: *addr,
+				region:  svc.Labels[labelutil.LabelTopologyRegion],
+				zone:    svc.Labels[labelutil.LabelTopologyZone],
+				network: svc.Labels[label.TopologyNetwork.Name],
+				cluster: svc.Labels[label.TopologyCluster.Name],
+			}
+			if gw.network == "" {
+				network, err := fetchNetwork(istioNamespace, kc)
+				if err != nil {
+					return remoteGateway{}, err
+				}
+				gw.network = string(network)
+			}
+			// If no cluster set on Service object, try to find from cluster state...
+			if gw.cluster == "" {
+				cls, err := fetchCluster(istioNamespace, kc, revision)
+				if err != nil {
+					// Fallback to network name as cluster name
+					cls = cluster.ID(gw.network)
+				}
+				gw.cluster = string(cls)
+			}
+			return gw, nil
 		}
 	}
-	return "", gateway.GatewaySpecAddress{}, fmt.Errorf("services found with %q label, but none have a load balancer", bootstrap.ExposeIstiodLabel)
+	return remoteGateway{}, fmt.Errorf("services found with %q label, but none have a load balancer", bootstrap.ExposeIstiodLabel)
 }

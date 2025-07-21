@@ -5,6 +5,7 @@
 package peering
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"os"
@@ -19,16 +20,19 @@ import (
 	k8s "sigs.k8s.io/gateway-api/apis/v1"
 	gateway "sigs.k8s.io/gateway-api/apis/v1beta1"
 
+	"istio.io/api/label"
 	networking "istio.io/api/networking/v1alpha3"
 	clientnetworking "istio.io/client-go/pkg/apis/networking/v1"
+	"istio.io/istio/pilot/pkg/model"
 	"istio.io/istio/pilot/pkg/status"
 	"istio.io/istio/pkg/adsc"
+	"istio.io/istio/pkg/backoff"
+	"istio.io/istio/pkg/cluster"
 	"istio.io/istio/pkg/config"
 	"istio.io/istio/pkg/config/constants"
 	kubeconfig "istio.io/istio/pkg/config/kube"
 	"istio.io/istio/pkg/config/mesh"
 	"istio.io/istio/pkg/config/schema/gvk"
-	"istio.io/istio/pkg/config/schema/kind"
 	"istio.io/istio/pkg/env"
 	"istio.io/istio/pkg/kube"
 	"istio.io/istio/pkg/kube/controllers"
@@ -36,7 +40,9 @@ import (
 	"istio.io/istio/pkg/kube/krt"
 	istiolog "istio.io/istio/pkg/log"
 	"istio.io/istio/pkg/maps"
+	networkid "istio.io/istio/pkg/network"
 	"istio.io/istio/pkg/ptr"
+	"istio.io/istio/pkg/sleep"
 	"istio.io/istio/pkg/slices"
 	"istio.io/istio/pkg/util/sets"
 	"istio.io/istio/pkg/workloadapi"
@@ -44,17 +50,7 @@ import (
 
 var log = istiolog.RegisterScope("peering", "")
 
-type NamedNetwork struct {
-	networkName string
-	network     *network
-}
-
-func (n *NamedNetwork) ShutdownNow() {
-	if n.network != nil {
-		n.network.shutdownNow()
-	}
-}
-
+// NetworkWatcher is currently a misnomer; it's actually a ClusterWatcher.
 type NetworkWatcher struct {
 	client kube.Client
 
@@ -63,6 +59,8 @@ type NetworkWatcher struct {
 	workloadEntryServiceIndex kclient.Index[types.NamespacedName, *clientnetworking.WorkloadEntry]
 	serviceEntries            kclient.Client[*clientnetworking.ServiceEntry]
 	services                  kclient.Client[*corev1.Service]
+	sd                        model.ServiceDiscovery
+	remoteWaypointSync        krt.Syncer
 
 	queue       controllers.Queue
 	statusQueue controllers.Queue
@@ -73,35 +71,48 @@ type NetworkWatcher struct {
 
 	meshConfigWatcher mesh.Watcher
 
-	// gateway -> network
-	gatewaysToNetwork map[types.NamespacedName]*NamedNetwork
-	clusterDomain     string
-	clusterID         string
+	clustersMu sync.RWMutex
+	// cluster name -> *network
+	remoteClusters map[cluster.ID]*peerCluster
+	// gateway -> cluster name
+	gatewaysToCluster map[types.NamespacedName]cluster.ID
+
+	// our local cluster
+	localCluster cluster.ID
+	localNetwork networkid.ID
+
+	clusterDomain   string
+	systemNamespace string
 
 	debugger *krt.DebugHandler
 }
 
 func New(
 	client kube.Client,
-	clusterID string,
+	systemNamespace string,
+	clusterID cluster.ID,
 	clusterDomain string,
 	buildConfig func(clientName string) *adsc.DeltaADSConfig,
 	debugger *krt.DebugHandler,
 	meshConfigWatcher mesh.Watcher,
+	sd model.ServiceDiscovery,
 	statusManager *status.Manager,
 ) *NetworkWatcher {
 	statusCtl := statusManager.CreateGenericController(func(status status.Manipulator, context any) {
 		status.SetInner(context)
 	})
 	c := &NetworkWatcher{
-		gatewaysToNetwork: make(map[types.NamespacedName]*NamedNetwork),
+		remoteClusters:    make(map[cluster.ID]*peerCluster),
+		gatewaysToCluster: make(map[types.NamespacedName]cluster.ID),
+		systemNamespace:   systemNamespace,
 		buildConfig:       buildConfig,
 		client:            client,
 		clusterDomain:     clusterDomain,
-		clusterID:         clusterID,
+		localCluster:      clusterID,
 		debugger:          debugger,
 		meshConfigWatcher: meshConfigWatcher,
 		statusController:  statusCtl,
+		sd:                sd,
 	}
 	c.gateways = kclient.New[*gateway.Gateway](client)
 	c.serviceEntries = kclient.New[*clientnetworking.ServiceEntry](client)
@@ -135,15 +146,16 @@ func New(
 	c.gateways.AddEventHandler(controllers.ObjectHandler(func(o controllers.Object) {
 		c.queue.Add(typedNamespace{
 			NamespacedName: config.NamespacedName(o),
-			kind:           kind.Gateway,
+			kind:           Gateway,
 		})
 	}))
 
-	c.services.AddEventHandler(controllers.FilteredObjectHandler(func(o controllers.Object) {
-		name := config.NamespacedName(o)
+	// update ServiceEntry and associated WorkloadEntry when a service changes
+	// triggered by local Service object changes and federatedWaypoints changes
+	commonServiceHandler := func(name types.NamespacedName) {
 		c.queue.Add(typedNamespace{
 			NamespacedName: name,
-			kind:           kind.ServiceEntry,
+			kind:           ServiceEntry,
 		})
 		for _, remoteService := range c.workloadEntryServiceIndex.Lookup(name) {
 			c.queue.Add(typedNamespace{
@@ -151,11 +163,31 @@ func New(
 					Namespace: remoteService.Labels[SourceClusterLabel],
 					Name:      remoteService.Labels[ParentServiceNamespaceLabel] + "/" + remoteService.Labels[ParentServiceLabel],
 				},
-				kind: kind.WorkloadEntry,
+				kind: WorkloadEntry,
 			})
 		}
+	}
+
+	if federatedWaypoints := sd.FederatedWaypoints(); federatedWaypoints != nil {
+		c.remoteWaypointSync = federatedWaypoints.RegisterBatch(func(events []krt.Event[krt.Named]) {
+			for _, e := range events {
+				o := e.Latest()
+				commonServiceHandler(types.NamespacedName{
+					Name:      o.Name,
+					Namespace: o.Namespace,
+				})
+			}
+		}, true)
+	} else {
+		// should never happen; can only happpen if we init peering after ambientindexes
+		log.Error("failed to watch FederatedWaypoints from the local cluster")
+	}
+
+	c.services.AddEventHandler(controllers.FilteredObjectHandler(func(o controllers.Object) {
+		name := config.NamespacedName(o)
+		commonServiceHandler(name)
 	}, func(o controllers.Object) bool {
-		return HasGlobalLabel(o.GetLabels())
+		return HasGlobalLabel(o.GetLabels()) || c.isGlobalWaypoint(o)
 	}))
 	c.workloadEntries.AddEventHandler(controllers.FilteredObjectHandler(func(o controllers.Object) {
 		svc := o.GetLabels()[ParentServiceLabel]
@@ -163,7 +195,7 @@ func New(
 
 		c.queue.Add(typedNamespace{
 			NamespacedName: types.NamespacedName{Name: svc, Namespace: ns},
-			kind:           kind.ServiceEntry,
+			kind:           ServiceEntry,
 		})
 	}, func(o controllers.Object) bool {
 		return o.GetLabels()[ParentServiceLabel] != "" &&
@@ -171,6 +203,20 @@ func New(
 			o.GetLabels()[SourceClusterLabel] != ""
 	}))
 	return c
+}
+
+// isGlobalWaypoint checks whether a Service should be treated
+// as implicitly global, because it is a waypoint for global services.
+// Anything that calls this isGlobalWaypoint func must also be enqueued
+// by FederatedWaypoints events.
+func (c *NetworkWatcher) isGlobalWaypoint(o controllers.Object) bool {
+	fw := c.sd.FederatedWaypoints()
+	if fw == nil {
+		// should never happen
+		log.Error("failed to check FederatedWaypoints")
+		return false
+	}
+	return fw.GetKey(o.GetNamespace()+string(types.Separator)+o.GetName()) != nil
 }
 
 func (c *NetworkWatcher) Run(stop <-chan struct{}) {
@@ -181,7 +227,9 @@ func (c *NetworkWatcher) Run(stop <-chan struct{}) {
 		c.serviceEntries.HasSynced,
 		c.workloadEntries.HasSynced,
 		c.services.HasSynced,
+		c.remoteWaypointSync.HasSynced,
 	)
+	c.localNetwork = tryFetchLocalNetworkForever(c.client, c.systemNamespace, stop)
 	c.pruneRemovedGateways()
 	log.Infof("informers synced, starting processing")
 	var wg sync.WaitGroup
@@ -197,12 +245,35 @@ func (c *NetworkWatcher) Run(stop <-chan struct{}) {
 	wg.Wait()
 	// Wait for the queue to finish draining (needed to ensure we don't hit a race when we trigger shutdowns later)
 	<-c.queue.Closed()
+	c.clustersMu.Lock()
+	defer c.clustersMu.Unlock()
 	log.Infof("shutting down")
 	controllers.ShutdownAll(c.gateways, c.serviceEntries, c.workloadEntries, c.services)
-	for _, namedNet := range c.gatewaysToNetwork {
-		namedNet.ShutdownNow()
+	for _, n := range c.remoteClusters {
+		n.shutdownNow()
 	}
 	<-c.statusQueue.Closed()
+}
+
+// TODO watch the namespace and re-trigger everything to support network change without istiod restart
+func tryFetchLocalNetworkForever(client kube.Client, systemNamespace string, stop <-chan struct{}) networkid.ID {
+	bo := backoff.NewExponentialBackOff(backoff.DefaultOption())
+	for {
+		nextSleep := bo.NextBackOff()
+		ns, err := client.Kube().CoreV1().Namespaces().Get(context.Background(), systemNamespace, metav1.GetOptions{})
+		if err != nil {
+			log.Errorf("failed to fetch namespace %s, will retry in %v: %v", systemNamespace, nextSleep, err)
+		} else {
+			if net, f := ns.Labels[label.TopologyNetwork.Name]; f {
+				return networkid.ID(net)
+			}
+			log.Errorf("fetched namespace %s but 'topology.istio.io/network' is not set; will retry in %v", systemNamespace, nextSleep)
+		}
+
+		if !sleep.Until(stop, nextSleep) {
+			return ""
+		}
+	}
 }
 
 var sourceClusterWorkloadEntries = func() klabels.Selector {
@@ -211,30 +282,32 @@ var sourceClusterWorkloadEntries = func() klabels.Selector {
 }()
 
 var networkGatewaysSelector = func() klabels.Selector {
-	l, _ := klabels.Parse("topology.istio.io/network")
+	l, _ := klabels.Parse(label.TopologyNetwork.Name)
 	return l
 }()
 
 func (c *NetworkWatcher) pruneRemovedGateways() {
-	networksInWorkloadEntries := sets.New[string]()
+	clustersInWorkloadEntries := sets.New[string]()
 	currentWorkloadEntries := c.workloadEntries.List(metav1.NamespaceAll, sourceClusterWorkloadEntries)
 	for _, we := range currentWorkloadEntries {
-		networksInWorkloadEntries.Insert(we.Labels[SourceClusterLabel])
+		clustersInWorkloadEntries.Insert(we.Labels[SourceClusterLabel])
 	}
-	networksInGateways := sets.New[string]()
+	clustersInGateways := sets.New[string]()
 	for _, gw := range c.gateways.List(metav1.NamespaceAll, networkGatewaysSelector) {
 		p, err := TranslatePeerGateway(gw)
 		if err != nil {
 			continue
 		}
-		networksInGateways.Insert(p.Network)
+		if clustersInGateways.InsertContains(p.Cluster.String()) {
+			log.Warnf("multiple gateways for cluster %s", p.Cluster)
+		}
 	}
-	staleNetworks := networksInWorkloadEntries.Difference(networksInGateways)
-	for stale := range staleNetworks {
+	staleClusters := clustersInWorkloadEntries.Difference(clustersInGateways)
+	for stale := range staleClusters {
 		log.Infof("found stale network %v", stale)
 		c.queue.Add(typedNamespace{
 			NamespacedName: types.NamespacedName{Name: stale},
-			kind:           kind.MeshNetworks,
+			kind:           Cluster,
 		})
 	}
 }
@@ -288,10 +361,11 @@ func convertPorts(ports []corev1.ServicePort) []*networking.ServicePort {
 
 type typedNamespace struct {
 	types.NamespacedName
-	kind kind.Kind
+	kind Kind
 }
 
 const (
+	// RemoteWaypointLabel should contain the hostname of the peered service for a remote waypoint
 	RemoteWaypointLabel = "solo.io/remote-waypoint"
 
 	ServiceScopeLabel      = "solo.io/service-scope"
@@ -302,6 +376,7 @@ const (
 	ParentServiceLabel               = "solo.io/parent-service"
 	ParentServiceNamespaceLabel      = "solo.io/parent-service-namespace"
 	SourceClusterLabel               = "solo.io/source-cluster"
+	SourceWorkloadLabel              = "solo.io/source-workload"
 
 	// ServiceEndpointStatus is a workaround WorkloadEntry not being able to encode "0 weight" or "unhealthy".
 	// This lets us
@@ -330,6 +405,8 @@ var (
 		"The domain suffix for generate services").Get()
 	DefaultTrafficDistribution = env.Register("PEERING_DISCOVERY_DEFAULT_TRAFFIC_DISTRIBUTION", "PreferNetwork",
 		"The default trafficDistribution for services, if none set.").Get()
+	EnableFlatNetworks = env.Register("PEERING_ENABLE_FLAT_NETWORKS", true,
+		"If enabled, clusters that have the same network name will be reached directly, skipping the gateway.").Get()
 )
 
 // IsPeerObject checks if an object is a peer object which should be logically considered a part of another namespace.
@@ -359,16 +436,29 @@ func WasPeerObject(c *config.Config) bool {
 }
 
 type RemoteFederatedService struct {
-	*workloadapi.FederatedService
+	Service *workloadapi.FederatedService
 	Cluster string
 }
 
 func (s RemoteFederatedService) ResourceName() string {
-	return s.Cluster + "/" + s.Namespace + "/" + s.Name
+	return s.Cluster + "/" + s.Service.Namespace + "/" + s.Service.Name
 }
 
 func (s RemoteFederatedService) Equals(other RemoteFederatedService) bool {
-	return s.Cluster == other.Cluster && proto.Equal(s.FederatedService, other.FederatedService)
+	return s.Cluster == other.Cluster && proto.Equal(s.Service, other.Service)
+}
+
+type RemoteWorkload struct {
+	*workloadapi.Workload
+	Cluster string
+}
+
+func (s RemoteWorkload) ResourceName() string {
+	return s.Uid
+}
+
+func (s RemoteWorkload) Equals(other RemoteWorkload) bool {
+	return s.Cluster == other.Cluster && proto.Equal(s.Workload, other.Workload)
 }
 
 // CreateOrUpdateIfNeeded will create an object if does not exist. If it does exist, it will update it if there are changes.
@@ -388,8 +478,10 @@ func CreateOrUpdateIfNeeded[T controllers.ComparableObject](c kclient.ReadWriter
 }
 
 type PeerGateway struct {
-	Network string
-	Address string
+	Network  networkid.ID
+	Cluster  cluster.ID
+	Address  string
+	Locality string
 }
 
 func TranslatePeerGateway(gw *gateway.Gateway) (PeerGateway, error) {
@@ -401,9 +493,25 @@ func TranslatePeerGateway(gw *gateway.Gateway) (PeerGateway, error) {
 	if err != nil {
 		return peer, err
 	}
-	peer.Network = gw.Labels["topology.istio.io/network"]
+	peer.Network = networkid.ID(gw.Labels[label.TopologyNetwork.Name])
 	if peer.Network == "" {
 		return peer, fmt.Errorf("no network label found in gateway")
+	}
+	peer.Cluster = cluster.ID(gw.Labels[label.TopologyCluster.Name])
+	if peer.Cluster == "" {
+		log.Debugf(
+			"no %s label on peer gateway, infer cluster name from network %s",
+			label.TopologyCluster.Name, peer.Network,
+		)
+		// Fallback to cluster == network
+		peer.Cluster = cluster.ID(peer.Network)
+	}
+	if len(gw.Spec.Addresses) == 0 {
+		if len(gw.Status.Addresses) > 0 {
+			// We could support this, but right now it's an error and doesn't have a use case
+			return peer, fmt.Errorf("no spec.addresses found in gateway (but found status.addresses)")
+		}
+		return peer, fmt.Errorf("no addresses found in gateway")
 	}
 	// We can use hostname or IP, so don't need to check the type
 	host := gw.Spec.Addresses[0].Value
@@ -416,6 +524,14 @@ func TranslatePeerGateway(gw *gateway.Gateway) (PeerGateway, error) {
 		}
 	}
 	peer.Address = net.JoinHostPort(host, port)
+
+	region, rf := gw.Labels["topology.kubernetes.io/region"]
+	zone, zf := gw.Labels["topology.kubernetes.io/zone"]
+	if rf && zf {
+		peer.Locality = region + "/" + zone
+	} else if rf {
+		peer.Locality = region
+	}
 	return peer, nil
 }
 
@@ -444,9 +560,13 @@ func TranslateEastWestGateway(gw *gateway.Gateway, trustDomain string) (*gateway
 	if _, f := gw.Labels[constants.ExposeIstiodLabel]; !f {
 		return nil, fmt.Errorf("gateway does not have the %q label", constants.ExposeIstiodLabel)
 	}
-	istioNetwork, f := gw.Labels[constants.NetworkTopologyLabel]
+	istioCluster, f := gw.Labels[label.TopologyCluster.Name]
 	if !f {
-		return nil, fmt.Errorf("gateway does not have the %q label", constants.NetworkTopologyLabel)
+		return nil, fmt.Errorf("gateway does not have the %q label", label.TopologyCluster.Name)
+	}
+	_, f = gw.Labels[label.TopologyNetwork.Name]
+	if !f {
+		return nil, fmt.Errorf("gateway does not have the %q label", label.TopologyNetwork.Name)
 	}
 	// get cross-network and xds-tls ports
 	var crossNetworkPort, xdsTLSPort *gateway.PortNumber
@@ -483,7 +603,7 @@ func TranslateEastWestGateway(gw *gateway.Gateway, trustDomain string) (*gateway
 			APIVersion: gvk.KubernetesGateway.GroupVersion(),
 		},
 		ObjectMeta: metav1.ObjectMeta{
-			Name:        fmt.Sprintf("istio-remote-peer-%s", istioNetwork),
+			Name:        fmt.Sprintf("istio-remote-peer-%s", istioCluster),
 			Namespace:   gw.GetNamespace(),
 			Annotations: annotations,
 			Labels:      gw.GetLabels(),
@@ -515,4 +635,28 @@ func TranslateEastWestGateway(gw *gateway.Gateway, trustDomain string) (*gateway
 			},
 		},
 	}, nil
+}
+
+func (c *NetworkWatcher) getClusterByID(cid cluster.ID) *peerCluster {
+	c.clustersMu.RLock()
+	defer c.clustersMu.RUnlock()
+	cluster, ok := c.remoteClusters[cid]
+	if !ok {
+		return nil
+	}
+	return cluster
+}
+
+func (c *NetworkWatcher) getClusterByGateway(gw types.NamespacedName) *peerCluster {
+	c.clustersMu.RLock()
+	defer c.clustersMu.RUnlock()
+	cid, ok := c.gatewaysToCluster[gw]
+	if !ok {
+		return nil
+	}
+	cluster, ok := c.remoteClusters[cid]
+	if !ok {
+		return nil
+	}
+	return cluster
 }

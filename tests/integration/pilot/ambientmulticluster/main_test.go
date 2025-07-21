@@ -18,7 +18,9 @@ import (
 	"sigs.k8s.io/yaml"
 
 	"istio.io/istio/pkg/log"
+	"istio.io/istio/pkg/slices"
 	"istio.io/istio/pkg/test/framework"
+	"istio.io/istio/pkg/test/framework/components/cluster"
 	"istio.io/istio/pkg/test/framework/components/crd"
 	"istio.io/istio/pkg/test/framework/components/environment/kube"
 	"istio.io/istio/pkg/test/framework/components/istio"
@@ -44,22 +46,38 @@ var (
 // The ambientmulticluster is a test to exercise Solo's ambient multicluster flow.
 // This is not under ambient/ since that runs with one cluster only, so would never be executed.
 func TestMain(m *testing.M) {
-	// Filter out the 'remote' cluster, we don't support that model.
-	kube.ClusterFilter = sets.New(shared.LocalCluster, shared.RemoteCluster)
+	// force every cluster to act as a primary cluster (no primary-remote support)
+	kube.ClusterFilter = func(c cluster.Config) (cluster.Config, bool) {
+		c.ConfigClusterName = ""
+		c.PrimaryClusterName = ""
+		return c, true
+	}
 	// nolint: staticcheck
 	framework.
 		NewSuite(m).
 		Label(testlabel.CustomSetup).
-		RequireMinClusters(2).
+		RequireMinClusters(3).
+		SkipIf("only support multi-primary", func(ctx resource.Context) bool {
+			haveClusters := sets.New(slices.Map(ctx.Clusters(), func(c cluster.Cluster) string {
+				return c.Name()
+			})...)
+			// TODO make the cluster names for tests dynamic
+			wantClusters := sets.New(
+				shared.LocalCluster,
+				shared.RemoteFlatCluster,
+				shared.RemoteNetworkCluster,
+			)
+			return len(haveClusters.Difference(wantClusters)) > 0
+		}).
 		Setup(func(t resource.Context) error {
 			t.Settings().Ambient = true
 			return nil
 		}).
 		Setup(istio.Setup(&i, func(ctx resource.Context, cfg *istio.Config) {
-			// can't deploy VMs in this mode
-			ctx.Settings().SkipVMs()
-			cfg.DeployEastWestGW = false
-			cfg.SkipDeployCrossClusterSecrets = true
+			ctx.Settings().SkipVMs()                 // can't deploy VMs in this mode
+			cfg.DeployEastWestGW = false             // this is the sidecar/SNI eastwest
+			cfg.SkipDeployCrossClusterSecrets = true // TODO disable this, secrets shouldn't break peering
+
 			tm := `
 profile: ambient
 values:
@@ -67,25 +85,23 @@ values:
     trustDomain: "{{.}}.local"
     defaultHttpRetryPolicy:
       attempts: 0 # Do not hide failures with retries
-  global:
-    multiCluster:
-      clusterName: "{{.}}"
-    network: "{{.}}"
   pilot:
     env:
       PILOT_ENABLE_IP_AUTOALLOCATE: "true"
       PILOT_SKIP_VALIDATE_TRUST_DOMAIN: "true"
+      PEERING_ENABLE_FLAT_NETWORKS: "true"
   cni:
     ambient:
       dnsCapture: true
   platforms:
     peering:
       enabled: true
+  ztunnel:
+    platforms:
+      peering:
+        enabled: true
 `
-
 			cfg.ControlPlaneValues = tmpl.MustEvaluate(tm, "primary")
-			// TODO: I think this is never used
-			cfg.RemoteClusterValues = tmpl.MustEvaluate(tm, "remote")
 		}, cert.CreateCASecret)).
 		Setup(func(ctx resource.Context) error {
 			if err := crd.DeployGatewayAPI(ctx); err != nil {

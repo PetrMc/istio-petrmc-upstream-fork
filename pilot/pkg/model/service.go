@@ -50,6 +50,7 @@ import (
 	"istio.io/istio/pkg/config/protocol"
 	"istio.io/istio/pkg/config/schema/kind"
 	"istio.io/istio/pkg/config/visibility"
+	"istio.io/istio/pkg/kube/krt"
 	"istio.io/istio/pkg/maps"
 	pm "istio.io/istio/pkg/model"
 	"istio.io/istio/pkg/network"
@@ -808,6 +809,15 @@ const (
 	TrafficDistributionPreferRegion
 )
 
+// HACK SOLO peering - federated services must distinguish between no value and defaulting to Any
+func MaybeGetTrafficDistribution(specValue *string, annotations map[string]string) *TrafficDistribution {
+	annoValue := annotations[annotation.NetworkingTrafficDistribution.Name]
+	if (specValue == nil || *specValue == "") && annoValue == "" {
+		return nil
+	}
+	return ptr.Of(GetTrafficDistribution(specValue, annotations))
+}
+
 func GetTrafficDistribution(specValue *string, annotations map[string]string) TrafficDistribution {
 	if specValue != nil {
 		switch *specValue {
@@ -835,6 +845,27 @@ func GetTrafficDistribution(specValue *string, annotations map[string]string) Tr
 		}
 		return TrafficDistributionAny
 	}
+}
+
+func (td *TrafficDistribution) String() string {
+	if td == nil {
+		return ""
+	}
+	switch *td {
+	case TrafficDistributionAny:
+		return "Any"
+	case TrafficDistributionPreferSameZone:
+		return "PreferSameZone"
+	case TrafficDistributionPreferSameNode:
+		return "PreferSameNode:"
+	case TrafficDistributionPreferNetwork:
+		return "PreferNetwork"
+	case TrafficDistributionPreferRegion:
+		return "PreferRegion"
+	}
+	// should never happen
+	log.Error("Unknown traffic distribution value, defaulting to \"\"")
+	return ""
 }
 
 // DeepCopy creates a deep copy of ServiceAttributes, but skips internal mutexes.
@@ -966,6 +997,9 @@ type AmbientIndexes interface {
 
 	FederatedServices(services sets.String) ([]FederatedService, sets.String)
 	ServicesWithWaypointOrRemoteWaypoint() sets.Set[host.Name]
+
+	// HACK: we want to get notified of any Global Waypoints in the peering controller
+	FederatedWaypoints() krt.Collection[krt.Named]
 }
 
 // WaypointKey is a multi-address extension of NetworkAddress which is commonly used for lookups in AmbientIndex
@@ -1036,6 +1070,10 @@ func (u NoopAmbientIndexes) ServicesWithWaypointOrRemoteWaypoint() sets.Set[host
 
 func (u NoopAmbientIndexes) AddressInformation(sets.String) ([]AddressInfo, sets.String) {
 	return nil, nil
+}
+
+func (u NoopAmbientIndexes) FederatedWaypoints() krt.Collection[krt.Named] {
+	return nil
 }
 
 func (u NoopAmbientIndexes) AdditionalPodSubscriptions(
@@ -1152,6 +1190,8 @@ type ServiceInfo struct {
 	GlobalService bool
 	// RemoteWaypoint marks this as having a waypoint - but on a remote cluster
 	RemoteWaypoint bool
+	// TrafficDistribution preserves the control plane value of TrafficDistribution (rather than the LoadBalancing which applies defaulting to Any)
+	TrafficDistribution *TrafficDistribution
 
 	// MarshaledAddress contains the pre-marshaled representation.
 	// Note: this is an Address -- not a Service.

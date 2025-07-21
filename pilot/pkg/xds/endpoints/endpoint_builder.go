@@ -718,6 +718,7 @@ func buildEnvoyLbEndpoint(b *EndpointBuilder, e *model.IstioEndpoint, mtlsEnable
 			address = serviceVIPs[0]
 			port = b.port
 		}
+
 		// We intentionally do not take into account waypoints here.
 		// 1. Workload waypoints: sidecar/ingress do not support sending traffic directly to workloads, only to services,
 		//    so these are not applicable.
@@ -740,6 +741,13 @@ func buildEnvoyLbEndpoint(b *EndpointBuilder, e *model.IstioEndpoint, mtlsEnable
 			Address: util.BuildInternalAddressWithIdentifier(innerAddressName, target),
 		}}
 		ep.Metadata.FilterMetadata[util.OriginalDstMetadataKey] = util.BuildTunnelMetadataStruct(address, port, waypoint)
+
+		// SOLO flat network peering needs a hostname to send to the Waypoint in another cluster (VIPs won't match)
+		if ep.Metadata.FilterMetadata[util.IstioMetadataKey] == nil {
+			ep.Metadata.FilterMetadata[util.IstioMetadataKey] = &structpb.Struct{Fields: map[string]*structpb.Value{}}
+		}
+		ep.Metadata.FilterMetadata[util.IstioMetadataKey].Fields["destination"] = structpb.NewStringValue(net.JoinHostPort(string(b.hostname), strconv.Itoa(b.port)))
+
 		if b.dir != model.TrafficDirectionInboundVIP {
 			// Add TLS metadata matcher to indicate we can use HBONE for this endpoint.
 			// We skip this for service waypoint, which doesn't need to dynamically match mTLS vs HBONE.

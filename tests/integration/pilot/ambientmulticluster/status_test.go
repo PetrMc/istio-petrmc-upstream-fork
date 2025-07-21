@@ -33,11 +33,12 @@ func TestStatus(t *testing.T) {
 		NewTest(t).
 		Run(func(t framework.TestContext) {
 			ctx := t.Context()
+			// TODO expand this test to handle the RemoteFlatCluster
 			localCluster := t.Clusters().GetByName(shared.LocalCluster)
-			remoteCluster := t.Clusters().GetByName(shared.RemoteCluster)
+			remoteCluster := t.Clusters().GetByName(shared.RemoteNetworkCluster)
 
 			// check istio-remote for local -> remote in local cluster
-			localToRemoteGwName := "istio-remote-peer-network-2"
+			localToRemoteGwName := "istio-remote-peer-" + shared.RemoteNetworkCluster
 			localToRemoteGw, err := localCluster.GatewayAPI().GatewayV1beta1().Gateways(peeringNamespace).Get(ctx, localToRemoteGwName, metav1.GetOptions{})
 			if err != nil {
 				t.Fatalf("Failed to get local gateway: %v", err)
@@ -80,7 +81,7 @@ func TestStatus(t *testing.T) {
 			AssertPeerGatewayStatus(t, localCluster, localToRemoteGwName, peeringNamespace, expectedStatus)
 
 			// check istio-remote for remote -> local in remote cluster
-			remoteToLocalGwName := "istio-remote-peer-network-1"
+			remoteToLocalGwName := "istio-remote-peer-" + shared.LocalCluster
 			remoteToLocalGw, err := remoteCluster.GatewayAPI().GatewayV1beta1().Gateways(peeringNamespace).Get(t.Context(), remoteToLocalGwName, metav1.GetOptions{})
 			if err != nil {
 				t.Fatalf("Failed to get remote gateway: %v", err)

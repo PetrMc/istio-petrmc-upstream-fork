@@ -495,24 +495,6 @@ func (lb *ListenerBuilder) createPerServiceHBONERoute(targetIP string, targetPor
 						},
 						SharedWithUpstream: sfsvalue.FilterStateValue_ONCE,
 					},
-					{
-						Key: &sfsvalue.FilterStateValue_ObjectKey{
-							ObjectKey: "io.istio.disable_cross_network",
-						},
-						FactoryKey: "envoy.string",
-						Value: &sfsvalue.FilterStateValue_FormatString{
-							FormatString: &core.SubstitutionFormatString{
-								Format: &core.SubstitutionFormatString_TextFormatSource{
-									TextFormatSource: &core.DataSource{
-										Specifier: &core.DataSource_InlineString{
-											InlineString: "true",
-										},
-									},
-								},
-							},
-						},
-						SharedWithUpstream: sfsvalue.FilterStateValue_ONCE,
-					},
 				},
 			}),
 		}),
@@ -537,6 +519,38 @@ func buildConnectRoutes(node *model.Proxy) []*route.Route {
 		// For waypoint proxies, we need to insert an additional match for traffic from another network
 		// This is to ensure we only send to local endpoints, and don't bound back to another network
 		routes = append(routes, &route.Route{
+			TypedPerFilterConfig: map[string]*anypb.Any{
+				xdsfilters.ConnectAuthorityFilter.Name: protoconv.MessageToAny(&route.FilterConfig{
+					// The ability to run set_filter_state as a per-route filter was added in Istio 1.25 (https://github.com/envoyproxy/envoy/pull/37507)
+					// We backported it internally in a 1.24.x patch release.
+					// Mark it as optional since we may be serving older clients.
+					// If it is not present then users will just not be able to serve multi-network traffic for those proxies (sidecar inbound and waypoints).
+					IsOptional: true,
+					Config: protoconv.MessageToAny(&sfs.Config{
+						OnRequestHeaders: []*sfsvalue.FilterStateValue{
+							{
+								Key: &sfsvalue.FilterStateValue_ObjectKey{
+									ObjectKey: "io.istio.disable_cross_network",
+								},
+								FactoryKey: "envoy.string",
+								Value: &sfsvalue.FilterStateValue_FormatString{
+									FormatString: &core.SubstitutionFormatString{
+										Format: &core.SubstitutionFormatString_TextFormatSource{
+											TextFormatSource: &core.DataSource{
+												Specifier: &core.DataSource_InlineString{
+													InlineString: "true",
+												},
+											},
+										},
+									},
+								},
+								SharedWithUpstream: sfsvalue.FilterStateValue_ONCE,
+							},
+						},
+					}),
+				}),
+			},
+
 			Match: &route.RouteMatch{
 				PathSpecifier: &route.RouteMatch_ConnectMatcher_{ConnectMatcher: &route.RouteMatch_ConnectMatcher{}},
 				Headers: []*route.HeaderMatcher{{

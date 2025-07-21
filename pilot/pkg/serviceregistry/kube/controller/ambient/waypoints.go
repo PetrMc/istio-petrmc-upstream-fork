@@ -30,6 +30,7 @@ import (
 
 	"istio.io/api/annotation"
 	"istio.io/api/label"
+	networkingclient "istio.io/client-go/pkg/apis/networking/v1"
 	"istio.io/istio/pilot/pkg/model"
 	"istio.io/istio/pilot/pkg/serviceregistry/kube/controller/ambient/multicluster"
 	"istio.io/istio/pkg/cluster"
@@ -160,6 +161,45 @@ func fetchWaypointForTarget(
 
 	// neither o nor it's namespace has a use-waypoint label
 	return nil, nil
+}
+
+func fetchRemoteWaypointForServiceEntry(
+	ctx krt.HandlerContext,
+	serviceEntries krt.Collection[*networkingclient.ServiceEntry],
+	o metav1.ObjectMeta,
+) (*Waypoint, *model.StatusMessage) {
+	wpAutogenHost := o.Labels[peering.RemoteWaypointLabel]
+	wpName, wpNs, ok := peering.ParseAutogenHostname(wpAutogenHost)
+	if !ok {
+		return nil, nil
+	}
+
+	wpSeName := fmt.Sprintf("%s/autogen.%s.%s", peering.PeeringNamespace, wpNs, wpName)
+	wpSe := ptr.Flatten(krt.FetchOne(ctx, serviceEntries, krt.FilterKey(wpSeName)))
+	if wpSe == nil || len(wpSe.Spec.GetHosts()) == 0 {
+		return nil, &model.StatusMessage{
+			Reason:  "WaypointIsNotReady",
+			Message: fmt.Sprintf("remote waypoint %q is not ready", wpAutogenHost),
+		}
+	}
+
+	return &Waypoint{
+		Named: krt.NewNamed(wpSe),
+		Address: &workloadapi.GatewayAddress{
+			Destination: &workloadapi.GatewayAddress_Hostname{
+				Hostname: &workloadapi.NamespacedHostname{
+					Namespace: wpNs,
+					Hostname:  wpSe.Spec.GetHosts()[0],
+				},
+			},
+			// TODO propagate via FederatedService.RemoteWaypoint field & label?
+			HboneMtlsPort: 15008,
+		},
+		TrafficType:     constants.ServiceTraffic,
+		ServiceAccounts: wpSe.Spec.SubjectAltNames,
+		// AllowedRoutes doesn't matter here - not accessed as part of Waypoints collection
+		AllowedRoutes: WaypointSelector{},
+	}, nil
 }
 
 func fetchWaypointForService(

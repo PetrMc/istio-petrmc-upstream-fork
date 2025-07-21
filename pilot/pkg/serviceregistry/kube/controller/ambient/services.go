@@ -66,7 +66,7 @@ func (a *index) ServicesCollection(
 				multicluster.ClusterKRTMetadataKey: clusterID,
 			}),
 		)...)
-	ServiceEntriesInfo := krt.NewManyCollection(serviceEntries, a.serviceEntryServiceBuilder(waypoints, namespaces, services),
+	ServiceEntriesInfo := krt.NewManyCollection(serviceEntries, a.serviceEntryServiceBuilder(serviceEntries, waypoints, namespaces, services),
 		append(
 			opts.WithName("ServiceEntriesInfo"),
 			krt.WithMetadata(krt.Metadata{
@@ -220,14 +220,14 @@ func serviceServiceBuilder(
 		svc := constructService(ctx, s, waypoint, serviceEntries, domainSuffix, networkGetter)
 
 		return precomputeServicePtr(&model.ServiceInfo{
-			Service:       svc,
-			PortNames:     portNames,
-			LabelSelector: model.NewSelector(s.Spec.Selector),
-			Source:        MakeSource(s),
-			Waypoint:      waypointStatus,
-			Scope:         serviceScope,
-
-			GlobalService: peering.HasGlobalLabel(s.Labels),
+			Service:             svc,
+			PortNames:           portNames,
+			LabelSelector:       model.NewSelector(s.Spec.Selector),
+			Source:              MakeSource(s),
+			Waypoint:            waypointStatus,
+			Scope:               serviceScope,
+			TrafficDistribution: model.MaybeGetTrafficDistribution(s.Spec.TrafficDistribution, s.GetAnnotations()),
+			GlobalService:       peering.HasGlobalLabel(s.Labels),
 		})
 	}
 }
@@ -351,6 +351,7 @@ func MakeSource(o controllers.Object) model.TypedObject {
 }
 
 func (a *index) serviceEntryServiceBuilder(
+	serviceEntries krt.Collection[*networkingclient.ServiceEntry],
 	waypoints krt.Collection[Waypoint],
 	namespaces krt.Collection[*v1.Namespace],
 	services krt.Collection[*v1.Service],
@@ -358,7 +359,21 @@ func (a *index) serviceEntryServiceBuilder(
 	return func(ctx krt.HandlerContext, s *networkingclient.ServiceEntry) []model.ServiceInfo {
 		var wasPeerObject bool
 		s, wasPeerObject = convertSENamespace(s)
-		waypoint, waypointError := fetchWaypointForService(ctx, waypoints, namespaces, services, s.ObjectMeta)
+
+		var waypoint *Waypoint
+		var waypointError *model.StatusMessage
+
+		if wasPeerObject {
+			waypoint, waypointError = fetchRemoteWaypointForServiceEntry(
+				ctx,
+				serviceEntries,
+				s.ObjectMeta,
+			)
+		}
+		if waypoint == nil {
+			// waypoint, waypointError = fetchWaypointForService(ctx, waypoints, namespaces, s.ObjectMeta)
+			waypoint, waypointError = fetchWaypointForService(ctx, waypoints, namespaces, services, s.ObjectMeta)
+		}
 		nwGetter := func(ctx krt.HandlerContext) network.ID {
 			return a.Network(ctx)
 		}
@@ -398,14 +413,15 @@ func serviceEntriesInfo(
 			source.Namespace = peering.PeeringNamespace
 		}
 		return precomputeService(model.ServiceInfo{
-			Service:       e,
-			PortNames:     portNames,
-			LabelSelector: sel,
-			Source:        source,
-			Waypoint:      waypoint,
+			Service:             e,
+			PortNames:           portNames,
+			LabelSelector:       sel,
+			Source:              source,
+			Waypoint:            waypoint,
+			TrafficDistribution: model.MaybeGetTrafficDistribution(nil, s.GetAnnotations()),
 
 			GlobalService:  peering.HasGlobalLabel(s.Labels),
-			RemoteWaypoint: s.Labels[peering.RemoteWaypointLabel] == "true",
+			RemoteWaypoint: s.Labels[peering.RemoteWaypointLabel] != "",
 		})
 	})
 }

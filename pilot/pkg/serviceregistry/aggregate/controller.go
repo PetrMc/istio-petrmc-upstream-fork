@@ -25,6 +25,7 @@ import (
 	"istio.io/istio/pkg/config/host"
 	"istio.io/istio/pkg/config/labels"
 	"istio.io/istio/pkg/config/mesh"
+	"istio.io/istio/pkg/kube/krt"
 	"istio.io/istio/pkg/log"
 	"istio.io/istio/pkg/maps"
 	"istio.io/istio/pkg/slices"
@@ -207,6 +208,20 @@ func (c *Controller) AddressInformation(addresses sets.String) ([]model.AddressI
 		}
 	}
 	return i, removed
+}
+
+func (c *Controller) FederatedWaypoints() krt.Collection[krt.Named] {
+	if !features.EnableAmbient {
+		return nil
+	}
+	for _, reg := range c.GetRegistries() {
+		col := reg.FederatedWaypoints()
+		if col != nil {
+			// should only have 1 ambient index!
+			return col
+		}
+	}
+	return nil
 }
 
 type registryEntry struct {

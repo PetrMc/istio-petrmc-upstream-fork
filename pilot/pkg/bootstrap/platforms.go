@@ -46,6 +46,7 @@ func (s *Server) initPeeringDiscovery(args *PilotArgs) {
 					IstioRevision: args.Revision,
 					// Hack to make `istioctl ps` show us... otherwise it is filtered
 					ProxyConfig: &model.NodeMetaProxyConfig{},
+					PeeringMode: true,
 				}.ToStruct(),
 				GrpcOpts: []grpc.DialOption{
 					args.KeepaliveOptions.ConvertToClientOption(),
@@ -87,11 +88,13 @@ func (s *Server) initPeeringDiscovery(args *PilotArgs) {
 
 					c := peering.New(
 						s.kubeClient,
-						args.RegistryOptions.KubeOptions.ClusterID.String(),
+						args.RegistryOptions.KubeOptions.SystemNamespace,
+						args.RegistryOptions.KubeOptions.ClusterID,
 						args.RegistryOptions.KubeOptions.DomainSuffix,
 						buildConfig,
 						args.KrtDebugger,
 						s.environment.Watcher,
+						s.environment.ServiceDiscovery,
 						s.statusManager,
 					)
 					// Start informers again. This fixes the case where informers for namespace do not start,

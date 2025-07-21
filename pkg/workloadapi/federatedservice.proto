@@ -29,6 +29,8 @@ message FederatedService {
   // Hostname represents the FQDN of the service.
   // For Kubernetes, this would be <name>.<namespace>.svc.<cluster domain>.
   string hostname = 3;
+  // TrafficDistribution within the source cluster if any.
+  string traffic_distribution = 8;
   // List of subject alt names to verify against. This will aggregate the SANs of all workloads in
   // the remote cluster.
   repeated string subject_alt_names = 4;
@@ -42,6 +44,15 @@ message FederatedService {
   google.protobuf.UInt32Value capacity = 6;
   // Information about a remote waypoint, if any
   RemoteWaypoint waypoint = 7;
+  // WaypointFor is specified only if the Service itself is a waypoint.
+  string waypoint_for = 9;
 }
 
-message RemoteWaypoint  {}
+message RemoteWaypoint  {
+  // Name represents the name for the service.
+  // This will reference the name of another FederatedService.
+  string name = 1;
+  // Name represents the namespace for the service.
+  // This will reference the namespace of another FederatedService.
+  string namespace = 2;
+}

@@ -175,3 +175,12 @@ _internal_defaults_do_not_set:
     # Path on the host to the SPIRE agent admin socket.
     # Do not change unless you know what you're doing or have a custom SPIRE setup
     adminSockHostPath: /run/spire/agent/sockets/csi.spiffe.io/admin
+
+  # SOLO
+  platforms:
+    ecs:
+      # If set, to the name of an ECS cluster, ECS service discovery will be enabled.
+      cluster: ""
+    peering:
+      # If set, Istiod will automatically peer with discovered Gateways for service discovery.
+      enabled: false

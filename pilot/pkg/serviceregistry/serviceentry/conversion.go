@@ -37,6 +37,7 @@ import (
 	"istio.io/istio/pkg/spiffe"
 	netutil "istio.io/istio/pkg/util/net"
 	"istio.io/istio/pkg/util/sets"
+	"istio.io/istio/platform/discovery/peering"
 )
 
 func convertPort(port *networking.ServicePort) *model.Port {
@@ -415,7 +416,10 @@ func getTLSModeFromWorkloadEntry(wle *networking.WorkloadEntry) string {
 	if val, exists := wle.Labels[label.SecurityTlsMode.Name]; exists {
 		tlsMode = val
 	} else if wle.ServiceAccount != "" {
-		tlsMode = model.IstioMutualTLSModeLabel
+		// SOLO peering; we cannot assume mTLS for peered WE like this
+		if !peering.HasGlobalLabel(wle.GetLabels()) {
+			tlsMode = model.IstioMutualTLSModeLabel
+		}
 	}
 
 	return tlsMode

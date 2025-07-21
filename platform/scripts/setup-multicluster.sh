@@ -25,9 +25,10 @@ function build_all () {
 
 function deploy_cluster() {
   name=${1:?name}
-  index=${2:?index}
+  network=${2:?network}
+  index=${3:?index}
   if ! kind get clusters | grep -q ^$name$; then
-     kindup2 --name $name --cluster-index=$index
+     kindup2 --name $name --cluster-index=$index --region $name
   fi
   kubectl create namespace istio-system || true
   kubectl create secret generic cacerts -n istio-system \
@@ -51,7 +52,7 @@ spec:
       multiCluster:
         clusterName: "$name"
       variant: ""
-      network: "$name"
+      network: "$network"
     pilot:
       env:
         SKIP_LICENSE_CHECK: "true"
@@ -67,7 +68,7 @@ spec:
       peering:
         enabled: true
 EOF
-  kubectl label namespace istio-system topology.istio.io/network=$name --overwrite
+  kubectl label namespace istio-system topology.istio.io/network=$network --overwrite
   kubectl apply -f tests/integration/pilot/testdata/gateway-api-crd.yaml
   kubectl create namespace istio-gateways || true
   istioctl multicluster expose --wait -n istio-gateways
@@ -78,9 +79,12 @@ EOF
 }
 
 build_all
-deploy_cluster alpha 1
-deploy_cluster beta 2
-istioctl multicluster link --contexts=kind-alpha,kind-beta -n istio-gateways
+# Two networks, 3 clusters
+deploy_cluster alpha net1 1
+deploy_cluster beta net1 2
+deploy_cluster gamma net2 3
+istioctl multicluster link --contexts=kind-alpha,kind-beta,kind-gamma -n istio-gateways
+kind-link alpha beta
 
 # For AWS, you may need a internal LB as well if you don't have a NAT gateway..
 #apiVersion: v1

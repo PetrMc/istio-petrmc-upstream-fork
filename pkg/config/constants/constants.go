@@ -213,8 +213,6 @@ const (
 
 	// ExposeIstiodLabel is the label used to indicate the port that Istiod is exposed on.
 	ExposeIstiodLabel = "istio.io/expose-istiod"
-	// NetworkTopologyLabel label used to identify the network for one or more pods
-	NetworkTopologyLabel = "topology.istio.io/network"
 	// TrustDomainAnnotation specifies the trust domain identity within the mesh
 	TrustDomainAnnotation = "gateway.istio.io/trust-domain"
 	// GatewayServiceAccountAnnotation overrides the name of the generated `ServiceAccount`resource

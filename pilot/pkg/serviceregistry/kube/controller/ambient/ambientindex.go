@@ -98,6 +98,7 @@ type servicesCollection struct {
 
 type federatedServicesCollection struct {
 	krt.Collection[model.FederatedService]
+	WaypointsCollection krt.Collection[krt.Named]
 }
 
 // index maintains an index of ambient WorkloadInfo objects by various keys.
@@ -504,12 +505,14 @@ func New(options Options) Index {
 	}
 
 	if features.EnablePeering {
-		FederatedServices := a.FederatedServicesCollection(a.meshConfig, WorkloadServices, Workloads, Waypoints, WorkloadServiceIndex, opts)
+		FederatedServices, FederatedWaypoints := a.FederatedServicesCollection(a.meshConfig, WorkloadServices, Workloads, Waypoints, WorkloadServiceIndex, opts)
 		FederatedServices.RegisterBatch(PushXds(a.XDSUpdater,
 			func(i model.FederatedService) model.ConfigKey {
 				return model.ConfigKey{Kind: kind.FederatedService, Name: i.ResourceName()}
 			}), false)
+
 		a.federatedServices.Collection = FederatedServices
+		a.federatedServices.WaypointsCollection = FederatedWaypoints
 	}
 
 	a.namespaces = NamespacesInfo
@@ -769,6 +772,11 @@ func (a *index) FederatedServices(services sets.String) ([]model.FederatedServic
 		}
 	}
 	return res, sets.New(removed...)
+}
+
+// HACK: we want to get notified of any Global Waypoints in the peering controller
+func (a *index) FederatedWaypoints() krt.Collection[krt.Named] {
+	return a.federatedServices.WaypointsCollection
 }
 
 func (a *index) ServicesWithWaypointOrRemoteWaypoint() sets.Set[host.Name] {

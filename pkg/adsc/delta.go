@@ -290,7 +290,7 @@ func (c *Client) runOnce(ctx context.Context) error {
 	c.xdsClient = xdsClient
 	for _, w := range c.initialWatches {
 		c.log.Infof("sending initial watch %v", w.TypeURL)
-		if err := c.request(w); err != nil {
+		if err := c.sendInitialWatch(w); err != nil {
 			return fmt.Errorf("initial watch: %v", err)
 		}
 	}
@@ -499,7 +499,7 @@ func (c *Client) handleDeltaResponse(d *discovery.DeltaDiscoveryResponse) error 
 		sets.InsertOrNew(allRemoves, key.TypeURL, key.Name)
 		c.drop(key)
 	}
-	if err := c.send(resourceKey{TypeURL: d.TypeUrl}, d.Nonce, joinError(rejects)); err != nil {
+	if err := c.send(resourceKey{TypeURL: d.TypeUrl}, d.Nonce, nil, joinError(rejects)); err != nil {
 		return err
 	}
 	for t, sub := range allAdds {
@@ -681,18 +681,25 @@ func (c *Client) Close() {
 	c.conn.Close()
 }
 
-func (c *Client) request(w resourceKey) error {
+func (c *Client) sendInitialWatch(w resourceKey) error {
 	nonce := c.lastReceivedNonce[w.TypeURL]
-	return c.send(w, nonce, nil)
+	child := c.tree[w].Children
+	initialResourceVersions := make(map[string]string, len(child))
+	for cc := range child {
+		// for now we do not have a version, so just send ''
+		initialResourceVersions[cc.Name] = ""
+	}
+	return c.send(w, nonce, initialResourceVersions, nil)
 }
 
-func (c *Client) send(w resourceKey, nonce string, nack error) error {
+func (c *Client) send(w resourceKey, nonce string, initialResourceVersions map[string]string, nack error) error {
 	req := &discovery.DeltaDiscoveryRequest{
 		Node: &core.Node{
 			Id: c.nodeID(),
 		},
-		TypeUrl:       w.TypeURL,
-		ResponseNonce: nonce,
+		TypeUrl:                 w.TypeURL,
+		ResponseNonce:           nonce,
+		InitialResourceVersions: initialResourceVersions,
 	}
 	if c.sendNodeMeta {
 		req.Node = c.node()

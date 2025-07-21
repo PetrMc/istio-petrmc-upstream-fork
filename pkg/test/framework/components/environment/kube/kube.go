@@ -26,7 +26,6 @@ import (
 	"istio.io/istio/pkg/test/framework/config"
 	"istio.io/istio/pkg/test/framework/resource"
 	"istio.io/istio/pkg/test/scopes"
-	"istio.io/istio/pkg/util/sets"
 )
 
 // Environment is the implementation of a kubernetes environment. It implements environment.Environment,
@@ -41,7 +40,7 @@ type Environment struct {
 var _ resource.Environment = &Environment{}
 
 // ClusterFilter allows filtering to only include clusters by a specific name.
-var ClusterFilter sets.String
+var ClusterFilter func(cluster.Config) (cluster.Config, bool)
 
 // New returns a new Kubernetes environment
 func New(ctx resource.Context, s *Settings) (env resource.Environment, err error) {
@@ -68,14 +67,14 @@ Check the test framework wiki for details on running the tests locally:
 
 	if ClusterFilter != nil {
 		f := ClusterFilter
-		configs = slices.Filter(configs, func(e cluster.Config) bool {
-			keep := f.Contains(e.Name)
+		configs = slices.MapFilter(configs, func(e cluster.Config) *cluster.Config {
+			config, keep := f(e)
 			if !keep {
-				log.Warnf("skipping cluster %v, does not match filter %v", e.Name, f)
-			} else {
-				log.Infof("keeping cluster %v, does match filter %v", e.Name, f)
+				log.Warnf("skipping cluster %v, does not match filter", e.Name, f)
+				return nil
 			}
-			return keep
+			log.Infof("keeping cluster %v, does match filter", e.Name, f)
+			return &config
 		})
 	}
 	clusters, err := buildClusters(configs)

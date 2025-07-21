@@ -15,13 +15,17 @@
 package xds
 
 import (
+	"strings"
+
 	discovery "github.com/envoyproxy/go-control-plane/envoy/service/discovery/v3"
 
 	"istio.io/istio/pilot/pkg/model"
 	"istio.io/istio/pilot/pkg/util/protoconv"
 	v3 "istio.io/istio/pilot/pkg/xds/v3"
 	"istio.io/istio/pkg/config/schema/kind"
+	"istio.io/istio/pkg/slices"
 	"istio.io/istio/pkg/util/sets"
+	"istio.io/istio/platform/discovery/peering"
 )
 
 type WorkloadGenerator struct {
@@ -61,6 +65,7 @@ func (e WorkloadGenerator) GenerateDeltas(
 		reqAddresses = nil
 	}
 	addrs, removed := e.Server.Env.ServiceDiscovery.AddressInformation(reqAddresses)
+	addrs = maybeFilterAddresses(proxy, addrs)
 	// Note: while "removed" is a weird name for a resource that never existed, this is how the spec works:
 	// https://www.envoyproxy.io/docs/envoy/latest/api-docs/xds_protocol#id2
 	have := sets.New[string]()
@@ -83,6 +88,33 @@ func (e WorkloadGenerator) GenerateDeltas(
 	// `req.Delta.Subscribed`.
 
 	return resources, removed.UnsortedList(), model.XdsLogDetails{}, true, nil
+}
+
+func maybeFilterAddresses(proxy *model.Proxy, addrs []model.AddressInfo) []model.AddressInfo {
+	if !proxy.Metadata.PeeringMode {
+		return addrs
+	}
+	return slices.FilterInPlace(addrs, func(info model.AddressInfo) bool {
+		wl := info.GetWorkload()
+		if wl == nil {
+			return true
+		}
+		spl := strings.Split(wl.Uid, "/")
+		if len(spl) != 5 || spl[2] != "Pod" {
+			return false
+		}
+		// Is this a part of any global services? If so, keep it
+		for k := range wl.Services {
+			// format: ns/name.ns.domain
+
+			if strings.HasSuffix(k, peering.DomainSuffix) {
+				// note: we do not return a modified object since they are premarshalled. The client can just ignore the other services.
+				return true
+			}
+		}
+		// Else we can filter
+		return false
+	})
 }
 
 func appendAddress(addr model.AddressInfo, requestedType string, aliases []string, have sets.Set[string], resources model.Resources) model.Resources {
@@ -164,6 +196,7 @@ func (e WorkloadGenerator) generateDeltasOndemand(
 		return nil, nil, model.XdsLogDetails{}, false, nil
 	}
 	addrs, removed := e.Server.Env.ServiceDiscovery.AddressInformation(addresses)
+	addrs = maybeFilterAddresses(proxy, addrs)
 	// Note: while "removed" is a weird name for a resource that never existed, this is how the spec works:
 	// https://www.envoyproxy.io/docs/envoy/latest/api-docs/xds_protocol#id2
 	have := sets.New[string]()

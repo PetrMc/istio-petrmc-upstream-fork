@@ -5,7 +5,10 @@
 package peering
 
 import (
+	"crypto/sha256"
+	"errors"
 	"fmt"
+	"net/netip"
 	"reflect"
 	"strings"
 
@@ -13,48 +16,93 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	klabels "k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	k8s "sigs.k8s.io/gateway-api/apis/v1"
 	gateway "sigs.k8s.io/gateway-api/apis/v1beta1"
 
 	"istio.io/api/annotation"
+	"istio.io/api/label"
 	networking "istio.io/api/networking/v1alpha3"
 	clientnetworking "istio.io/client-go/pkg/apis/networking/v1"
 	"istio.io/istio/pilot/pkg/model"
 	"istio.io/istio/pilot/pkg/model/kstatus"
 	"istio.io/istio/pilot/pkg/status"
+	"istio.io/istio/pkg/cluster"
 	"istio.io/istio/pkg/config"
 	"istio.io/istio/pkg/config/constants"
 	"istio.io/istio/pkg/config/schema/gvk"
-	"istio.io/istio/pkg/config/schema/kind"
 	"istio.io/istio/pkg/kube/controllers"
 	"istio.io/istio/pkg/kube/krt"
 	"istio.io/istio/pkg/maps"
+	networkid "istio.io/istio/pkg/network"
+	"istio.io/istio/pkg/ptr"
 	"istio.io/istio/pkg/slices"
 	"istio.io/istio/pkg/util/sets"
+	"istio.io/istio/pkg/workloadapi"
 )
+
+type Kind int
+
+const (
+	Cluster Kind = iota
+	Gateway
+	WorkloadEntry
+	FlatWorkloadEntry
+	ServiceEntry
+)
+
+func (k Kind) String() string {
+	switch k {
+	case Cluster:
+		return "Cluster"
+	case Gateway:
+		return "Gateway"
+	case WorkloadEntry:
+		return "WorkloadEntry"
+	case FlatWorkloadEntry:
+		return "FlatWorkloadEntry"
+	case ServiceEntry:
+		return "ServiceEntry"
+	}
+	return "Unknown"
+}
+
+func AutogenHostname(name, ns string) string {
+	return fmt.Sprintf("%s.%s%s", name, ns, DomainSuffix)
+}
+
+func ParseAutogenHostname(hostname string) (string, string, bool) {
+	nns, suffixOk := strings.CutSuffix(hostname, DomainSuffix)
+	name, ns, nnsOk := strings.Cut(nns, ".")
+	return name, ns, suffixOk && nnsOk
+}
 
 func (c *NetworkWatcher) Reconcile(raw any) error {
 	key := raw.(typedNamespace)
 	log.WithLabels("kind", key.kind, "resource", key.NamespacedName).Infof("reconciling")
 	switch key.kind {
-	case kind.Gateway:
+	case Gateway:
 		// Gateway: triggered when we have a change to a Gateway object, which may mean we need to add/remove/update our
 		// remote network watches or add/remove/update the generated istio-remote gateway necessary for GME automated peering
 		return c.reconcileGateway(key.NamespacedName)
-	case kind.WorkloadEntry:
+	case WorkloadEntry:
 		// WorkloadEntry: triggered when we may need to change a generated WE
 		// The key is: Name=ns/name of target service, Namespace=cluster
-		return c.reconcileWorkloadEntry(key.NamespacedName)
-	case kind.ServiceEntry:
+		return c.reconcileGatewayWorkloadEntry(key.NamespacedName)
+	case FlatWorkloadEntry:
+		// FlatWorkloadEntry: triggered when we may need to change a generated WE
+		// The key is: Name=ns/name of target workload, Namespace=cluster
+		return c.reconcileFlatWorkloadEntry(key.NamespacedName)
+	case ServiceEntry:
 		// WorkloadEntry: triggered when we may need to change a generated SE
 		// The key is: Name=name of target service, Namespace=namespace of target service
 		return c.reconcileServiceEntry(key.NamespacedName)
-	case kind.MeshNetworks:
-		// MeshNetworks: triggered when an entire network has changed.
+	case Cluster:
+		// Cluster: triggered when an entire cluster has changed.
 		// Intended to cleanup stale resources
-		return c.reconcileNetworkSync(key.Name)
+		return c.reconcileClusterSync(key.Name)
 	default:
 		log.Errorf("unknown resource kind: %v", key.kind)
 	}
@@ -62,6 +110,8 @@ func (c *NetworkWatcher) Reconcile(raw any) error {
 }
 
 func (c *NetworkWatcher) reconcileGateway(name types.NamespacedName) error {
+	c.clustersMu.Lock()
+	defer c.clustersMu.Unlock()
 	log := log.WithLabels("gateway", name)
 	gw := c.gateways.Get(name.Name, name.Namespace)
 	if EnableAutomaticGatewayCreation {
@@ -69,40 +119,48 @@ func (c *NetworkWatcher) reconcileGateway(name types.NamespacedName) error {
 	}
 	peer, err := TranslatePeerGateway(gw)
 	if err != nil {
-		oldNet, f := c.gatewaysToNetwork[name]
+		oldCluster, f := c.gatewaysToCluster[name]
+		delete(c.gatewaysToCluster, name)
 		if !f {
 			c.enqueueStatusUpdate(name)
 			log.Debugf("gateway is not a peer gateway (%v) and we were not tracking it", err)
 			return nil
 		}
-		log.Infof("gateway for network %q is no longer a peer gateway (%v), shutting down network controller", oldNet.networkName, err)
-		oldNet.ShutdownNow()
-		delete(c.gatewaysToNetwork, name)
+		log.Infof("gateway for cluster %q is no longer a peer gateway (%v), shutting down cluster controller", oldCluster, err)
+		peerCluster := c.remoteClusters[oldCluster]
+		peerCluster.shutdownNow()
+		delete(c.remoteClusters, oldCluster)
 		c.enqueueStatusUpdate(name)
 		return nil
 	}
-	oldNet, f := c.gatewaysToNetwork[name]
+
+	oldClusterID, f := c.gatewaysToCluster[name]
 	if f {
-		if oldNet.networkName != peer.Network {
-			log.Infof("network changed from %v to %v", oldNet.networkName, peer.Network)
-			oldNet.ShutdownNow()
-			delete(c.gatewaysToNetwork, name)
+		cluster := c.remoteClusters[oldClusterID]
+		oldNetworkID := cluster.networkName
+		if oldClusterID != peer.Cluster || oldNetworkID != peer.Network {
+			log.Infof(
+				"cluster changed from %v/%v to %v/%v",
+				oldClusterID, oldNetworkID,
+				peer.Cluster, peer.Network,
+			)
+			cluster.shutdownNow()
+			delete(c.remoteClusters, oldClusterID)
 			c.enqueueStatusUpdate(name)
 		} else {
-			// TODO: respect address change
+			// TODO: respect other changes other than just the cluster/network name
 			log.Infof("gateway changed but not in a meaningful way")
 			return nil
 		}
 	}
-	clusterNetwork := c.clusterID // we already assume the network is the clusterID in the buildConfig
-	if peer.Network == clusterNetwork {
+	if peer.Cluster == c.localCluster {
 		log.Infof("peer gateway to %v is for local cluster network, ignoring", peer.Address)
 		return nil
 	}
-	net := newNetwork(
-		peer.Network,
-		peer.Address,
-		c.buildConfig(fmt.Sprintf("peering-%s", peer.Network)),
+	peerCluster := newPeerCluster(
+		c.localNetwork,
+		peer,
+		c.buildConfig(fmt.Sprintf("peering-%s", peer.Cluster)),
 		c.debugger,
 		c.queue,
 		func(o krt.Event[RemoteFederatedService]) {
@@ -110,66 +168,280 @@ func (c *NetworkWatcher) reconcileGateway(name types.NamespacedName) error {
 			c.queue.Add(typedNamespace{
 				NamespacedName: types.NamespacedName{
 					Namespace: obj.Cluster,
-					Name:      config.NamespacedName(obj).String(),
+					Name:      config.NamespacedName(obj.Service).String(),
 				},
-				kind: kind.WorkloadEntry,
+				kind: WorkloadEntry,
+			})
+		},
+		func(o krt.Event[RemoteWorkload]) {
+			obj := o.Latest()
+			c.queue.Add(typedNamespace{
+				NamespacedName: types.NamespacedName{
+					Namespace: obj.Cluster,
+					Name:      obj.ResourceName(),
+				},
+				kind: FlatWorkloadEntry,
 			})
 		},
 		func() {
 			c.enqueueStatusUpdate(name)
 		},
 	)
-	c.gatewaysToNetwork[name] = &NamedNetwork{
-		networkName: peer.Network,
-		network:     net,
-	}
+	c.remoteClusters[peer.Cluster] = peerCluster
+	c.gatewaysToCluster[name] = peer.Cluster
 	// we started a network, so enqueue the resource for a status update
 	c.enqueueStatusUpdate(name)
 	return nil
 }
 
-// reconcileNetworkSync is called when a network watch has synced. This is used to cleanup stale resources
-func (c *NetworkWatcher) reconcileNetworkSync(network string) error {
+// reconcileClusterSync is called when a cluster watch has synced. This is used to cleanup stale resources
+func (c *NetworkWatcher) reconcileClusterSync(cluster string) error {
 	// Get all current workload entries. This appears "racy" to look at one time and act on it, but
 	// since we are cleaning up stale resources this is not a problem.
 	currentWorkloadEntries := c.workloadEntries.List(PeeringNamespace, klabels.SelectorFromSet(map[string]string{
-		SourceClusterLabel: network,
+		SourceClusterLabel: cluster,
 	}))
 	for _, w := range currentWorkloadEntries {
 		// Enqueue it; if it no longer exists it will be removed
 		c.queue.Add(typedNamespace{
 			NamespacedName: types.NamespacedName{
-				Namespace: network,
+				Namespace: cluster,
 				Name:      w.Labels[ParentServiceNamespaceLabel] + "/" + w.Labels[ParentServiceLabel],
 			},
-			kind: kind.WorkloadEntry,
+			kind: WorkloadEntry,
 		})
 	}
 	return nil
 }
 
-func (c *NetworkWatcher) reconcileWorkloadEntry(tn types.NamespacedName) error {
+func (c *NetworkWatcher) reconcileFlatWorkloadEntry(tn types.NamespacedName) error {
+	log := log.WithLabels("flatworkloadentry", tn)
+
+	clusterID := tn.Namespace
+	// format of UID: <cluster>/<group>/<kind>/<namespace>/<name></section-name>
+	items := strings.Split(tn.Name, "/")
+	if len(items) < 5 {
+		// TODO: maybe NACK? probably ok to just ignore
+		log.Warnf("received invalid resource name %v", tn.Name)
+		return nil
+	}
+	uidKind := items[2]
+	uidNamespace := items[3]
+	uidName := items[4]
+	if uidKind != "Pod" {
+		// We only handle Pod
+		return nil
+	}
+
+	// because a single RemoteWorkload results in multiple WorkloadEntries (when it needs to be selected by more than one Service)
+	// we add a common label to all of the WorkloadEntries so we can reliably clean them up.
+	weGroupLabel := fmt.Sprintf("autogenflat.%v.%v.%v", clusterID, uidNamespace, uidName)
+	if len(weGroupLabel) > 63 {
+		// Use a hash to ensure uniqueness when truncating
+		hash := fmt.Sprintf("%x", sha256.Sum256([]byte(weGroupLabel)))[:8]
+		weGroupLabel = "autogenflat." + hash
+	}
+
+	reconcile := func(want []*clientnetworking.WorkloadEntry) error {
+		req, err := klabels.NewRequirement(SourceWorkloadLabel, selection.Equals, []string{weGroupLabel})
+		if err != nil {
+			log.Errorf("failed to create label requirement: %v", err)
+			return err
+		}
+		entries := c.workloadEntries.List(PeeringNamespace, klabels.NewSelector().Add(*req))
+
+		var errs []error
+		for _, toDel := range entries {
+			// don't delete it
+			if nil != slices.FindFunc(want, func(want *clientnetworking.WorkloadEntry) bool {
+				return toDel.GetName() == want.GetName() && toDel.GetNamespace() == want.GetNamespace()
+			}) {
+				continue
+			}
+			if err := controllers.IgnoreNotFound(c.workloadEntries.Delete(toDel.GetName(), PeeringNamespace)); err != nil {
+				errs = append(errs, err)
+			}
+		}
+
+		for _, we := range want {
+			changed, err := CreateOrUpdateIfNeeded(c.workloadEntries, we, workloadEntryChanged)
+			if err != nil {
+				errs = append(errs, err)
+				continue
+			}
+			log.WithLabels("updated", changed).Infof("workload entry %q processed", we.Name)
+		}
+
+		return errors.Join(errs...)
+	}
+
+	cluster := c.getClusterByID(cluster.ID(clusterID))
+	if cluster == nil {
+		log.Infof("workload entry will be deleted (network not found for key %v)", tn.String())
+		return reconcile(nil)
+	}
+	if !cluster.HasSynced() {
+		log.Debugf("skipping, network not yet synced")
+		return nil
+	}
+	workload := cluster.workloads.GetKey(tn.Name)
+	if workload == nil {
+		log.Infof("workload entry will be deleted (key %v not found)", tn.String())
+		return reconcile(nil)
+	}
+	if len(workload.Addresses) == 0 {
+		// workload entry is not valid for cross-cluster
+		return reconcile(nil)
+	}
+	address, ok := netip.AddrFromSlice(workload.Addresses[0])
+	if !ok {
+		// workload entry is not valid for cross-cluster
+		return reconcile(nil)
+	}
+
+	mergedServices := c.mergedServicesForWorkload(clusterID, cluster, workload)
+
+	// potentially write multiple workloadEntries so we can be selected by multiple services
+	wantEntries := slices.MapFilter(mergedServices, func(servicesWithMergedSelector servicesForWorkload) **clientnetworking.WorkloadEntry {
+		// the selector may use peering labels, or may use the local service labels
+		// so that this WE can be seelcted alongside local pods
+		// TODO right now we never re-use this map, so it's not cloned
+		labels := servicesWithMergedSelector.selector
+
+		// label to let us list these for cleanup
+		labels[SourceWorkloadLabel] = weGroupLabel
+		// always write the source cluster
+		labels[SourceClusterLabel] = clusterID
+		// Indicate we support tunneling. This is for Envoy dataplanes mostly.
+		if workload.TunnelProtocol == workloadapi.TunnelProtocol_HBONE {
+			labels[model.TunnelLabel] = model.TunnelHTTP
+		}
+		if workload.GetCanonicalName() != "" {
+			labels[label.ServiceWorkloadName.Name] = workload.GetCanonicalName()
+		}
+
+		annos := map[string]string{
+			// Signal we should use HBONE
+			annotation.AmbientRedirection.Name: constants.AmbientRedirectionEnabled,
+		}
+
+		svcNames := slices.Map(servicesWithMergedSelector.services, serviceForWorkload.federatedName)
+		hash := fmt.Sprintf("%x", sha256.Sum256([]byte(strings.Join(svcNames, ","))))[:12]
+		weName := fmt.Sprintf("autogenflat.%v.%v.%v.%v", clusterID, uidNamespace, uidName, hash)
+		if len(weName) > 253 {
+			weName = weName[:253]
+		}
+
+		we := &clientnetworking.WorkloadEntry{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:        weName,
+				Namespace:   PeeringNamespace,
+				Labels:      labels,
+				Annotations: annos,
+			},
+			Spec: networking.WorkloadEntry{
+				Address:  address.String(),
+				Network:  string(c.localNetwork),
+				Ports:    flatWorkloadEntryPorts(servicesWithMergedSelector),
+				Weight:   1, // weight,
+				Locality: cluster.locality,
+				// TODO ztunnel (if trustdomain validtion enabled) will validate the local cluster's td
+				// we'd need a way to propagate the remote td for to-pod-ip calls with TD validation enabled.
+				ServiceAccount: workload.GetServiceAccount(),
+			},
+		}
+		return &we
+	})
+	return reconcile(wantEntries)
+}
+
+// TODO this doesn't detect overlap at all
+func flatWorkloadEntryPorts(
+	services servicesForWorkload,
+) map[string]uint32 {
+	svcPortToName := make(map[int32]string)
+	var workloadSvcPorts []*workloadapi.Port
+	for _, ss := range services.services {
+		// when we have a local service, use actual port names
+		// otherwise we use port-<number> as the names
+		// this must match the logic in reconcileServiceEntry
+		// TODO if names conflict across multiple services we must handle that
+		// or if we have one locally and the other is remote only, the names are different
+		workloadSvcPorts = append(workloadSvcPorts, ss.ports...)
+
+		if ss.local != nil {
+			// TODO see if local services have name conflict
+			for _, p := range ss.local.Spec.Ports {
+				svcPortToName[p.Port] = p.Name
+			}
+		}
+	}
+
+	// the actual port mapping is done on the server who sent the RemoteWorkload
+	workloadPorts := make(map[string]uint32, len(workloadSvcPorts))
+	for _, p := range workloadSvcPorts {
+		sp, tp := p.GetServicePort(), p.GetTargetPort()
+		if tp == 0 {
+			// shouldn't happen, we usually have every port here, sometimes mapping to itself
+			tp = sp
+		}
+
+		portName := fmt.Sprintf("port-%d", p.GetServicePort())
+		if knownName, ok := svcPortToName[int32(p.GetServicePort())]; ok {
+			portName = knownName
+		}
+
+		workloadPorts[portName] = tp
+	}
+
+	return workloadPorts
+}
+
+func workloadEntryChanged(desired *clientnetworking.WorkloadEntry, live *clientnetworking.WorkloadEntry) bool {
+	if desired.Name != live.Name {
+		return false
+	}
+	if desired.Namespace != live.Namespace {
+		return false
+	}
+	if !maps.Equal(desired.Labels, live.Labels) {
+		return false
+	}
+	if !maps.Equal(desired.Annotations, live.Annotations) {
+		return false
+	}
+	return proto.Equal(&desired.Spec, &live.Spec)
+}
+
+func (c *NetworkWatcher) reconcileGatewayWorkloadEntry(tn types.NamespacedName) error {
 	log := log.WithLabels("workloadentry", tn)
 
-	cluster := tn.Namespace
+	clusterID := tn.Namespace
 	ns, name, _ := strings.Cut(tn.Name, "/")
 
-	weName := fmt.Sprintf("autogen.%v.%v.%v", cluster, ns, name)
+	weName := fmt.Sprintf("autogen.%v.%v.%v", clusterID, ns, name)
 	labels := map[string]string{}
 
+	var locality string
 	var fs *RemoteFederatedService
-	for _, net := range c.gatewaysToNetwork {
-		if net.networkName == cluster {
-			if !net.network.HasSynced() {
-				log.Debugf("skipping, network not yet synced")
-				return nil
-			}
-			fs = net.network.collection.GetKey(tn.String())
+	var networkName networkid.ID
+	if pc := c.getClusterByID(cluster.ID(clusterID)); pc != nil {
+		if !pc.HasSynced() {
+			log.Debugf("skipping, cluster not yet synced")
+			return nil
 		}
+		fs = pc.federatedServices.GetKey(tn.String())
+		locality = pc.locality
+		networkName = pc.networkName
 	}
 	if fs == nil {
 		// No federated service exists, remove
 		log.Infof("workload entry will be deleted (key %v not found)", tn.String())
+		return controllers.IgnoreNotFound(c.workloadEntries.Delete(weName, PeeringNamespace))
+	}
+
+	// HACK: don't peer waypoint services for remote networks, let the gateway route to the waypoint
+	if fs.Service.WaypointFor != "" && networkName != c.localNetwork {
 		return controllers.IgnoreNotFound(c.workloadEntries.Delete(weName, PeeringNamespace))
 	}
 
@@ -194,15 +466,16 @@ func (c *NetworkWatcher) reconcileWorkloadEntry(tn types.NamespacedName) error {
 	labels[ParentServiceLabel] = name
 	labels[ServiceScopeLabel] = weScope
 	labels[ParentServiceNamespaceLabel] = ns
-	labels[SourceClusterLabel] = cluster
+	labels[SourceClusterLabel] = clusterID
 	// Indicate we support tunneling. This is for Envoy dataplanes mostly.
 	labels[model.TunnelLabel] = model.TunnelHTTP
-	if fs.Waypoint != nil {
-		labels[RemoteWaypointLabel] = "true"
+	fss := fs.Service
+	if fss.Waypoint != nil {
+		labels[RemoteWaypointLabel] = AutogenHostname(fss.Waypoint.Name, fss.Waypoint.Namespace)
 	}
 
 	ports := map[string]uint32{}
-	for _, p := range fs.Ports {
+	for _, p := range fss.Ports {
 		if sp := slices.FindFunc(localPorts, func(port corev1.ServicePort) bool {
 			return uint32(port.Port) == p.ServicePort && port.TargetPort.Type == intstr.String
 		}); sp != nil {
@@ -212,19 +485,34 @@ func (c *NetworkWatcher) reconcileWorkloadEntry(tn types.NamespacedName) error {
 		}
 	}
 	annos := map[string]string{
-		ServiceSubjectAltNamesAnnotation: strings.Join(slices.Sort(fs.SubjectAltNames), ","),
+		ServiceSubjectAltNamesAnnotation: strings.Join(slices.Sort(fss.SubjectAltNames), ","),
 		// Signal we should use HBONE
 		annotation.AmbientRedirection.Name: constants.AmbientRedirectionEnabled,
 	}
+	// propagate traffic distribution from this WE to the SE
+	if td := fss.GetTrafficDistribution(); td != "" {
+		annos[annotation.NetworkingTrafficDistribution.Name] = td
+	}
+
 	weight := uint32(0)
-	if fs.Capacity != nil {
-		weight = fs.Capacity.GetValue()
+	if fss.Capacity != nil {
+		weight = fss.Capacity.GetValue()
 		if weight == 0 {
 			// WorkloadEntry cannot distinguish 0 and unset.
 			annos[ServiceEndpointStatus] = ServiceEndpointStatusUnhealthy
 		}
 
 	}
+
+	if EnableFlatNetworks && c.localNetwork == networkName {
+		// In flat mode, we still make the network WE, but disable it.
+		// This is pretty hacky, but the reason is we derive FederatedService --> WorkloadEntry --> ServiceEntry.
+		// This is so if there is an outage connecting to a remote, we have the FederatedService state stored locally in order
+		// to properly compute the ServiceEntry
+		// TODO: john make this per-service opt-in
+		annos[ServiceEndpointStatus] = ServiceEndpointStatusUnhealthy
+	}
+
 	we := &clientnetworking.WorkloadEntry{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        weName,
@@ -233,28 +521,15 @@ func (c *NetworkWatcher) reconcileWorkloadEntry(tn types.NamespacedName) error {
 			Annotations: annos,
 		},
 		Spec: networking.WorkloadEntry{
-			Address: "",
-			Network: cluster,
-			Ports:   ports,
-			Weight:  weight,
+			Address:  "",
+			Network:  networkName.String(),
+			Ports:    ports,
+			Weight:   weight,
+			Locality: locality,
 		},
 	}
 
-	changed, err := CreateOrUpdateIfNeeded(c.workloadEntries, we, func(desired *clientnetworking.WorkloadEntry, live *clientnetworking.WorkloadEntry) bool {
-		if desired.Name != live.Name {
-			return false
-		}
-		if desired.Namespace != live.Namespace {
-			return false
-		}
-		if !maps.Equal(desired.Labels, live.Labels) {
-			return false
-		}
-		if !maps.Equal(desired.Annotations, live.Annotations) {
-			return false
-		}
-		return proto.Equal(&desired.Spec, &live.Spec)
-	})
+	changed, err := CreateOrUpdateIfNeeded(c.workloadEntries, we, workloadEntryChanged)
 	if err != nil {
 		return err
 	}
@@ -264,7 +539,7 @@ func (c *NetworkWatcher) reconcileWorkloadEntry(tn types.NamespacedName) error {
 
 func (c *NetworkWatcher) reconcileServiceEntry(name types.NamespacedName) error {
 	log := log.WithLabels("federatedservice", name)
-	hostname := fmt.Sprintf("%s.%s%s", name.Name, name.Namespace, DomainSuffix)
+	hostname := AutogenHostname(name.Name, name.Namespace)
 	seName := fmt.Sprintf("autogen.%v.%v", name.Namespace, name.Name)
 
 	se := &clientnetworking.ServiceEntry{
@@ -280,7 +555,7 @@ func (c *NetworkWatcher) reconcileServiceEntry(name types.NamespacedName) error 
 	}
 
 	localService := c.services.Get(name.Name, name.Namespace)
-	if localService != nil && !HasGlobalLabel(localService.Labels) {
+	if localService != nil && !HasGlobalLabel(localService.Labels) && !c.isGlobalWaypoint(localService) {
 		// It's not global, so ignore it
 		localService = nil
 	}
@@ -312,8 +587,7 @@ func (c *NetworkWatcher) reconcileServiceEntry(name types.NamespacedName) error 
 			}
 		}
 	} else {
-		// If there is no local service, prefer network by default
-		annos[annotation.NetworkingTrafficDistribution.Name] = DefaultTrafficDistribution
+		annos[annotation.NetworkingTrafficDistribution.Name] = computeTrafficDistribution(remoteServices)
 	}
 	se.Annotations = annos
 
@@ -328,20 +602,36 @@ func (c *NetworkWatcher) reconcileServiceEntry(name types.NamespacedName) error 
 			ParentServiceLabel:          name.Name,
 			ParentServiceNamespaceLabel: name.Namespace,
 		}}
-		// Semantics: sidecar will skip processing if there is a local waypoint (determined by standard waypoint codepath)
-		// OR if any cluster has a remote waypoint (determined by remote waypoint label).
-		// This has a few awkward edge cases...
-		// * If there are 2 remote clusters, and only 1 has a remote waypoint, then the sidecar will skip processing regardless.
-		// * If there is a local service but no local waypoint, the sidecar will do processing
-		remoteWaypoint := false
-		for _, remote := range remoteServices {
-			if rw, f := remote.Labels[RemoteWaypointLabel]; f && rw == "true" {
-				remoteWaypoint = true
-				break
+	}
+
+	// Semantics: sidecar will skip processing if there is a local waypoint (determined by standard waypoint codepath)
+	// OR if any cluster has a remote waypoint (determined by remote waypoint label).
+	// This has a few awkward edge cases...
+	// * If there are 2 remote clusters, and only 1 has a remote waypoint, then the sidecar will skip processing regardless.
+	// * If there is a local service but no local waypoint, the sidecar will do processing
+
+	remoteWaypoint := ""
+	for _, remote := range remoteServices {
+		if rw, f := remote.Labels[RemoteWaypointLabel]; f && rw != "" {
+			remoteWaypoint = rw
+			break // TODO handle the case where two remote clusters disagree...
+		}
+	}
+	if remoteWaypoint != "" {
+		// this label now effectively overrides use-waypoint!
+		// we should only overwrite the label if the local doesn't use-waypoint,
+		// or use-waypoint points to the same logical service
+		remoteWaypointName, remoteWaypointNs, useRemote := ParseAutogenHostname(remoteWaypoint)
+		if useRemote && localService != nil {
+			localWaypointName := localService.GetLabels()[label.IoIstioUseWaypoint.Name]
+			localWaypointNs := ptr.NonEmptyOrDefault(localService.GetLabels()[label.IoIstioUseWaypointNamespace.Name], localService.Namespace)
+			if localWaypointName != "" && (localWaypointName != remoteWaypointName || localWaypointNs != remoteWaypointNs) {
+				useRemote = false
 			}
 		}
-		if remoteWaypoint {
-			labels[RemoteWaypointLabel] = "true"
+
+		if useRemote {
+			labels[RemoteWaypointLabel] = remoteWaypoint
 		}
 	}
 
@@ -373,6 +663,42 @@ func (c *NetworkWatcher) reconcileServiceEntry(name types.NamespacedName) error 
 	}
 	log.WithLabels("updated", changed).Infof("service entry processed")
 	return nil
+}
+
+// computeTrafficDistribution attempts to find the value for networking.istio.io/traffic-distribution
+// that all the remoteServices agree upon. remoteServices that don't specify any value are not considered.
+func computeTrafficDistribution(remoteServices []*clientnetworking.WorkloadEntry) string {
+	consensusDistribution := ""
+	for _, remote := range remoteServices {
+		distribution, ok := remote.GetAnnotations()[annotation.NetworkingTrafficDistribution.Name]
+		if !ok {
+			// if a single remote doesn't specify, inherit from remote services that do
+			continue
+		}
+
+		if consensusDistribution == "" {
+			consensusDistribution = distribution
+		}
+
+		if distribution != consensusDistribution {
+			log.Warnf(
+				"remote services do not agree on %s: %q != %q; falling back to %s",
+				annotation.NetworkingTrafficDistribution.Name,
+				consensusDistribution,
+				distribution,
+				DefaultTrafficDistribution,
+			)
+			consensusDistribution = ""
+			break
+		}
+	}
+
+	// If there is no local service and remotes disagree or have no value, prefer network by default
+	if consensusDistribution != "" {
+		return consensusDistribution
+	}
+
+	return DefaultTrafficDistribution
 }
 
 // reconcileEastWestGateway creates/updates/deletes the generated istio-remote peer gateway for the given istio-eastwest gateway
@@ -422,7 +748,7 @@ func (c *NetworkWatcher) ReconcileStatus(raw any) error {
 	key := raw.(typedNamespace)
 	log.WithLabels("kind", key.kind, "resource", key.NamespacedName).Infof("reconciling status")
 	switch key.kind {
-	case kind.Gateway:
+	case Gateway:
 		return c.reconcileGatewayStatus(key.NamespacedName)
 	default:
 		log.Errorf("unknown resource kind: %v", key.kind)
@@ -464,13 +790,13 @@ func (c *NetworkWatcher) reconcileGatewayStatus(name types.NamespacedName) error
 	// If the network for the gateway exists
 	//    a. If the network exists but is not synced, write Programmed: Pending status and Accepted: Accepted status
 	//    b. If the network exists and is synced, write Programmed: Programmed and Accepted: Accepted status
-	namedNet, f := c.gatewaysToNetwork[name]
-	if !f {
-		log.Debugf("unable to set status for gateway %q, no network found", name)
+	peerCluster := c.getClusterByGateway(name)
+	if peerCluster == nil {
+		log.Debugf("unable to set status for gateway %q, no cluster found", name)
 		return nil
 	}
 
-	if !namedNet.network.HasSynced() {
+	if !peerCluster.HasSynced() {
 		gatewayConditions = append(gatewayConditions, metav1.Condition{
 			ObservedGeneration: gw.Generation,
 			Type:               constants.SoloConditionPeeringSucceeded,
@@ -519,6 +845,6 @@ func (c *NetworkWatcher) setGatewayStatus(gw *gateway.Gateway, conditions []meta
 func (c *NetworkWatcher) enqueueStatusUpdate(name types.NamespacedName) {
 	c.statusQueue.Add(typedNamespace{
 		NamespacedName: name,
-		kind:           kind.Gateway,
+		kind:           Gateway,
 	})
 }

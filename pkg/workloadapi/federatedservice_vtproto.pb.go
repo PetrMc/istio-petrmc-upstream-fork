@@ -68,6 +68,12 @@ func (this *FederatedService) EqualVT(that *FederatedService) bool {
 	if !this.Waypoint.EqualVT(that.Waypoint) {
 		return false
 	}
+	if this.TrafficDistribution != that.TrafficDistribution {
+		return false
+	}
+	if this.WaypointFor != that.WaypointFor {
+		return false
+	}
 	return string(this.unknownFields) == string(that.unknownFields)
 }
 
@@ -82,6 +88,12 @@ func (this *RemoteWaypoint) EqualVT(that *RemoteWaypoint) bool {
 	if this == that {
 		return true
 	} else if this == nil || that == nil {
+		return false
+	}
+	if this.Name != that.Name {
+		return false
+	}
+	if this.Namespace != that.Namespace {
 		return false
 	}
 	return string(this.unknownFields) == string(that.unknownFields)
@@ -123,6 +135,20 @@ func (m *FederatedService) MarshalToSizedBufferVTStrict(dAtA []byte) (int, error
 	if m.unknownFields != nil {
 		i -= len(m.unknownFields)
 		copy(dAtA[i:], m.unknownFields)
+	}
+	if len(m.WaypointFor) > 0 {
+		i -= len(m.WaypointFor)
+		copy(dAtA[i:], m.WaypointFor)
+		i = protohelpers.EncodeVarint(dAtA, i, uint64(len(m.WaypointFor)))
+		i--
+		dAtA[i] = 0x4a
+	}
+	if len(m.TrafficDistribution) > 0 {
+		i -= len(m.TrafficDistribution)
+		copy(dAtA[i:], m.TrafficDistribution)
+		i = protohelpers.EncodeVarint(dAtA, i, uint64(len(m.TrafficDistribution)))
+		i--
+		dAtA[i] = 0x42
 	}
 	if m.Waypoint != nil {
 		size, err := m.Waypoint.MarshalToSizedBufferVTStrict(dAtA[:i])
@@ -219,6 +245,20 @@ func (m *RemoteWaypoint) MarshalToSizedBufferVTStrict(dAtA []byte) (int, error) 
 		i -= len(m.unknownFields)
 		copy(dAtA[i:], m.unknownFields)
 	}
+	if len(m.Namespace) > 0 {
+		i -= len(m.Namespace)
+		copy(dAtA[i:], m.Namespace)
+		i = protohelpers.EncodeVarint(dAtA, i, uint64(len(m.Namespace)))
+		i--
+		dAtA[i] = 0x12
+	}
+	if len(m.Name) > 0 {
+		i -= len(m.Name)
+		copy(dAtA[i:], m.Name)
+		i = protohelpers.EncodeVarint(dAtA, i, uint64(len(m.Name)))
+		i--
+		dAtA[i] = 0xa
+	}
 	return len(dAtA) - i, nil
 }
 
@@ -260,6 +300,14 @@ func (m *FederatedService) SizeVT() (n int) {
 		l = m.Waypoint.SizeVT()
 		n += 1 + l + protohelpers.SizeOfVarint(uint64(l))
 	}
+	l = len(m.TrafficDistribution)
+	if l > 0 {
+		n += 1 + l + protohelpers.SizeOfVarint(uint64(l))
+	}
+	l = len(m.WaypointFor)
+	if l > 0 {
+		n += 1 + l + protohelpers.SizeOfVarint(uint64(l))
+	}
 	n += len(m.unknownFields)
 	return n
 }
@@ -270,6 +318,14 @@ func (m *RemoteWaypoint) SizeVT() (n int) {
 	}
 	var l int
 	_ = l
+	l = len(m.Name)
+	if l > 0 {
+		n += 1 + l + protohelpers.SizeOfVarint(uint64(l))
+	}
+	l = len(m.Namespace)
+	if l > 0 {
+		n += 1 + l + protohelpers.SizeOfVarint(uint64(l))
+	}
 	n += len(m.unknownFields)
 	return n
 }

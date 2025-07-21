@@ -757,10 +757,11 @@ func workloadEntryWorkloadBuilder(
 			TrustDomain:           pickTrustDomain(meshCfg),
 			Locality:              getWorkloadEntryLocality(&wle.Spec),
 		}
+		if wle.Annotations[peering.ServiceEndpointStatus] == peering.ServiceEndpointStatusUnhealthy {
+			w.Status = workloadapi.WorkloadStatus_UNHEALTHY
+		}
 		if wle.Spec.Weight > 0 {
 			w.Capacity = wrappers.UInt32(wle.Spec.Weight)
-		} else if wle.Annotations[peering.ServiceEndpointStatus] == peering.ServiceEndpointStatusUnhealthy {
-			w.Capacity = wrappers.UInt32(0)
 		}
 
 		if addr, err := netip.ParseAddr(wle.Spec.Address); err == nil {

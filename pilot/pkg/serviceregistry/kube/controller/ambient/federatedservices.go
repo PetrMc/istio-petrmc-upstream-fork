@@ -24,14 +24,36 @@ func (a *index) FederatedServicesCollection(
 	Waypoints krt.Collection[Waypoint],
 	WorkloadsByService krt.Index[string, model.WorkloadInfo],
 	opts krt.OptionsBuilder,
-) krt.Collection[model.FederatedService] {
-	return krt.NewCollection(Services, func(ctx krt.HandlerContext, svc model.ServiceInfo) *model.FederatedService {
+) (
+	krt.Collection[model.FederatedService],
+	krt.Collection[krt.Named],
+) {
+	globalServiceByWaypoint := krt.NewIndex(Services, "globalServiceByWaypoint", func(s model.ServiceInfo) []string {
+		if s.GlobalService && s.Waypoint.ResourceName != "" {
+			return []string{s.Waypoint.ResourceName}
+		}
+		return nil
+	})
+	// check if the given service is a waypoint, and any of the services using it are global
+	isGlobalWaypoint := func(ctx krt.HandlerContext, name, ns string) bool {
+		n := len(krt.Fetch(ctx, Services, krt.FilterIndex(globalServiceByWaypoint, ns+"/"+name)))
+		return n > 0
+	}
+
+	federatedServices := krt.NewCollection(Services, func(ctx krt.HandlerContext, svc model.ServiceInfo) *model.FederatedService {
 		if svc.Source.Kind != kind.Service {
 			// Currently we only export Kubernetes services
 			return nil
 		}
-		if !svc.GlobalService {
+
+		isGlobalWaypoint := isGlobalWaypoint(ctx, svc.Service.GetName(), svc.GetNamespace())
+		if !svc.GlobalService && !isGlobalWaypoint {
 			return nil
+		}
+
+		waypointFor := ""
+		if isGlobalWaypoint {
+			waypointFor = "service"
 		}
 
 		workloads := krt.Fetch(ctx, Workloads, krt.FilterIndex(WorkloadsByService, svc.ResourceName()))
@@ -51,7 +73,8 @@ func (a *index) FederatedServicesCollection(
 		}
 
 		// we may also hit the waypoint, so mark that as allowed as well
-		if waypoint := krt.FetchOne(ctx, Waypoints, krt.FilterKey(svc.Waypoint.ResourceName)); waypoint != nil {
+		waypoint := krt.FetchOne(ctx, Waypoints, krt.FilterKey(svc.Waypoint.ResourceName))
+		if waypoint != nil {
 			meshCfg := krt.FetchOne(ctx, MeshConfig.AsCollection())
 			sas := waypoint.ServiceAccounts
 			if len(sas) == 0 {
@@ -65,18 +88,32 @@ func (a *index) FederatedServicesCollection(
 
 		s := svc.Service
 		fs := &workloadapi.FederatedService{
-			Name:            s.Name,
-			Namespace:       s.Namespace,
-			Hostname:        s.Hostname,
-			SubjectAltNames: sets.SortedList(uniqueSANS),
-			Ports:           s.Ports,
-			Capacity:        wrappers.UInt32(bucket(workloadCount)),
+			Name:                s.Name,
+			Namespace:           s.Namespace,
+			Hostname:            s.Hostname,
+			SubjectAltNames:     sets.SortedList(uniqueSANS),
+			Ports:               s.Ports,
+			Capacity:            wrappers.UInt32(bucket(workloadCount)),
+			TrafficDistribution: svc.TrafficDistribution.String(),
+			WaypointFor:         waypointFor,
 		}
 		if s.Waypoint != nil {
-			fs.Waypoint = &workloadapi.RemoteWaypoint{}
+			fs.Waypoint = &workloadapi.RemoteWaypoint{
+				Name:      waypoint.GetName(),
+				Namespace: waypoint.GetNamespace(),
+			}
 		}
 		return &model.FederatedService{FederatedService: fs}
 	}, opts.WithName("FederatedServices")...)
+
+	// HACK: we want to get notified of any Global Waypoints in the peering controller
+	federatedWaypoints := krt.NewCollection(federatedServices, func(ctx krt.HandlerContext, fs model.FederatedService) *krt.Named {
+		if !isGlobalWaypoint(ctx, fs.Name, fs.Namespace) {
+			return nil
+		}
+		return &krt.Named{Name: fs.Name, Namespace: fs.Namespace}
+	})
+	return federatedServices, federatedWaypoints
 }
 
 var buckets = []int{0, 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048}

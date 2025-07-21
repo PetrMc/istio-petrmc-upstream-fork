@@ -515,7 +515,7 @@ func (lb *ListenerBuilder) buildWaypointInternal(wls []model.WorkloadInfo, svcs 
 		},
 	}
 
-	if len(svcHostnameMap.Map) > 0 && features.EnableAmbientMultiNetwork {
+	if len(svcHostnameMap.Map) > 0 {
 		l.FilterChainMatcher.OnNoMatch = &matcher.Matcher_OnMatch{
 			OnMatch: &matcher.Matcher_OnMatch_Matcher{
 				Matcher: &matcher.Matcher{
@@ -577,6 +577,10 @@ func buildConnectForwarder(push *model.PushContext, proxy *model.Proxy, class is
 	if tunnel {
 		tcpProxy.TunnelingConfig = &tcp.TcpProxy_TunnelingConfig{
 			Hostname: "%DOWNSTREAM_LOCAL_ADDRESS%",
+		}
+		if features.EnablePeering {
+			// SOLO flat multi-network sends the hostname on HBONE using this metadata
+			tcpProxy.TunnelingConfig.Hostname = "%DYNAMIC_METADATA(istio:destination)%"
 		}
 		// Set access logs. These are filtered down to only connection establishment errors, to avoid double logs in most cases.
 		accessLogBuilder.setHboneOriginationAccessLog(push, proxy, tcpProxy, class)

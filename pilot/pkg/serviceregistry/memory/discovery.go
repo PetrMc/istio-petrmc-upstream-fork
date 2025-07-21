@@ -25,6 +25,7 @@ import (
 	"istio.io/istio/pkg/config/host"
 	"istio.io/istio/pkg/config/labels"
 	"istio.io/istio/pkg/config/protocol"
+	"istio.io/istio/pkg/kube/krt"
 	"istio.io/istio/pkg/log"
 	"istio.io/istio/pkg/maps"
 	"istio.io/istio/pkg/slices"
@@ -365,6 +366,10 @@ func (sd *ServiceDiscovery) FederatedServices(services sets.String) ([]model.Fed
 }
 
 func (sd *ServiceDiscovery) ServicesWithWaypointOrRemoteWaypoint() sets.Set[host.Name] {
+	return nil
+}
+
+func (sd *ServiceDiscovery) FederatedWaypoints() krt.Collection[krt.Named] {
 	return nil
 }
 

@@ -106,6 +106,10 @@ spec:
         - proxy
         - ztunnel
         env:
+        {{- if .Values.platforms.peering.enabled }}
+        - name: WAYPOINTS_ALWAYS_USE_HOSTNAME
+          value: "true"
+        {{- end }}
         - name: CA_ADDRESS
         {{- if and (.Values.caAddress) (not .Values.spire.enabled) }}
           value: {{ .Values.caAddress }}

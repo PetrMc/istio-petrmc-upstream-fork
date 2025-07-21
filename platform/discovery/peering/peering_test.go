@@ -37,6 +37,7 @@ import (
 	"istio.io/istio/pilot/test/xds"
 	"istio.io/istio/pkg/adsc"
 	"istio.io/istio/pkg/backoff"
+	"istio.io/istio/pkg/cluster"
 	"istio.io/istio/pkg/config"
 	"istio.io/istio/pkg/config/constants"
 	"istio.io/istio/pkg/config/mesh"
@@ -55,8 +56,8 @@ import (
 
 func TestPeering(t *testing.T) {
 	setup := func(t test.Failer) (*Cluster, *Cluster) {
-		c1 := NewCluster(t, "c1")
-		c2 := NewCluster(t, "c2")
+		c1 := NewCluster(t, "c1", "c1")
+		c2 := NewCluster(t, "c2", "c2")
 		c1.ConnectTo(c2)
 		return c1, c2
 	}
@@ -337,8 +338,8 @@ func TestPeering(t *testing.T) {
 		AssertSE(c2)
 	})
 	t.Run("disconnects", func(t *testing.T) {
-		c1 := NewCluster(t, "c1")
-		c2 := NewCluster(t, "c2")
+		c1 := NewCluster(t, "c1", "c1")
+		c2 := NewCluster(t, "c2", "c2")
 
 		c1.ConnectTo(c2)
 		c1.CreateService("svc1", true, ports1)
@@ -352,6 +353,7 @@ func TestPeering(t *testing.T) {
 			{Name: "extra1", Number: 91},
 		})
 
+		// Add a service during disconnection
 		c1.Outage.setOutage(true)
 		c2.CreateService("svc1", true, ports2)
 		c1.Outage.setOutage(false)
@@ -363,12 +365,12 @@ func TestPeering(t *testing.T) {
 		c1k := kube.NewFakeClient()
 		initialStop := make(chan struct{})
 		// Peering will stop when we trigger it, kube client will run for as long as the test
-		c1 := newCluster(t, c1k, initialStop, false, "c1")
+		c1 := newCluster(t, c1k, initialStop, false, "c1", "c1")
 		fullStop := test.NewStop(t)
 		c1k.RunAndWait(fullStop)
 
 		// Initial run as normal
-		c2 := NewCluster(t, "c2")
+		c2 := NewCluster(t, "c2", "c2")
 		c1.ConnectTo(c2)
 
 		c1ports2 := []corev1.ServicePort{
@@ -442,7 +444,7 @@ func TestPeering(t *testing.T) {
 
 		secondStop := make(chan struct{})
 		// c1 reconnects, but with a simulated an outage against c2
-		c1 = newCluster(t, c1k, secondStop, true, "c1")
+		c1 = newCluster(t, c1k, secondStop, true, "c1", "c1")
 		c1k.RunAndWait(fullStop)
 		// We should NOT clean things up
 		AssertWE(c1, DesiredWE{Name: c2Svc1Name}, DesiredWE{Name: "autogen.c2.default.svc2"})
@@ -498,7 +500,7 @@ func TestPeering(t *testing.T) {
 		// c1 reconnects, but no longer connected
 		c1.DisconnectFrom(c2)
 		thirdStop := make(chan struct{})
-		c1 = newCluster(t, c1k, thirdStop, false, "c1")
+		c1 = newCluster(t, c1k, thirdStop, false, "c1", "c1")
 		c1k.RunAndWait(fullStop)
 		// We should cleanup everything
 		AssertWE(c1)
@@ -572,7 +574,7 @@ func TestPeering(t *testing.T) {
 			},
 		}
 		c1, c2 := setup(t)
-		c3 := NewCluster(t, "c3")
+		c3 := NewCluster(t, "c3", "c3")
 		c1.ConnectTo(c3)
 		c2.CreateService("svc1", true, ports2)
 		c3.CreateService("svc1", true, ports3)
@@ -624,6 +626,38 @@ func TestPeering(t *testing.T) {
 		AssertWE(c2)
 		AssertWE(c3)
 	})
+	t.Run("flat network", func(t *testing.T) {
+		c1 := NewCluster(t, "c1", "net1")
+		c2 := NewCluster(t, "c2", "net1")
+		c3 := NewCluster(t, "c3", "net2")
+		c1.ConnectTo(c2)
+		c1.ConnectTo(c3)
+		// No service in c1 at all
+		// c2 is flat
+		// c3 is cross-network
+		c2.CreateService("svc1", true, nil)
+		c2.CreatePod("svc1", "pod1", "1.2.3.4")
+		c3.CreateService("svc1", true, nil)
+		c3.CreatePod("svc1", "pod2", "2.3.4.5")
+
+		AssertWE(c1,
+			DesiredWE{Name: "autogen.c2.default.svc1"},                                      // aggregated ew gw. HACK unhealthy since we're flat
+			DesiredWE{Name: "autogenflat.c2.default.pod1.f2396f15c5c2", Address: "1.2.3.4"}, // direct to pod
+			DesiredWE{Name: "autogen.c3.default.svc1"},                                      // aggregated ew gw
+		)
+		AssertSE(c1, DesiredSE{Name: "autogen.default.svc1"})
+
+		AssertWE(c2)
+		AssertSE(c2, DesiredSE{Name: "autogen.default.svc1"})
+
+		c1.Outage.setOutage(true)
+		c2.DeletePod("pod1")
+		c1.Outage.setOutage(false)
+		AssertWE(c1,
+			DesiredWE{Name: "autogen.c2.default.svc1"},
+			DesiredWE{Name: "autogen.c3.default.svc1"},
+		)
+	})
 }
 
 func init() {
@@ -633,8 +667,8 @@ func init() {
 
 func TestAutomatedPeering(t *testing.T) {
 	t.Run("creates and removes gme peer gateway", func(t *testing.T) {
-		c1 := NewCluster(t, "c1")
-		c2 := NewCluster(t, "c2")
+		c1 := NewCluster(t, "c1", "c1")
+		c2 := NewCluster(t, "c2", "c2")
 		c1.CreateService("svc1", true, nil)
 
 		ewGw := c1.CreateOrUpdateEastWestGateway(
@@ -672,8 +706,8 @@ func TestAutomatedPeering(t *testing.T) {
 		AssertPeerGateway(c1)
 	})
 	t.Run("writes Programmed: Unknown status when network is not synced", func(t *testing.T) {
-		c1 := NewCluster(t, "c1")
-		c2 := NewCluster(t, "c2")
+		c1 := NewCluster(t, "c1", "n1")
+		c2 := NewCluster(t, "c2", "n2")
 		ewGw := c1.CreateOrUpdateEastWestGateway(
 			"istio-eastwest",
 			constants.IstioSystemNamespace,
@@ -699,8 +733,8 @@ func TestAutomatedPeering(t *testing.T) {
 		AssertPeerGatewayStatus(c2, generatedPeer.GetName(), generatedPeer.GetNamespace(), expectedGatewayStatus)
 	})
 	t.Run("writes Programmed: False status when istio-remote is invalid", func(t *testing.T) {
-		c1 := NewCluster(t, "c1")
-		c2 := NewCluster(t, "c2")
+		c1 := NewCluster(t, "c1", "n1")
+		c2 := NewCluster(t, "c2", "n2")
 		ewGw := c1.CreateOrUpdateEastWestGateway(
 			"istio-eastwest",
 			constants.IstioSystemNamespace,
@@ -727,8 +761,8 @@ func TestAutomatedPeering(t *testing.T) {
 		AssertPeerGatewayStatus(c2, generatedPeer.GetName(), generatedPeer.GetNamespace(), expectedGatewayStatus)
 	})
 	t.Run("istioctl link gw equals generated peer gateway", func(t *testing.T) {
-		c1 := NewCluster(t, "c1")
-		c2 := NewCluster(t, "c2")
+		c1 := NewCluster(t, "c1", "c1")
+		c2 := NewCluster(t, "c2", "c2")
 		c1.CreateService("svc1", true, nil)
 
 		ewGw := c1.CreateOrUpdateEastWestGateway(
@@ -743,7 +777,7 @@ func TestAutomatedPeering(t *testing.T) {
 			Value: ip,
 			Type:  ptr.Of(k8sbeta.IPAddressType),
 		}
-		istioctlLinkGw := makeLinkGateway(ewGw.GetName(), ewGw.GetNamespace(), gwAddress, c1.Name, c1.Name, port)
+		istioctlLinkGw := makeLinkGateway(ewGw.GetName(), ewGw.GetNamespace(), gwAddress, c1.ClusterName, c1.NetworkName, c1.ClusterName, port)
 		generatedPeer := c1.GeneratedPeerGateway(ewGw)
 		AssertPeerGatewayEqual(istioctlLinkGw, generatedPeer)
 
@@ -757,7 +791,7 @@ func TestAutomatedPeering(t *testing.T) {
 		AssertSE(c2, DesiredSE{Name: "autogen.default.svc1"})
 	})
 	t.Run("creates gme peer gateway with address override", func(t *testing.T) {
-		c1 := NewCluster(t, "c1")
+		c1 := NewCluster(t, "c1", "c1")
 		ewGwAddressOverride := k8sbeta.GatewaySpecAddress{
 			Value: "example.host",
 			Type:  ptr.Of(k8sbeta.HostnameAddressType),
@@ -784,7 +818,7 @@ func TestAutomatedPeering(t *testing.T) {
 					Name:      "istio-eastwest",
 					Namespace: constants.IstioSystemNamespace,
 					Labels: map[string]string{
-						constants.NetworkTopologyLabel: "c1",
+						label.TopologyNetwork.Name: "c1",
 					},
 				},
 				Spec: k8sbeta.GatewaySpec{
@@ -814,8 +848,8 @@ func TestAutomatedPeering(t *testing.T) {
 					Name:      "istio-eastwest",
 					Namespace: constants.IstioSystemNamespace,
 					Labels: map[string]string{
-						constants.ExposeIstiodLabel:    "15012",
-						constants.NetworkTopologyLabel: "c1",
+						constants.ExposeIstiodLabel: "15012",
+						label.TopologyNetwork.Name:  "c1",
 					},
 				},
 				Spec: k8sbeta.GatewaySpec{
@@ -838,8 +872,8 @@ func TestAutomatedPeering(t *testing.T) {
 					Name:      "istio-eastwest",
 					Namespace: constants.IstioSystemNamespace,
 					Labels: map[string]string{
-						constants.ExposeIstiodLabel:    "15012",
-						constants.NetworkTopologyLabel: "c1",
+						constants.ExposeIstiodLabel: "15012",
+						label.TopologyNetwork.Name:  "c1",
 					},
 				},
 				Spec: k8sbeta.GatewaySpec{
@@ -862,8 +896,8 @@ func TestAutomatedPeering(t *testing.T) {
 					Name:      "istio-eastwest",
 					Namespace: constants.IstioSystemNamespace,
 					Labels: map[string]string{
-						constants.ExposeIstiodLabel:    "15012",
-						constants.NetworkTopologyLabel: "c1",
+						constants.ExposeIstiodLabel: "15012",
+						label.TopologyNetwork.Name:  "c1",
 					},
 				},
 				Spec: k8sbeta.GatewaySpec{
@@ -890,7 +924,7 @@ func TestAutomatedPeering(t *testing.T) {
 	// Test negative cases where the peer gateway is not created due to an invalid east-west gateway
 	for _, tc := range negativeTests {
 		t.Run(tc.name, func(t *testing.T) {
-			c1 := NewCluster(t, "c1")
+			c1 := NewCluster(t, "c1", "c1")
 
 			clienttest.NewWriter[*k8sbeta.Gateway](c1.t, c1.Kube).CreateOrUpdate(tc.ewGw)
 			// this is a bit awkward, but we need to wait for reconciliation to happen
@@ -915,7 +949,8 @@ type Cluster struct {
 	Peering         *peering.NetworkWatcher
 	Kube            kube.Client
 	Discovery       *xds.FakeDiscoveryServer
-	Name            string
+	ClusterName     string
+	NetworkName     string
 	t               test.Failer
 	ServiceEntries  clienttest.TestClient[*networkingclient.ServiceEntry]
 	WorkloadEntries clienttest.TestClient[*networkingclient.WorkloadEntry]
@@ -971,6 +1006,38 @@ func (c *Cluster) CreateWorkload(serviceName string, workloadName string, servic
 	})
 }
 
+func (c *Cluster) DeletePod(podName string) {
+	clienttest.NewWriter[*corev1.Pod](c.t, c.Kube).Delete(podName, "default")
+}
+
+func (c *Cluster) CreatePod(serviceName string, podName string, podIP string) {
+	clienttest.NewWriter[*corev1.Pod](c.t, c.Kube).CreateOrUpdateStatus(&corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      podName,
+			Namespace: "default",
+			Labels: map[string]string{
+				"app": serviceName,
+			},
+		},
+		Status: corev1.PodStatus{
+			Conditions: []corev1.PodCondition{
+				{
+					Type:               corev1.PodReady,
+					Status:             corev1.ConditionTrue,
+					LastTransitionTime: metav1.Now(),
+				},
+			},
+			PodIP: podIP,
+			PodIPs: []corev1.PodIP{
+				{
+					IP: podIP,
+				},
+			},
+			Phase: corev1.PodRunning,
+		},
+	})
+}
+
 func (c *Cluster) DeleteWorkload(workloadName string) {
 	clienttest.NewWriter[*networkingclient.WorkloadEntry](c.t, c.Kube).Delete(workloadName, "default")
 }
@@ -993,8 +1060,9 @@ func (c *Cluster) CreateOrUpdateEastWestGateway(gwName, gwNs string, gwAddresses
 			Name:      gwName,
 			Namespace: gwNs,
 			Labels: map[string]string{
-				constants.NetworkTopologyLabel: c.Name,
-				constants.ExposeIstiodLabel:    ports,
+				label.TopologyNetwork.Name:  c.NetworkName,
+				label.TopologyCluster.Name:  c.ClusterName,
+				constants.ExposeIstiodLabel: ports,
 			},
 		},
 		Spec: k8sbeta.GatewaySpec{
@@ -1049,15 +1117,16 @@ func (c *Cluster) GeneratedPeerGateway(ewGateway *k8sbeta.Gateway) *k8sbeta.Gate
 			APIVersion: gvk.KubernetesGateway.GroupVersion(),
 		},
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      fmt.Sprintf("istio-remote-peer-%s", c.Name),
+			Name:      fmt.Sprintf("istio-remote-peer-%s", c.ClusterName),
 			Namespace: constants.IstioSystemNamespace,
 			Annotations: map[string]string{
 				constants.GatewayServiceAccountAnnotation: constants.EastWestGatewayClassName,
-				constants.TrustDomainAnnotation:           c.Name,
+				constants.TrustDomainAnnotation:           c.ClusterName,
 			},
 			Labels: map[string]string{
-				constants.ExposeIstiodLabel:    ports,
-				constants.NetworkTopologyLabel: c.Name,
+				constants.ExposeIstiodLabel: ports,
+				label.TopologyNetwork.Name:  c.NetworkName,
+				label.TopologyCluster.Name:  c.ClusterName,
 			},
 			OwnerReferences: []metav1.OwnerReference{
 				{
@@ -1096,6 +1165,7 @@ func makeLinkGateway(
 	ewGwName string,
 	gwNs string,
 	addr k8sbeta.GatewaySpecAddress,
+	cluster string,
 	network string,
 	trustDomain string,
 	xdsPort int,
@@ -1109,11 +1179,12 @@ func makeLinkGateway(
 			Name:      "istio-remote-peer-" + network,
 			Namespace: gwNs,
 			Annotations: map[string]string{
-				"gateway.istio.io/service-account": ewGwName,
-				"gateway.istio.io/trust-domain":    trustDomain,
+				constants.GatewayServiceAccountAnnotation: ewGwName,
+				constants.TrustDomainAnnotation:           trustDomain,
 			},
 			Labels: map[string]string{
-				"topology.istio.io/network": network,
+				label.TopologyNetwork.Name: network,
+				label.TopologyCluster.Name: cluster,
 			},
 		},
 		Spec: k8sbeta.GatewaySpec{
@@ -1148,7 +1219,7 @@ func (c *Cluster) DeleteGateway(name, namespace string) {
 }
 
 func (c *Cluster) DisconnectFrom(other *Cluster) {
-	clienttest.NewWriter[*k8sbeta.Gateway](c.t, c.Kube).Delete("peer-to-"+other.Name, "istio-system")
+	clienttest.NewWriter[*k8sbeta.Gateway](c.t, c.Kube).Delete("peer-to-"+other.ClusterName, "istio-system")
 }
 
 func (c *Cluster) ConnectTo(other *Cluster) {
@@ -1157,10 +1228,11 @@ func (c *Cluster) ConnectTo(other *Cluster) {
 	port, _ := strconv.Atoi(ports)
 	gw := &k8sbeta.Gateway{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "peer-to-" + other.Name,
+			Name:      "peer-to-" + other.ClusterName,
 			Namespace: "istio-system",
 			Labels: map[string]string{
-				label.TopologyNetwork.Name: other.Name,
+				label.TopologyNetwork.Name: other.NetworkName,
+				label.TopologyCluster.Name: other.ClusterName,
 			},
 		},
 		Spec: k8s.GatewaySpec{
@@ -1183,11 +1255,11 @@ func (c *Cluster) ConnectTo(other *Cluster) {
 	clienttest.NewWriter[*k8sbeta.Gateway](c.t, c.Kube).CreateOrUpdate(gw)
 }
 
-func NewCluster(t test.Failer, name string) *Cluster {
-	return newCluster(t, nil, test.NewStop(t), false, name)
+func NewCluster(t test.Failer, clusterName, networkName string) *Cluster {
+	return newCluster(t, nil, test.NewStop(t), false, clusterName, networkName)
 }
 
-func newCluster(t test.Failer, premadeKubeClient kube.Client, stop chan struct{}, startWithOutage bool, name string) *Cluster {
+func newCluster(t test.Failer, premadeKubeClient kube.Client, stop chan struct{}, startWithOutage bool, clusterName, networkName string) *Cluster {
 	outage := NewOutageInjector()
 	outage.setOutage(startWithOutage)
 	buildConfig := func(clientName string) *adsc.DeltaADSConfig {
@@ -1195,7 +1267,7 @@ func newCluster(t test.Failer, premadeKubeClient kube.Client, stop chan struct{}
 			Config: adsc.Config{
 				ClientName: clientName,
 				Namespace:  "istio-system",
-				Workload:   name,
+				Workload:   clusterName,
 				GrpcOpts: []grpc.DialOption{
 					grpc.WithStreamInterceptor(outage.Interceptor),
 					grpc.WithTransportCredentials(insecure.NewCredentials()),
@@ -1222,7 +1294,7 @@ func newCluster(t test.Failer, premadeKubeClient kube.Client, stop chan struct{}
 		_, _ = kc.Kube().CoreV1().Namespaces().Create(context.Background(), &corev1.Namespace{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:   constants.IstioSystemNamespace,
-				Labels: map[string]string{constants.NetworkTopologyLabel: name},
+				Labels: map[string]string{label.TopologyNetwork.Name: networkName},
 			},
 		}, metav1.CreateOptions{})
 	}
@@ -1230,17 +1302,28 @@ func newCluster(t test.Failer, premadeKubeClient kube.Client, stop chan struct{}
 		client: kc,
 	}
 	statusManager := pilotstatus.NewManager(store)
-	peer := peering.New(kc, name, "cluster.local", buildConfig, nil, fakeMeshHolder(name), statusManager)
+	peer := peering.New(
+		kc,
+		constants.IstioSystemNamespace,
+		cluster.ID(clusterName),
+		"cluster.local",
+		buildConfig,
+		nil,
+		fakeMeshHolder(clusterName),
+		ds.KubeRegistry,
+		statusManager,
+	)
 	if premadeKubeClient == nil {
 		kc.RunAndWait(stop)
 	}
 	go peer.Run(stop)
 	return &Cluster{
-		Discovery: ds,
-		Kube:      kc,
-		Peering:   peer,
-		Name:      name,
-		Outage:    outage,
+		Discovery:   ds,
+		Kube:        kc,
+		Peering:     peer,
+		ClusterName: clusterName,
+		NetworkName: networkName,
+		Outage:      outage,
 
 		ServiceEntries:  clienttest.NewDirectClient[*networkingclient.ServiceEntry, *networkingclient.ServiceEntry, *networkingclient.ServiceEntryList](t, kc),
 		WorkloadEntries: clienttest.NewDirectClient[*networkingclient.WorkloadEntry, *networkingclient.WorkloadEntry, *networkingclient.WorkloadEntryList](t, kc),
@@ -1256,7 +1339,8 @@ func fakeMeshHolder(clusterName string) mesh.Watcher {
 }
 
 type DesiredWE struct {
-	Name string
+	Name    string
+	Address string
 }
 
 func AssertWE(c *Cluster, we ...DesiredWE) {
@@ -1267,7 +1351,7 @@ func AssertWE(c *Cluster, we ...DesiredWE) {
 	fetch := func() []DesiredWE {
 		return slices.SortBy(
 			slices.MapFilter(c.WorkloadEntries.List(peering.PeeringNamespace, klabels.Everything()), func(a *networkingclient.WorkloadEntry) *DesiredWE {
-				return &DesiredWE{Name: a.Name}
+				return &DesiredWE{a.Name, a.Spec.Address}
 			}),
 			func(a DesiredWE) string {
 				return a.Name
@@ -1420,7 +1504,7 @@ func AssertPeerGatewayEqual(gw1, gw2 *k8sbeta.Gateway) bool {
 	if gw1.GetNamespace() != gw2.GetNamespace() {
 		return false
 	}
-	if gw1.GetLabels()[constants.NetworkTopologyLabel] != gw2.GetLabels()[constants.NetworkTopologyLabel] {
+	if gw1.GetLabels()[label.TopologyNetwork.Name] != gw2.GetLabels()[label.TopologyNetwork.Name] {
 		return false
 	}
 	if gw1.GetAnnotations()[constants.GatewayServiceAccountAnnotation] != gw2.GetAnnotations()[constants.GatewayServiceAccountAnnotation] {

@@ -46,6 +46,8 @@ type FederatedService struct {
 	// Hostname represents the FQDN of the service.
 	// For Kubernetes, this would be <name>.<namespace>.svc.<cluster domain>.
 	Hostname string `protobuf:"bytes,3,opt,name=hostname,proto3" json:"hostname,omitempty"`
+	// TrafficDistribution within the source cluster if any.
+	TrafficDistribution string `protobuf:"bytes,8,opt,name=traffic_distribution,json=trafficDistribution,proto3" json:"traffic_distribution,omitempty"`
 	// List of subject alt names to verify against. This will aggregate the SANs of all workloads in
 	// the remote cluster.
 	SubjectAltNames []string `protobuf:"bytes,4,rep,name=subject_alt_names,json=subjectAltNames,proto3" json:"subject_alt_names,omitempty"`
@@ -58,7 +60,9 @@ type FederatedService struct {
 	// If unset, the capacity is default to 1.
 	Capacity *wrapperspb.UInt32Value `protobuf:"bytes,6,opt,name=capacity,proto3" json:"capacity,omitempty"`
 	// Information about a remote waypoint, if any
-	Waypoint      *RemoteWaypoint `protobuf:"bytes,7,opt,name=waypoint,proto3" json:"waypoint,omitempty"`
+	Waypoint *RemoteWaypoint `protobuf:"bytes,7,opt,name=waypoint,proto3" json:"waypoint,omitempty"`
+	// WaypointFor is specified only if the Service itself is a waypoint.
+	WaypointFor   string `protobuf:"bytes,9,opt,name=waypoint_for,json=waypointFor,proto3" json:"waypoint_for,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -114,6 +118,13 @@ func (x *FederatedService) GetHostname() string {
 	return ""
 }
 
+func (x *FederatedService) GetTrafficDistribution() string {
+	if x != nil {
+		return x.TrafficDistribution
+	}
+	return ""
+}
+
 func (x *FederatedService) GetSubjectAltNames() []string {
 	if x != nil {
 		return x.SubjectAltNames
@@ -142,8 +153,21 @@ func (x *FederatedService) GetWaypoint() *RemoteWaypoint {
 	return nil
 }
 
+func (x *FederatedService) GetWaypointFor() string {
+	if x != nil {
+		return x.WaypointFor
+	}
+	return ""
+}
+
 type RemoteWaypoint struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Name represents the name for the service.
+	// This will reference the name of another FederatedService.
+	Name string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	// Name represents the namespace for the service.
+	// This will reference the namespace of another FederatedService.
+	Namespace     string `protobuf:"bytes,2,opt,name=namespace,proto3" json:"namespace,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -178,20 +202,38 @@ func (*RemoteWaypoint) Descriptor() ([]byte, []int) {
 	return file_workloadapi_federatedservice_proto_rawDescGZIP(), []int{1}
 }
 
+func (x *RemoteWaypoint) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *RemoteWaypoint) GetNamespace() string {
+	if x != nil {
+		return x.Namespace
+	}
+	return ""
+}
+
 var File_workloadapi_federatedservice_proto protoreflect.FileDescriptor
 
 const file_workloadapi_federatedservice_proto_rawDesc = "" +
 	"\n" +
-	"\"workloadapi/federatedservice.proto\x12\x0eistio.workload\x1a\x1egoogle/protobuf/wrappers.proto\x1a\x1aworkloadapi/workload.proto\"\xae\x02\n" +
+	"\"workloadapi/federatedservice.proto\x12\x0eistio.workload\x1a\x1egoogle/protobuf/wrappers.proto\x1a\x1aworkloadapi/workload.proto\"\x84\x03\n" +
 	"\x10FederatedService\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1c\n" +
 	"\tnamespace\x18\x02 \x01(\tR\tnamespace\x12\x1a\n" +
-	"\bhostname\x18\x03 \x01(\tR\bhostname\x12*\n" +
+	"\bhostname\x18\x03 \x01(\tR\bhostname\x121\n" +
+	"\x14traffic_distribution\x18\b \x01(\tR\x13trafficDistribution\x12*\n" +
 	"\x11subject_alt_names\x18\x04 \x03(\tR\x0fsubjectAltNames\x12*\n" +
 	"\x05ports\x18\x05 \x03(\v2\x14.istio.workload.PortR\x05ports\x128\n" +
 	"\bcapacity\x18\x06 \x01(\v2\x1c.google.protobuf.UInt32ValueR\bcapacity\x12:\n" +
-	"\bwaypoint\x18\a \x01(\v2\x1e.istio.workload.RemoteWaypointR\bwaypoint\"\x10\n" +
-	"\x0eRemoteWaypointB\x11Z\x0fpkg/workloadapib\x06proto3"
+	"\bwaypoint\x18\a \x01(\v2\x1e.istio.workload.RemoteWaypointR\bwaypoint\x12!\n" +
+	"\fwaypoint_for\x18\t \x01(\tR\vwaypointFor\"B\n" +
+	"\x0eRemoteWaypoint\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1c\n" +
+	"\tnamespace\x18\x02 \x01(\tR\tnamespaceB\x11Z\x0fpkg/workloadapib\x06proto3"
 
 var (
 	file_workloadapi_federatedservice_proto_rawDescOnce sync.Once

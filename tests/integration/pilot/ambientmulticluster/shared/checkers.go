@@ -20,13 +20,27 @@ import (
 )
 
 var WaypointRemoteDirectLocal = check.And(check.OK(), PerClusterChecker(map[string]echo.Checker{
-	LocalCluster:  CheckNotTraversedWaypoint(),
-	RemoteCluster: CheckTraversedWaypointIn(RemoteCluster),
+	LocalCluster:         CheckNotTraversedWaypoint(),
+	RemoteFlatCluster:    CheckNotTraversedWaypoint(),
+	RemoteNetworkCluster: CheckEachTraversedWaypointIn(RemoteNetworkCluster),
 }))
 
-var WaypointLocalForBoth = check.And(check.OK(), PerClusterChecker(map[string]echo.Checker{
-	LocalCluster:  CheckTraversedWaypointIn(LocalCluster),
-	RemoteCluster: CheckTraversedWaypointIn(LocalCluster),
+// WaypointLocalNetworkToAll checks that:
+// * we used all the _cluster_ local waypoints
+// * we still hit all endpoints in every cluster
+var WaypointLocalClusterToAll = check.And(check.OK(), PerClusterChecker(map[string]echo.Checker{
+	LocalCluster:         CheckEachTraversedWaypointIn(LocalCluster),
+	RemoteFlatCluster:    CheckEachTraversedWaypointIn(LocalCluster),
+	RemoteNetworkCluster: CheckEachTraversedWaypointIn(LocalCluster),
+}))
+
+// WaypointLocalNetworkToAll checks that:
+// * we used all the _network_ local waypoints
+// * we still hit all endpoints in every cluster
+var WaypointLocalNetworkToAll = check.And(check.OK(), PerClusterChecker(map[string]echo.Checker{
+	LocalCluster:         CheckAllTraversedWaypointIn(LocalCluster, RemoteFlatCluster),
+	RemoteFlatCluster:    CheckAllTraversedWaypointIn(LocalCluster, RemoteFlatCluster),
+	RemoteNetworkCluster: CheckAllTraversedWaypointIn(LocalCluster, RemoteFlatCluster),
 }))
 
 // DestinationWorkload checks the destination workload the request landed on.
@@ -91,7 +105,32 @@ func PerClusterChecker(checkers map[string]echo.Checker) echo.Checker {
 	}
 }
 
-func CheckTraversedWaypointIn(clusters ...string) echo.Checker {
+// CheckTraversedWaypointInOneOf checks that a request traversed a waypoint
+// in any of the given clusters (1 waypoint per request)
+func CheckAllTraversedWaypointIn(clusters ...string) echo.Checker {
+	return func(all echo.CallResult, err error) error {
+		if err != nil {
+			return err
+		}
+		seenClusters := sets.New[string]()
+		for _, res := range all.Responses {
+			hitClusters := res.RequestHeaders.Values("X-Istio-Clusters")
+			if len(hitClusters) != 1 {
+				return fmt.Errorf("expected to hit %d waypoint per request, traversed %d", 1, len(hitClusters))
+			}
+			seenClusters.InsertAll(hitClusters...)
+		}
+		if !sets.New[string](clusters...).Equals(seenClusters) {
+			return fmt.Errorf("expected to hit clusters %v, received %s", clusters, seenClusters.UnsortedList())
+		}
+		return nil
+	}
+}
+
+// Each individual request traversed this entire list of waypoints.
+// To assert that a group of requests use a group of waypoints, but only
+// a single waypoint per-request, use CheckAllTraversedWaypointIn
+func CheckEachTraversedWaypointIn(clusters ...string) echo.Checker {
 	return check.Each(func(r echot.Response) error {
 		want := sets.New(clusters...)
 		all := r.RequestHeaders.Values("X-Istio-Clusters")
@@ -103,6 +142,16 @@ func CheckTraversedWaypointIn(clusters ...string) echo.Checker {
 			return fmt.Errorf("expected to hit clusters %v, received %s", clusters, all)
 		}
 		return nil
+	})
+}
+
+func CheckTraversedLocalWaypoint() echo.Checker {
+	return CheckEachTraversedWaypointIn(LocalCluster)
+}
+
+func CheckTraversedRemoteNetworkWaypoint() echo.Checker {
+	return PerClusterChecker(map[string]echo.Checker{
+		RemoteNetworkCluster: CheckEachTraversedWaypointIn(RemoteNetworkCluster),
 	})
 }
 
@@ -137,7 +186,7 @@ func CheckPolicyEnforced(required map[string]string, optional map[string]string)
 	return check.Each(func(r echot.Response) error {
 		required := maps.Clone(required)
 		optional := maps.Clone(optional)
-		clusters := r.RequestHeaders.Values("X-Istio-Clusters")
+		clusters := r.RequestHeaders.Values("Cluster")
 		workloads := r.RequestHeaders.Values("X-Istio-Workload")
 		if len(clusters) != len(workloads) {
 			return fmt.Errorf("expected to have to hit 1 cluster for each workload: %v/%v", clusters, workloads)

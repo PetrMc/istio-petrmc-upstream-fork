@@ -623,6 +623,7 @@ func TestServiceEntryServices(t *testing.T) {
 			mock := krttest.NewMock(t, tt.inputs)
 			a := newAmbientUnitTest(t)
 			builder := a.serviceEntryServiceBuilder(
+				krttest.GetMockCollection[*networkingclient.ServiceEntry](mock),
 				krttest.GetMockCollection[Waypoint](mock),
 				krttest.GetMockCollection[*v1.Namespace](mock),
 				krttest.GetMockCollection[*v1.Service](mock),

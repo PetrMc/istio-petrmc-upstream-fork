@@ -18,6 +18,7 @@ import (
 	"istio.io/istio/pkg/kube/controllers"
 	"istio.io/istio/pkg/test/echo/common/scheme"
 	"istio.io/istio/pkg/test/framework"
+	"istio.io/istio/pkg/test/framework/components/cluster"
 	"istio.io/istio/pkg/test/framework/components/echo"
 	"istio.io/istio/pkg/test/framework/components/echo/check"
 	"istio.io/istio/pkg/test/framework/components/istio"
@@ -38,8 +39,29 @@ func globalName(serviceName string, appsNs namespace.Instance) string {
 	return fmt.Sprintf("%s.%s%s", serviceName, appsNs.Name(), peering.DomainSuffix)
 }
 
+func hitAllClusters(t framework.TestContext) echo.Checker {
+	return check.ReachedClusters(t.Clusters(), t.Clusters())
+}
+
+var (
+	hitLocalCluster         = check.Cluster(LocalCluster)
+	hitRemoteNetworkCluster = check.Cluster(RemoteNetworkCluster)
+)
+
+func hitRemoteClusters(t framework.TestContext) echo.Checker {
+	return check.ReachedClusters(t.Clusters(), t.Clusters().Exclude(
+		t.Clusters().GetByName(LocalCluster),
+	))
+}
+
+func hitRemoteNetwork(t framework.TestContext) echo.Checker {
+	return check.ReachedClusters(
+		t.Clusters(),
+		cluster.Clusters{t.Clusters().GetByName(RemoteNetworkCluster)},
+	)
+}
+
 func testFromZtunnel(t TrafficContext) {
-	hitBothClusters := check.ReachedClusters(t.Clusters(), t.Clusters())
 	client := t.Apps.LocalApp[0]
 	appsNs := t.Apps.Namespace
 
@@ -55,7 +77,7 @@ func testFromZtunnel(t TrafficContext) {
 				Address: globalName(name, appsNs),
 				Port:    echo.Port{ServicePort: 80},
 				Scheme:  scheme.HTTP,
-				Count:   10,
+				Count:   25,
 				Check:   c,
 			})
 		})
@@ -63,30 +85,31 @@ func testFromZtunnel(t TrafficContext) {
 
 	// No global name to call! So this should fail
 	call(ServiceLocal, nil)
-	call(ServiceLocalGlobal, check.And(IsL4(), check.OK(), check.Cluster(LocalCluster)))
-	call(ServiceRemoteGlobal, check.And(IsL4(), check.OK(), check.Cluster(RemoteCluster)))
-	call(ServiceBothGlobal, check.And(IsL4(), check.OK(), hitBothClusters))
-	call(ServiceGlobalTakeover, check.And(IsL4(), check.OK(), hitBothClusters))
+	call(ServiceLocalGlobal, check.And(IsL4(), check.OK(), hitLocalCluster))
+	call(ServiceRemoteGlobal, check.And(IsL4(), check.OK(), hitRemoteClusters(t)))
+	call(ServiceAllGlobal, check.And(IsL4(), check.OK(), hitAllClusters(t)))
+	call(ServiceGlobalTakeover, check.And(IsL4(), check.OK(), hitAllClusters(t)))
 
-	// Calls should always go to the local waypoint, then may be sent either local or remote.
-	call(ServiceLocalWaypoint, WaypointLocalForBoth)
-	// TODO(https://github.com/solo-io/ztunnel/issues/730): this should be WaypointRemoteDirectLocal.
-	// Today, we don't have a way to prevent sending back to the source cluster for this flow
-	// So we do `client (local net) -> waypoint (remote net) -> backend (local net)
-	call(ServiceRemoteWaypoint, check.And(check.OK(), PerClusterChecker(map[string]echo.Checker{
-		LocalCluster:  check.OK(),
-		RemoteCluster: CheckTraversedWaypointIn(RemoteCluster),
-	})))
-	call(ServiceRemoteOnlyWaypoint, check.And(check.OK(), check.Cluster(RemoteCluster), CheckTraversedWaypointIn(RemoteCluster)))
+	// Calls should always go to the local waypoint, then sent to all backends.
+	call(ServiceLocalWaypoint, WaypointLocalClusterToAll)
+
+	// Calls will go to any _network_ local waypoint because:
+	// * RemoteFlatNetwork has a global waypoint, so waypoint svc is peered
+	// * The local waypoint service is considered 'global' because it's a waypoint for some global svcs
+	// * Since we have a local and global svc for waypoint itself, we select both flat WE and local pod for waypoint
+	// After that, they will go to all backends
+	call(ServiceRemoteWaypoint, check.And(check.OK(), WaypointLocalNetworkToAll))
+
+	call(ServiceCrossNetworkOnlyWaypoint, check.And(check.OK(), hitRemoteNetworkCluster, CheckTraversedRemoteNetworkWaypoint()))
+
 	// Calls should always go to the local waypoint -- they should always skip the remote waypoint
-	call(ServiceBothWaypoint, WaypointLocalForBoth)
+	call(ServiceAllWaypoint, WaypointLocalNetworkToAll)
 
 	// Should hit remote and local, and in both cases be L7 (from the inbound sidecar)
-	call(ServiceSidecar, check.And(check.OK(), hitBothClusters, IsL7()))
+	call(ServiceSidecar, check.And(check.OK(), hitAllClusters(t), IsL7()))
 }
 
 func testFromSidecar(t TrafficContext) {
-	hitBothClusters := check.ReachedClusters(t.Clusters(), t.Clusters())
 	client := t.Apps.Sidecar[0]
 	appsNs := t.Apps.Namespace
 
@@ -110,47 +133,37 @@ func testFromSidecar(t TrafficContext) {
 
 	// No global name to call! So this should fail
 	call(ServiceLocal, nil)
-	call(ServiceLocalGlobal, check.And(check.OK(), check.Cluster(LocalCluster)))
-	call(ServiceRemoteGlobal, check.And(check.OK(), check.Cluster(RemoteCluster)))
-	call(ServiceBothGlobal, check.And(check.OK(), hitBothClusters))
-	call(ServiceGlobalTakeover, check.And(check.OK(), hitBothClusters))
+	call(ServiceLocalGlobal, check.And(check.OK(), hitLocalCluster))
+	call(ServiceRemoteGlobal, check.And(check.OK(), hitRemoteClusters(t)))
+	call(ServiceAllGlobal, check.And(check.OK(), hitAllClusters(t)))
+	call(ServiceGlobalTakeover, check.And(check.OK(), hitAllClusters(t)))
 
 	// Calls should always go to the local waypoint, then may be sent either local or remote.
-	call(ServiceLocalWaypoint, WaypointLocalForBoth)
-	// This setup is broken; users should NOT do this. However, we test it to ensure we have the right behavior.
+	call(ServiceLocalWaypoint, WaypointLocalClusterToAll)
+
 	call(ServiceRemoteWaypoint, check.And(
 		check.OK(),
-		hitBothClusters,
-		// There are two cases: we hit the local pod (no waypoint) or we hit the remote pod (waypoint).
-		// In both cases, the sidecar applies policies.
-		// This is because we need to decide to apply policies before we pick the endpoint.
-		// Real users should deploy a waypoint in all clusters or no clusters, not have a mix like this case.
-		CheckPolicyEnforced(
-			map[string]string{
-				LocalCluster: ServiceSidecar,
-			},
-			map[string]string{
-				RemoteCluster: "waypoint",
-			},
-		),
+		hitAllClusters(t),
+		WaypointLocalNetworkToAll,
 	))
 
 	// We should hit the remote waypoint and skip policy on the local sidecar
-	call(ServiceRemoteOnlyWaypoint, check.And(
+	call(ServiceCrossNetworkOnlyWaypoint, check.And(
 		check.OK(),
-		check.Cluster(RemoteCluster),
-		CheckTraversedWaypointIn(RemoteCluster),
-		CheckPolicyAppliedByWorkload("waypoint"),
+		hitRemoteNetwork(t),
+		CheckTraversedRemoteNetworkWaypoint(),
+		CheckPolicyAppliedByWorkload(WaypointXNet),
+		// TODO test that policy is applied by sidecar when we hit local-network endpoints
 	))
+
 	// Calls should always go to the local waypoint -- they should always skip the remote waypoint
-	call(ServiceBothWaypoint, WaypointLocalForBoth)
+	call(ServiceAllWaypoint, WaypointLocalNetworkToAll)
 
 	// Should hit remote and local
-	call(ServiceSidecar, check.And(check.OK(), hitBothClusters))
+	call(ServiceSidecar, check.And(check.OK(), hitAllClusters(t)))
 }
 
 func testFromGateway(t TrafficContext) {
-	hitBothClusters := check.ReachedClusters(t.Clusters(), t.Clusters())
 	apps := t.Apps
 
 	// Setup GW for
@@ -218,19 +231,19 @@ spec:
 		// No global name to call! So this should fail
 		call(t, ServiceLocal, nil) // Should get a NC
 		call(t, ServiceLocalGlobal, check.And(check.OK(), check.Cluster(LocalCluster)))
-		call(t, ServiceRemoteGlobal, check.And(check.OK(), check.Cluster(RemoteCluster)))
-		call(t, ServiceBothGlobal, check.And(check.OK(), hitBothClusters))
-		call(t, ServiceGlobalTakeover, check.And(check.OK(), hitBothClusters))
+		call(t, ServiceRemoteGlobal, check.And(check.OK(), hitRemoteClusters(t)))
+		call(t, ServiceAllGlobal, check.And(check.OK(), hitAllClusters(t)))
+		call(t, ServiceGlobalTakeover, check.And(check.OK(), hitAllClusters(t)))
 
 		// For all the waypointcases, we skip waypoints because ingress-use-waypoint is false
-		call(t, ServiceLocalWaypoint, check.And(check.OK(), hitBothClusters, CheckNotTraversedWaypoint()))
-		call(t, ServiceRemoteWaypoint, check.And(check.OK(), hitBothClusters, CheckNotTraversedWaypoint()))
+		call(t, ServiceLocalWaypoint, check.And(check.OK(), hitAllClusters(t), CheckNotTraversedWaypoint()))
+		call(t, ServiceRemoteWaypoint, check.And(check.OK(), hitAllClusters(t), CheckNotTraversedWaypoint()))
 		// No local, so we always hit remote but not the waypoint
-		call(t, ServiceRemoteOnlyWaypoint, check.And(check.Cluster(RemoteCluster), CheckNotTraversedWaypoint()))
-		call(t, ServiceBothWaypoint, check.And(check.OK(), hitBothClusters, CheckNotTraversedWaypoint()))
+		call(t, ServiceCrossNetworkOnlyWaypoint, check.And(hitRemoteNetwork(t), CheckNotTraversedWaypoint()))
+		call(t, ServiceAllWaypoint, check.And(check.OK(), hitAllClusters(t), CheckNotTraversedWaypoint()))
 
 		// Should hit remote and local
-		call(t, ServiceSidecar, check.And(check.OK(), hitBothClusters))
+		call(t, ServiceSidecar, check.And(check.OK(), hitAllClusters(t)))
 	})
 	t.NewSubTest("use-waypoint").Run(func(t framework.TestContext) {
 		for _, svc := range AllServices {
@@ -248,20 +261,23 @@ spec:
 		// No global name to call! So this should fail
 		call(t, ServiceLocal, nil) // Should get a NC
 		call(t, ServiceLocalGlobal, check.And(check.OK(), check.Cluster(LocalCluster)))
-		call(t, ServiceRemoteGlobal, check.And(check.OK(), check.Cluster(RemoteCluster)))
-		call(t, ServiceBothGlobal, check.And(check.OK(), hitBothClusters))
-		call(t, ServiceGlobalTakeover, check.And(check.OK(), hitBothClusters))
+		call(t, ServiceRemoteGlobal, check.And(check.OK(), hitRemoteClusters(t)))
+		call(t, ServiceAllGlobal, check.And(check.OK(), hitAllClusters(t)))
+		call(t, ServiceGlobalTakeover, check.And(check.OK(), hitAllClusters(t)))
 
-		// Calls should always go to the local waypoint, then may be sent either local or remote.
-		call(t, ServiceLocalWaypoint, WaypointLocalForBoth)
-		call(t, ServiceRemoteWaypoint, WaypointRemoteDirectLocal)
-		// No local, so we always hit remote and its waypoint
-		call(t, ServiceRemoteOnlyWaypoint, check.And(check.Cluster(RemoteCluster), CheckTraversedWaypointIn(RemoteCluster)))
 		// Calls should always go to the local waypoint -- they should always skip the remote waypoint
-		call(t, ServiceBothWaypoint, WaypointLocalForBoth)
+		call(t, ServiceLocalWaypoint, WaypointLocalClusterToAll)
+
+		// No local, so we always hit remote and its waypoint
+		call(t, ServiceCrossNetworkOnlyWaypoint, check.And(hitRemoteNetwork(t), CheckTraversedRemoteNetworkWaypoint()))
+
+		// Calls should always go to the local network waypoints then go to any cluster's backend
+		// since the waypoints are merged across flat network
+		call(t, ServiceAllWaypoint, WaypointLocalNetworkToAll)
+		call(t, ServiceRemoteWaypoint, check.And(check.OK(), WaypointLocalNetworkToAll))
 
 		// Should hit remote and local
-		call(t, ServiceSidecar, check.And(check.OK(), hitBothClusters))
+		call(t, ServiceSidecar, check.And(check.OK(), hitAllClusters(t)))
 	})
 }
 
