@@ -943,7 +943,6 @@ func podWorkloadBuilder(
 				return a.(model.ServiceInfo).Source.Kind == kind.Service
 			}))
 		}
-		// <<<<<<< HEAD
 		fetchedWorkloadServices := krt.Fetch(ctx, workloadServices, fo...)
 		fetchedWorkloadServices = append(fetchedWorkloadServices, matchingServicesWithoutSelectors(
 			ctx,
@@ -954,20 +953,7 @@ func podWorkloadBuilder(
 			endpointSlicesAddressIndex,
 			domainSuffix,
 		)...)
-		// =======
-		// 		fetchedWorkloadServices := krt.Fetch(ctx, workloadServices, fo...)
-		// 		fetchedWorkloadServices = append(
-		// 			fetchedWorkloadServices,
-		// 			a.matchingServicesWithoutSelectors(
-		// 				ctx,
-		// 				p,
-		// 				fetchedWorkloadServices,
-		// 				workloadServices,
-		// 				endpointSlices,
-		// 				endpointSlicesAddressIndex,
-		// 			)...,
-		// 		)
-		// >>>>>>> origin/master-solo
+
 		// Logic from https://github.com/kubernetes/kubernetes/blob/7c873327b679a70337288da62b96dd610858181d/staging/src/k8s.io/endpointslice/utils.go#L37
 		// Kubernetes has Ready, Serving, and Terminating. We only have a boolean, which is sufficient for our cases
 		status := workloadapi.WorkloadStatus_HEALTHY
@@ -982,11 +968,7 @@ func podWorkloadBuilder(
 		appTunnel, targetWaypoint := computeWaypoint(ctx, waypoints, namespaces, services, p.ObjectMeta)
 
 		// enforce traversing waypoints
-		// <<<<<<< HEAD
 		policies = append(policies, implicitWaypointPolicies(flags, ctx, waypoints, targetWaypoint, fetchedWorkloadServices)...)
-		// =======
-		// 		policies = append(policies, implicitWaypointPolicies(a.Flags, ctx, waypoints, targetWaypoint, fetchedWorkloadServices)...)
-		// >>>>>>> origin/master-solo
 
 		w := &workloadapi.Workload{
 			Uid:                   generatePodUID(cluster, p),
