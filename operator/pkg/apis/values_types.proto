@@ -85,8 +85,22 @@ message CNIConfig {
   // K8s affinity to set on the istio-cni Pods. Can be used to exclude istio-cni from being scheduled on specified nodes.
   k8s.io.api.core.v1.Affinity affinity = 20;
 
+  // Environment variables passed to the CNI container.
+  //
+  // Examples:
+  // env:
+  //   ENV_VAR_1: value1
+  //   ENV_VAR_2: value2
+  google.protobuf.Struct env = 32;
+
+  // Additional labels to apply to the istio-cni DaemonSet.
+  google.protobuf.Struct daemonSetLabels = 33;
+
   // Additional annotations to apply to the istio-cni Pods.
   google.protobuf.Struct podAnnotations = 10 [deprecated = true];
+
+  // Additional labels to apply to the istio-cni Pods.
+  google.protobuf.Struct podLabels = 34;
 
   // PodSecurityPolicy cluster role. No longer used anywhere.
   string psp_cluster_role = 11;
