@@ -38,6 +38,7 @@ func Cmd(ctx cli.Context) *cobra.Command {
 	}
 	cmd.AddCommand(Expose(ctx))
 	cmd.AddCommand(Link(ctx))
+	cmd.AddCommand(Check(ctx))
 	return cmd
 }
 

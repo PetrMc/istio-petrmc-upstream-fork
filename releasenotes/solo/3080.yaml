@@ -1,0 +1,16 @@
+apiVersion: release-notes/v2
+
+kind: feature
+
+area: istioctl
+
+issue:
+  - https://github.com/solo-io/istio/issues/2821
+
+releaseNotes:
+- |
+  **Added** the command `istioctl multicluster check` which will iterate through a few different checks on the status of multicluster for the current kube context. The following checks are performed:
+  - Checks the license in use by each istiod and validates that it supports multicluster
+  - Checks the health of all istiod, ztunnel, and eastwest gateway pods
+  - Checks that the eastwest gateway is programmed
+  - Checks that each remote gateway has a gloo.solo.io/PeeringSucceeded status of True

@@ -221,6 +221,9 @@ func (s *DiscoveryServer) AddDebugHandlers(mux, internalMux *http.ServeMux, enab
 	s.addDebugHandler(mux, internalMux, "/debug/mcsz", "List information about Kubernetes MCS services", s.mcsz)
 
 	s.addDebugHandler(mux, internalMux, "/debug/list", "List all supported debug commands in json", s.list)
+
+	// solo-only debug handlers
+	s.addDebugHandler(mux, internalMux, "/debug/license", "Current license", s.debugLicenseHandler)
 }
 
 func (s *DiscoveryServer) addDebugHandler(mux *http.ServeMux, internalMux *http.ServeMux,

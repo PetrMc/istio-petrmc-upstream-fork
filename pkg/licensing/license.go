@@ -56,14 +56,35 @@ func GetXDSLicenseState() LicenseState {
 	return state.State
 }
 
-// CheckLicense checks the license is valid for the given feature.
-// A valid license is one that is not expired.
+func GetLicenseInfo() LicenseInfo {
+	state, _ := licenseState.Get()
+	return state
+}
+
+// CheckLicense checks the global license is valid for the given feature.
+// The implementation of the license check is defined in CheckLicenseByInfo.
 // The verbose flag configures whether warnings will be spammed if it's not able to be used. This should be used
 // only when a feature has been explicitly enabled, not implicitly.
 func CheckLicense(name LicenseFeature, verbose bool) bool {
 	info, err := licenseState.Get()
+	if err != nil && verbose {
+		message := fmt.Sprintf("SKIPPING FEATURE %s due to licensing issue: %s", name, err.Error())
+		for range 10 {
+			// Log 10x for good measure
+			log.Error(message)
+		}
+		return false
+	}
+	return CheckLicenseByInfo(info, name, verbose)
+}
+
+// CheckLicenseByInfo checks the given license is valid for the given feature.
+// A valid license is one that is not expired.
+// The verbose flag configures whether warnings will be spammed if it's not able to be used. This should be used
+// only when a feature has been explicitly enabled, not implicitly.
+func CheckLicenseByInfo(info LicenseInfo, name LicenseFeature, verbose bool) bool {
 	state := info.State
-	valid := (state == StateBypassed || state == StateOK) && err == nil
+	valid := (state == StateBypassed || state == StateOK)
 	if valid {
 		if lf, ok := licenseFeatures[info.Product]; ok && !lf.Contains(name) {
 			if verbose {
@@ -78,9 +99,6 @@ func CheckLicense(name LicenseFeature, verbose bool) bool {
 		return true
 	}
 	reason := "expired"
-	if err != nil {
-		reason = err.Error()
-	}
 	if verbose {
 		message := fmt.Sprintf("SKIPPING FEATURE %s due to licensing issue: %s", name, reason)
 		for range 10 {

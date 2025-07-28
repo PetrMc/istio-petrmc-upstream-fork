@@ -7,6 +7,7 @@ package xds
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
 
 	core "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
 
@@ -53,4 +54,9 @@ func LicenseControlPlane() *core.ControlPlane {
 	// Error will never happen because the getter of lazy does not return error.
 	cp, _ := controlPlaneLicense.Get()
 	return cp
+}
+
+func (s *DiscoveryServer) debugLicenseHandler(w http.ResponseWriter, req *http.Request) {
+	info := licensing.GetLicenseInfo()
+	writeJSON(w, info, req)
 }
