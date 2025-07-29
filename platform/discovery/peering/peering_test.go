@@ -673,7 +673,11 @@ func TestPeering(t *testing.T) {
 			// direct to pod with gateway locality
 			DesiredWE{Name: "autogenflat.c2.default.pod1.f2396f15c5c2", Address: "1.2.3.4", Locality: "region-c2/zone-c2"},
 			// direct to pod with custom locality
-			DesiredWE{Name: "autogenflat.c2.default.pod-locality.f2396f15c5c2", Address: "1.2.3.5", Locality: "custom-region/custom-zone"},
+			DesiredWE{
+				Name: "autogenflat.c2.default.pod-locality.f2396f15c5c2",
+				Address: "1.2.3.5",
+				Locality: "custom-region/custom-zone"
+			},
 		)
 		AssertSE(c1, DesiredSE{Name: "autogen.default.svc1"})
 
@@ -686,7 +690,12 @@ func TestPeering(t *testing.T) {
 		AssertWE(c1,
 			DesiredWE{Name: "autogen.c2.default.svc1", Locality: "region-c2/zone-c2"},
 			DesiredWE{Name: "autogen.c3.default.svc1", Locality: "region-c3/zone-c3"},
-			DesiredWE{Name: "autogenflat.c2.default.pod-locality.f2396f15c5c2", Address: "1.2.3.5", Locality: "custom-region/custom-zone"}, // pod remains with gateway locality
+			// pod remains with gateway locality
+			DesiredWE{
+				Name: "autogenflat.c2.default.pod-locality.f2396f15c5c2",
+				Address: "1.2.3.5",
+				Locality: "custom-region/custom-zone"
+			},
 		)
 	})
 }
