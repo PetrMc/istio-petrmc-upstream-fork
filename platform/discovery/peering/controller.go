@@ -332,6 +332,21 @@ func (c *NetworkWatcher) reconcileFlatWorkloadEntry(tn types.NamespacedName) err
 			weName = weName[:253]
 		}
 
+		// by default use the cluster locality based on istio-remote Gateway labels
+		locality := cluster.locality
+		if workload.Locality != nil {
+			region, zone, subzone := workload.Locality.GetRegion(), workload.Locality.GetZone(), workload.Locality.GetSubzone()
+			if region != "" {
+				locality = region
+				if zone != "" {
+					locality += "/" + zone
+					if subzone != "" {
+						locality += "/" + subzone
+					}
+				}
+			}
+		}
+
 		we := &clientnetworking.WorkloadEntry{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:        weName,
@@ -344,7 +359,7 @@ func (c *NetworkWatcher) reconcileFlatWorkloadEntry(tn types.NamespacedName) err
 				Network:  string(c.localNetwork),
 				Ports:    flatWorkloadEntryPorts(servicesWithMergedSelector),
 				Weight:   1, // weight,
-				Locality: cluster.locality,
+				Locality: locality,
 				// TODO ztunnel (if trustdomain validtion enabled) will validate the local cluster's td
 				// we'd need a way to propagate the remote td for to-pod-ip calls with TD validation enabled.
 				ServiceAccount: workload.GetServiceAccount(),
