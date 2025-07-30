@@ -36,6 +36,7 @@ import (
 	"istio.io/istio/pilot/pkg/features"
 	"istio.io/istio/pilot/pkg/model"
 	"istio.io/istio/pilot/pkg/model/credentials"
+	istio_core "istio.io/istio/pilot/pkg/networking/core"
 	securitymodel "istio.io/istio/pilot/pkg/security/model"
 	"istio.io/istio/pilot/pkg/util/protoconv"
 	"istio.io/istio/pkg/cluster"
@@ -294,8 +295,8 @@ func filterAuthorizedResources(resources []SecretResource, proxy *model.Proxy, s
 			isCAOnlySecret := strings.HasSuffix(r.Name, securitymodel.SdsCaSuffix)
 			// For Kubernetes, we require the secret to be in the same namespace as the proxy and for it to be
 			// authorized for access.
-			if sameNamespace && (isCAOnlySecret || isAuthorized()) {
-				// if sameNamespace && isAuthorized() {
+			if istio_core.ResouceAccessPermitted(proxy) ||
+				(sameNamespace && (isCAOnlySecret || isAuthorized())) {
 				allowedResources = append(allowedResources, r)
 			} else {
 				deniedResources = append(deniedResources, r.Name)

@@ -1,0 +1,16 @@
+apiVersion: release-notes/v2
+
+kind: feature
+
+area: traffic-management
+
+issue:
+  - https://github.com/solo-io/istio/issues/2809
+
+releaseNotes:
+- |
+  **Added** istiod support for per-service account mTLS egress via a single waypoint.
+    - This is enabled by adding the environment variable`PERMIT_CROSS_NAMESPACE_RESOURCE_ACCESS` to istiod, the value is a comma-separated list of `namespace/gateway` pairs. Gateway is the name of the waypoint's service account.
+    - This also includes sample manifests under `samples/solo-mtls-egress` to demonstrate how to use this feature.
+    - This feature requires a valid license capable of enabling our EnvoyFilter waypoint support.
+  

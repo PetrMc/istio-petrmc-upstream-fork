@@ -1,0 +1,61 @@
+---
+# App HTTPRoute
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: app1-api-partner-com-invalid-hr
+  namespace: team-namespace
+spec:
+  hostnames:
+    - my-nginx.mesh-external.foo.bar.invalid
+  parentRefs:
+    - name: nginx-mesh-external-se
+      kind: ServiceEntry
+      group: networking.istio.io
+      namespace: istio-egress
+  rules:
+    - matches:
+        - headers:
+            - type: Exact
+              name: "%%source.principal%%"
+              value: "spiffe://cluster.local/ns/team-namespace/sa/sleep"
+      backendRefs:
+        - group: networking.istio.io
+          kind: Hostname
+          name: app1.team-namespace.my-nginx.mesh-external.svc.cluster.local.invalid
+          port: 443
+---
+# App ServiceEntry
+apiVersion: networking.istio.io/v1
+kind: ServiceEntry
+metadata:
+  name: app1-nginx-mesh-external-se
+  namespace: team-namespace
+spec:
+  ports:
+    - number: 443
+      name: https
+      protocol: HTTPS
+  hosts:
+    - app1.team-namespace.my-nginx.mesh-external.svc.cluster.local.invalid
+  location: MESH_EXTERNAL
+  resolution: DNS
+  endpoints:
+    - address: my-nginx.mesh-external.svc.cluster.local
+---
+# App DestinationRule
+apiVersion: networking.istio.io/v1
+kind: DestinationRule
+metadata:
+  name: app1-nginx-mesh-external-dr
+  namespace: team-namespace
+spec:
+  host: app1.team-namespace.my-nginx.mesh-external.svc.cluster.local.invalid
+  trafficPolicy:
+    tls:
+      # insecureSkipVerify: true
+      subjectAltNames:
+        - app1.team-namespace.my-nginx.mesh-external.svc.cluster.local.invalid
+        - my-nginx.mesh-external.svc.cluster.local
+      mode: MUTUAL
+      credentialName: team-namespace/app1-client-mtls-secret

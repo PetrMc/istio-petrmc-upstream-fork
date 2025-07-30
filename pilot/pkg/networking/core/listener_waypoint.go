@@ -721,7 +721,10 @@ func (lb *ListenerBuilder) buildWaypointNetworkFilters(svc *model.Service, fcc i
 	var destinationRule *networking.DestinationRule
 	if svc != nil {
 		svcHostname = svc.Hostname
-		virtualServices := getVirtualServiceForWaypoint(lb.node.ConfigNamespace, svc, lb.node.SidecarScope.EgressListeners[0].VirtualServices())
+		virtualServices := getVirtualServiceForWaypoint(lb.node.ConfigNamespace,
+			svc,
+			lb.node.SidecarScope.EgressListeners[0].VirtualServices(),
+			ResouceAccessPermitted(lb.node))
 		routes := getWaypointTCPRoutes(virtualServices, svcHostname.String(), fcc.port.Port)
 		if len(routes) > 0 {
 			// Existing (slightly incorrect, but best we can do) semantics.
@@ -843,27 +846,34 @@ func buildWaypointInboundHTTPRouteConfig(lb *ListenerBuilder, svc *model.Service
 		return buildSidecarInboundHTTPRouteConfig(lb, cc)
 	}
 
-	virtualServices := getVirtualServiceForWaypoint(lb.node.ConfigNamespace, svc, lb.node.SidecarScope.EgressListeners[0].VirtualServices())
-	vs := slices.FindFunc(virtualServices, func(c config.Config) bool {
-		// Find the first HTTP virtual service
-		return c.Spec.(*networking.VirtualService).Http != nil
-	})
-	if vs == nil {
-		return buildSidecarInboundHTTPRouteConfig(lb, cc)
-	}
-
-	// Typically we setup routes with the Host header match. However, for waypoint inbound we are actually using
-	// hostname purely to match to the Service VIP. So we only need a single VHost, with routes compute based on the VS.
-	// For destinations, we need to hit the inbound clusters if it is an internal destination, otherwise outbound.
-	routes, err := lb.waypointInboundRoute(*vs, cc.port.Port)
-	if err != nil {
-		return buildSidecarInboundHTTPRouteConfig(lb, cc)
-	}
-
+	virtualServices := getVirtualServiceForWaypoint(lb.node.ConfigNamespace,
+		svc,
+		lb.node.SidecarScope.EgressListeners[0].VirtualServices(),
+		ResouceAccessPermitted(lb.node))
 	inboundVHost := &route.VirtualHost{
 		Name:    inboundVirtualHostPrefix + strconv.Itoa(cc.port.Port), // Format: "inbound|http|%d"
 		Domains: []string{"*"},
-		Routes:  routes,
+		// Routes:  routes,
+	}
+
+	found := false
+	for _, c := range virtualServices {
+		if c.Spec.(*networking.VirtualService).Http == nil {
+			continue
+		}
+		found = true
+
+		// Typically we setup routes with the Host header match. However, for waypoint inbound we are actually using
+		// hostname purely to match to the Service VIP. So we only need a single VHost, with routes compute based on the VS.
+		// For destinations, we need to hit the inbound clusters if it is an internal destination, otherwise outbound.
+		routes, err := lb.waypointInboundRoute(c, cc.port.Port)
+		if err != nil {
+			return buildSidecarInboundHTTPRouteConfig(lb, cc)
+		}
+		inboundVHost.Routes = append(inboundVHost.Routes, routes...)
+	}
+	if !found {
+		return buildSidecarInboundHTTPRouteConfig(lb, cc)
 	}
 
 	return &route.RouteConfiguration{
@@ -874,10 +884,10 @@ func buildWaypointInboundHTTPRouteConfig(lb *ListenerBuilder, svc *model.Service
 }
 
 // Select the config pertaining to the service being processed.
-func getVirtualServiceForWaypoint(configNamespace string, svc *model.Service, configs []config.Config) []config.Config {
+func getVirtualServiceForWaypoint(configNamespace string, svc *model.Service, configs []config.Config, crossNamespacePermitted bool) []config.Config {
 	var matching []config.Config
 	for _, cfg := range configs {
-		if cfg.Namespace != configNamespace && cfg.Namespace != svc.Attributes.Namespace {
+		if !crossNamespacePermitted && cfg.Namespace != configNamespace && cfg.Namespace != svc.Attributes.Namespace {
 			// We only allow routes in the same namespace as the service or in the waypoint's own namespace
 			continue
 		}
@@ -1058,3 +1068,16 @@ func buildCommonConnectTLSContext(proxy *model.Proxy, push *model.PushContext) *
 	security.EnforceCompliance(ctx)
 	return ctx
 }
+
+// SOLO
+// TODO: does this belong here? Maybe model instead?
+func ResouceAccessPermitted(proxy *model.Proxy) bool {
+	return proxy != nil &&
+		proxy.VerifiedIdentity != nil &&
+		features.PermitCrossNamespaceResouceAccess.Contains(
+			proxy.VerifiedIdentity.Namespace+
+				"/"+
+				proxy.VerifiedIdentity.ServiceAccount)
+}
+
+// END SOLO

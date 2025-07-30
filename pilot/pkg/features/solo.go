@@ -5,7 +5,10 @@
 package features
 
 import (
+	"strings"
+
 	"istio.io/istio/pkg/env"
+	"istio.io/istio/pkg/util/sets"
 )
 
 // EnableSidecarWaypointInterop enables Sidecar -> Service Waypoint
@@ -31,4 +34,16 @@ var EnableEnvoyMultiNetworkHBONE = func() bool {
 	// We explicitly do not check the license here; if they are not licensed we will just turn off the service discovery,
 	// not break routing
 	return EnablePeering
+}()
+
+var PermitCrossNamespaceResouceAccess = func() sets.Set[string] {
+	v, f := env.Register("PERMIT_CROSS_NAMESPACE_RESOURCE_ACCESS", "",
+		"If enabled, cross-namespace resource access will be allowed for the given proxies. Format: namespace1/proxy1,namespace2/proxy2,namespace3/proxy3").Lookup()
+	permits := sets.New[string]()
+	if f {
+		for _, s := range strings.Split(v, ",") {
+			permits.Insert(s)
+		}
+	}
+	return permits
 }()
