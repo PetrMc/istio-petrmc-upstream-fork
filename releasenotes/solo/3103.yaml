@@ -1,0 +1,12 @@
+apiVersion: release-notes/v2
+
+kind: feature
+
+area: traffic-management
+
+issue:
+  - https://github.com/solo-io/istio/issues/2821
+
+releaseNotes:
+- |
+  **Added** syncing of peer connection status to remote Gateways

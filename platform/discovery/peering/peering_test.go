@@ -686,6 +686,11 @@ func TestAutomatedPeering(t *testing.T) {
 		expectedGatewayStatus := k8s.GatewayStatus{
 			Conditions: []metav1.Condition{
 				{
+					Type:               constants.SoloConditionPeerConnected,
+					Status:             metav1.ConditionTrue,
+					Reason:             string(k8s.GatewayReasonProgrammed),
+					LastTransitionTime: metav1.Now(),
+				}, {
 					Type:               constants.SoloConditionPeeringSucceeded,
 					Status:             metav1.ConditionTrue,
 					Reason:             string(k8s.GatewayReasonProgrammed),
@@ -722,6 +727,12 @@ func TestAutomatedPeering(t *testing.T) {
 		expectedGatewayStatus := k8s.GatewayStatus{
 			Conditions: []metav1.Condition{
 				{
+					Type:               constants.SoloConditionPeerConnected,
+					Status:             metav1.ConditionFalse,
+					Reason:             string(k8s.GatewayReasonPending),
+					Message:            "not connected to peer",
+					LastTransitionTime: metav1.Now(),
+				}, {
 					Type:               constants.SoloConditionPeeringSucceeded,
 					Status:             metav1.ConditionUnknown,
 					Reason:             string(k8s.GatewayReasonPending),
@@ -751,6 +762,12 @@ func TestAutomatedPeering(t *testing.T) {
 			Conditions: []metav1.Condition{
 				{
 					Type:               constants.SoloConditionPeeringSucceeded,
+					Status:             metav1.ConditionFalse,
+					Reason:             string(k8s.GatewayReasonInvalid),
+					Message:            "no network started encountered error validating gateway: no network label found in gateway",
+					LastTransitionTime: metav1.Now(),
+				}, {
+					Type:               constants.SoloConditionPeerConnected,
 					Status:             metav1.ConditionFalse,
 					Reason:             string(k8s.GatewayReasonInvalid),
 					Message:            "no network started encountered error validating gateway: no network label found in gateway",

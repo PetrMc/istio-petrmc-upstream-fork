@@ -72,6 +72,12 @@ func TestStatus(t *testing.T) {
 					},
 					{
 						ObservedGeneration: 1,
+						Type:               constants.SoloConditionPeerConnected,
+						Status:             metav1.ConditionTrue,
+						Reason:             string(k8s.GatewayReasonProgrammed),
+					},
+					{
+						ObservedGeneration: 1,
 						Type:               constants.SoloConditionPeeringSucceeded,
 						Status:             metav1.ConditionTrue,
 						Reason:             string(k8s.GatewayReasonProgrammed),

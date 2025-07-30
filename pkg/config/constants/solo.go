@@ -7,4 +7,5 @@ package constants
 const (
 	// Solo status condition types
 	SoloConditionPeeringSucceeded = "gloo.solo.io/PeeringSucceeded"
+	SoloConditionPeerConnected    = "gloo.solo.io/PeerConnected"
 )

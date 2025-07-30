@@ -780,6 +780,13 @@ func (c *NetworkWatcher) reconcileGatewayStatus(name types.NamespacedName) error
 			Reason:             string(k8s.GatewayReasonInvalid),
 			Message:            fmt.Sprintf("no network started encountered error validating gateway: %v", err.Error()),
 			LastTransitionTime: metav1.Now(),
+		}, metav1.Condition{
+			ObservedGeneration: gw.Generation,
+			Type:               constants.SoloConditionPeerConnected,
+			Status:             metav1.ConditionFalse,
+			Reason:             string(k8s.GatewayReasonInvalid),
+			Message:            fmt.Sprintf("no network started encountered error validating gateway: %v", err.Error()),
+			LastTransitionTime: metav1.Now(),
 		})
 		c.setGatewayStatus(gw, gatewayConditions)
 		return nil
@@ -794,6 +801,25 @@ func (c *NetworkWatcher) reconcileGatewayStatus(name types.NamespacedName) error
 	if peerCluster == nil {
 		log.Debugf("unable to set status for gateway %q, no cluster found", name)
 		return nil
+	}
+
+	if peerCluster.IsConnected() {
+		gatewayConditions = append(gatewayConditions, metav1.Condition{
+			ObservedGeneration: gw.Generation,
+			Type:               constants.SoloConditionPeerConnected,
+			Status:             metav1.ConditionTrue,
+			Reason:             string(k8s.GatewayReasonProgrammed),
+			LastTransitionTime: metav1.Now(),
+		})
+	} else {
+		gatewayConditions = append(gatewayConditions, metav1.Condition{
+			ObservedGeneration: gw.Generation,
+			Type:               constants.SoloConditionPeerConnected,
+			Status:             metav1.ConditionFalse,
+			Reason:             string(k8s.GatewayReasonPending),
+			Message:            "not connected to peer",
+			LastTransitionTime: metav1.Now(),
+		})
 	}
 
 	if !peerCluster.HasSynced() {

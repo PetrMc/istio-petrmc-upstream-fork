@@ -34,8 +34,9 @@ type peerCluster struct {
 	federatedServices krt.StaticCollection[RemoteFederatedService]
 	workloads         krt.StaticCollection[RemoteWorkload]
 
-	synced   *atomic.Bool
-	locality string
+	synced    *atomic.Bool
+	connected *atomic.Bool
+	locality  string
 }
 
 func (s *peerCluster) run() {
@@ -66,6 +67,10 @@ func (s *peerCluster) resync() {
 
 func (s *peerCluster) HasSynced() bool {
 	return s.synced.Load()
+}
+
+func (s *peerCluster) IsConnected() bool {
+	return s.connected.Load()
 }
 
 func newPeerCluster(
@@ -102,6 +107,7 @@ func newPeerCluster(
 		federatedServices: svcCollection,
 		workloads:         workloadCollection,
 		synced:            atomic.NewBool(false),
+		connected:         atomic.NewBool(false),
 		locality:          gateway.Locality,
 	}
 
@@ -169,6 +175,20 @@ func newPeerCluster(
 		handlers = append(handlers,
 			workloadsAdscHandler,
 			adsc.Watch[*workloadapi.Workload]("*"))
+	}
+
+	cfg.ConnectionEventHandler = func(event adsc.ConnectionEvent, reason string) {
+		switch event {
+		case adsc.Connected:
+			c.connected.Store(true)
+			statusUpdateFunc()
+		case adsc.Disconnected:
+			// only update status on repeated disconnected event to avoid transient disconnects
+			if !c.connected.Load() {
+				statusUpdateFunc()
+			}
+			c.connected.Store(false)
+		}
 	}
 
 	c.xds = adsc.NewDelta(gateway.Address, cfg, handlers...)

@@ -125,6 +125,10 @@ func (h *handlerContext) Reject(reason error) {
 // DeltaADSConfig for delta ADS connection.
 type DeltaADSConfig struct {
 	Config
+
+	// SOLO
+	ConnectionEventHandler func(event ConnectionEvent, reason string)
+	// END SOLO
 }
 
 type Resource struct {
@@ -134,6 +138,16 @@ type Resource struct {
 }
 
 type HandlerFunc func(ctx HandlerContext, res *Resource, event Event)
+
+// SOLO
+type ConnectionEvent int
+
+const (
+	Connected ConnectionEvent = iota
+	Disconnected
+)
+
+// END SOLO
 
 // Client is a stateful ADS (Aggregated Discovery Service) client designed to handle delta updates from an xDS server.
 // Central to this client is a dynamic 'tree' of resources, representing the relationships and states of resources in the service mesh.
@@ -286,6 +300,11 @@ func (c *Client) runOnce(ctx context.Context) error {
 		return fmt.Errorf("delta stream: %v", err)
 	}
 	c.log.WithLabels("node", c.nodeID()).Infof("established connection")
+	// SOLO
+	if c.cfg.ConnectionEventHandler != nil {
+		c.cfg.ConnectionEventHandler(Connected, "connected")
+	}
+	// END SOLO
 	c.sendNodeMeta = true
 	c.xdsClient = xdsClient
 	for _, w := range c.initialWatches {
@@ -316,6 +335,15 @@ func (c *Client) runWithReconnects(ctx context.Context) {
 			break
 		}
 		err := c.runOnce(ctx)
+		// SOLO
+		if c.cfg.ConnectionEventHandler != nil {
+			reason := "disconnected"
+			if err != nil {
+				reason = err.Error()
+			}
+			c.cfg.ConnectionEventHandler(Disconnected, reason)
+		}
+		// END SOLO
 		if c.cfg.BackoffPolicy == nil {
 			log.Warnf("disconnected: %v", err)
 			break
