@@ -124,7 +124,7 @@ func TestPeering(t *testing.T) {
 		c1.CreateService("svc1", true, ports1)
 		c2.CreateService("svc1", true, ports2)
 
-		AssertWE(c1, DesiredWE{Name: c2Svc1Name})
+		AssertWE(c1, DesiredWE{Name: c2Svc1Name, Locality: c2.Locality()})
 		AssertWEPorts(c1, c2Svc1Name, map[string]uint32{"port-80": 80, "port-81": 81, "port-92": 92, "target-821": 82})
 		AssertSE(c1, DesiredSE{Name: defaultSvc1Name})
 		AssertSEPorts(c1, defaultSvc1Name, []*networking.ServicePort{
@@ -182,7 +182,7 @@ func TestPeering(t *testing.T) {
 		// No service in c1 at all
 		c2.CreateService("svc1", true, ports2)
 
-		AssertWE(c1, DesiredWE{Name: c2Svc1Name})
+		AssertWE(c1, DesiredWE{Name: c2Svc1Name, Locality: c2.Locality()})
 		AssertWEPorts(c1, c2Svc1Name, map[string]uint32{"port-80": 80, "port-81": 81, "port-92": 92, "port-82": 82})
 		AssertSE(c1, DesiredSE{Name: defaultSvc1Name})
 		AssertSEPorts(c1, defaultSvc1Name, []*networking.ServicePort{
@@ -207,7 +207,7 @@ func TestPeering(t *testing.T) {
 		c1.CreateService("svc1", true, ports1)
 		c2.CreateService("svc1", true, ports2)
 
-		AssertWE(c1, DesiredWE{Name: c2Svc1Name})
+		AssertWE(c1, DesiredWE{Name: c2Svc1Name, Locality: c2.Locality()})
 		AssertWEPorts(c1, c2Svc1Name, map[string]uint32{"port-80": 80, "port-81": 81, "port-92": 92, "target-821": 82})
 		AssertSE(c1, DesiredSE{Name: defaultSvc1Name})
 		AssertSEPorts(c1, defaultSvc1Name, []*networking.ServicePort{
@@ -217,7 +217,7 @@ func TestPeering(t *testing.T) {
 			{Name: "extra1", Number: 91},
 		})
 
-		AssertWE(c2, DesiredWE{Name: c1Svc1Name})
+		AssertWE(c2, DesiredWE{Name: c1Svc1Name, Locality: c1.Locality()})
 		AssertWEPorts(c2, c1Svc1Name, map[string]uint32{"port-80": 80, "port-81": 81, "port-91": 91, "target-822": 82})
 		AssertSE(c2, DesiredSE{Name: defaultSvc1Name})
 		AssertSEPorts(c2, defaultSvc1Name, []*networking.ServicePort{
@@ -236,7 +236,7 @@ func TestPeering(t *testing.T) {
 		c1.CreateWorkload("svc1", "we3", "sa-2", nil)
 		c2.CreateService("svc1", true, ports2)
 
-		AssertWE(c1, DesiredWE{Name: c2Svc1Name})
+		AssertWE(c1, DesiredWE{Name: c2Svc1Name, Locality: c2.Locality()})
 		AssertWEPorts(c2, c1Svc1Name, map[string]uint32{"port-80": 80, "port-81": 81, "port-91": 91, "target-822": 82})
 		AssertSE(c1, DesiredSE{Name: defaultSvc1Name})
 		AssertSEPorts(c1, defaultSvc1Name, []*networking.ServicePort{
@@ -246,7 +246,7 @@ func TestPeering(t *testing.T) {
 			{Name: "extra1", Number: 91},
 		})
 
-		AssertWE(c2, DesiredWE{Name: c1Svc1Name})
+		AssertWE(c2, DesiredWE{Name: c1Svc1Name, Locality: c1.Locality()})
 		AssertWEPorts(c2, c1Svc1Name, map[string]uint32{"port-80": 80, "port-81": 81, "port-91": 91, "target-822": 82})
 		AssertSE(c2, DesiredSE{Name: defaultSvc1Name, ServiceAccounts: []string{
 			"spiffe://cluster.local/ns/default/sa/sa-1",
@@ -265,10 +265,10 @@ func TestPeering(t *testing.T) {
 		c1.CreateService("svc1", true, ports1)
 		c2.CreateService("svc1", true, ports2)
 
-		AssertWE(c1, DesiredWE{Name: c2Svc1Name})
+		AssertWE(c1, DesiredWE{Name: c2Svc1Name, Locality: c2.Locality()})
 		AssertSE(c1, DesiredSE{Name: defaultSvc1Name})
 
-		AssertWE(c2, DesiredWE{Name: c1Svc1Name})
+		AssertWE(c2, DesiredWE{Name: c1Svc1Name, Locality: c1.Locality()})
 		AssertSE(c2, DesiredSE{Name: defaultSvc1Name})
 
 		// Removal of gateway is a permanent drop, not an ephemeral one -- should cleanup resources.
@@ -288,7 +288,7 @@ func TestPeering(t *testing.T) {
 		c1.CreateService("svc1", true, ports1)
 		c2.CreateService("svc1", true, ports2)
 
-		AssertWE(c1, DesiredWE{Name: c2Svc1Name})
+		AssertWE(c1, DesiredWE{Name: c2Svc1Name, Locality: c2.Locality()})
 		AssertWEPorts(c1, c2Svc1Name, map[string]uint32{"port-80": 80, "port-81": 81, "port-92": 92, "target-821": 82})
 		AssertSE(c1, DesiredSE{Name: defaultSvc1Name})
 		AssertSEPorts(c1, defaultSvc1Name, []*networking.ServicePort{
@@ -298,7 +298,7 @@ func TestPeering(t *testing.T) {
 			{Name: "extra1", Number: 91},
 		})
 
-		AssertWE(c2, DesiredWE{Name: c1Svc1Name})
+		AssertWE(c2, DesiredWE{Name: c1Svc1Name, Locality: c1.Locality()})
 		AssertWEPorts(c2, c1Svc1Name, map[string]uint32{"port-80": 80, "port-81": 81, "port-91": 91, "target-822": 82})
 		AssertSE(c2, DesiredSE{Name: defaultSvc1Name})
 		AssertSEPorts(c2, defaultSvc1Name, []*networking.ServicePort{
@@ -310,7 +310,7 @@ func TestPeering(t *testing.T) {
 
 		// Delete from one cluster...
 		c1.DeleteService("svc1")
-		AssertWE(c1, DesiredWE{Name: c2Svc1Name})
+		AssertWE(c1, DesiredWE{Name: c2Svc1Name, Locality: c2.Locality()})
 		AssertWEPorts(c1, c2Svc1Name, map[string]uint32{"port-80": 80, "port-81": 81, "port-82": 82, "port-92": 92})
 		AssertSE(c1, DesiredSE{Name: defaultSvc1Name})
 		AssertSEPorts(c1, defaultSvc1Name, []*networking.ServicePort{
@@ -357,7 +357,7 @@ func TestPeering(t *testing.T) {
 		c1.Outage.setOutage(true)
 		c2.CreateService("svc1", true, ports2)
 		c1.Outage.setOutage(false)
-		AssertWE(c1, DesiredWE{Name: c2Svc1Name})
+		AssertWE(c1, DesiredWE{Name: c2Svc1Name, Locality: c2.Locality()})
 		AssertWEPorts(c1, c2Svc1Name, map[string]uint32{"port-80": 80, "port-81": 81, "port-92": 92, "target-821": 82})
 	})
 	t.Run("restarts", func(t *testing.T) {
@@ -417,7 +417,11 @@ func TestPeering(t *testing.T) {
 		c2.CreateWorkload("svc1", "we3", "sa-2", nil)
 
 		// we have pointers for the 2 services that exist remotely
-		AssertWE(c1, DesiredWE{Name: c2Svc1Name}, DesiredWE{Name: c2Svc2Name})
+		AssertWE(
+			c1,
+			DesiredWE{Name: c2Svc1Name, Locality: c2.Locality()},
+			DesiredWE{Name: c2Svc2Name, Locality: c2.Locality()},
+		)
 		AssertWEPorts(c1, c2Svc1Name, map[string]uint32{"port-80": 80, "port-81": 81, "port-92": 92, "target-821": 82})
 		AssertWEPorts(c1, c2Svc2Name, map[string]uint32{"port-2002": 2002})
 		// svc1 has some remote workloads so should have those SAs included
@@ -447,7 +451,11 @@ func TestPeering(t *testing.T) {
 		c1 = newCluster(t, c1k, secondStop, true, "c1", "c1")
 		c1k.RunAndWait(fullStop)
 		// We should NOT clean things up
-		AssertWE(c1, DesiredWE{Name: c2Svc1Name}, DesiredWE{Name: "autogen.c2.default.svc2"})
+		AssertWE(
+			c1,
+			DesiredWE{Name: c2Svc1Name, Locality: c2.Locality()},
+			DesiredWE{Name: "autogen.c2.default.svc2", Locality: c2.Locality()},
+		)
 		AssertWEPorts(c1, c2Svc1Name, map[string]uint32{"port-80": 80, "port-81": 81, "port-92": 92, "target-821": 82})
 		AssertWEPorts(c1, c2Svc2Name, map[string]uint32{"port-2002": 2002})
 		AssertSE(c1, DesiredSE{Name: "autogen.default.svc1", ServiceAccounts: []string{
@@ -475,7 +483,11 @@ func TestPeering(t *testing.T) {
 		// Reconnect... we should see the changes
 		c1.Outage.setOutage(false)
 		// svc2 removed, svc3 added
-		AssertWE(c1, DesiredWE{Name: c2Svc1Name}, DesiredWE{Name: c2Svc3Name})
+		AssertWE(
+			c1,
+			DesiredWE{Name: c2Svc1Name, Locality: c2.Locality()},
+			DesiredWE{Name: c2Svc3Name, Locality: c2.Locality()},
+		)
 		AssertWEPorts(c1, c2Svc1Name, map[string]uint32{"port-80": 80, "port-81": 81, "port-92": 92, "target-821": 82})
 		AssertWEPorts(c1, c2Svc3Name, map[string]uint32{"port-2003": 2003})
 		AssertSE(c1, DesiredSE{Name: defaultSvc1Name, ServiceAccounts: []string{
@@ -523,7 +535,7 @@ func TestPeering(t *testing.T) {
 		c1.CreateServiceLabel("svc1", peering.ServiceScopeGlobal, ports1)
 		c2.CreateServiceLabel("svc1", peering.ServiceScopeGlobal, ports2)
 
-		AssertWE(c1, DesiredWE{Name: c2Svc1Name})
+		AssertWE(c1, DesiredWE{Name: c2Svc1Name, Locality: c2.Locality()})
 		AssertWEPorts(c1, c2Svc1Name, map[string]uint32{"port-80": 80, "port-81": 81, "port-92": 92, "target-821": 82})
 		AssertSE(c1, DesiredSE{Name: defaultSvc1Name})
 		lbls := map[string]string{
@@ -581,7 +593,11 @@ func TestPeering(t *testing.T) {
 
 		c3Svc1Name := "autogen.c3.default.svc1"
 
-		AssertWE(c1, DesiredWE{Name: c2Svc1Name}, DesiredWE{Name: c3Svc1Name})
+		AssertWE(
+			c1,
+			DesiredWE{Name: c2Svc1Name, Locality: c2.Locality()},
+			DesiredWE{Name: c3Svc1Name, Locality: c3.Locality()},
+		)
 		AssertWEPorts(c1, c2Svc1Name, map[string]uint32{"port-80": 80, "port-81": 81, "port-82": 82, "port-92": 92})
 		AssertWEPorts(c1, c3Svc1Name, map[string]uint32{"port-80": 80, "port-81": 81, "port-82": 82, "port-93": 93})
 		AssertSE(c1, DesiredSE{Name: defaultSvc1Name})
@@ -597,7 +613,11 @@ func TestPeering(t *testing.T) {
 
 		// c1 local
 		c1.CreateService("svc1", false, ports1)
-		AssertWE(c1, DesiredWE{Name: c2Svc1Name}, DesiredWE{Name: c3Svc1Name})
+		AssertWE(
+			c1,
+			DesiredWE{Name: c2Svc1Name, Locality: c2.Locality()},
+			DesiredWE{Name: c3Svc1Name, Locality: c3.Locality()},
+		)
 		AssertWEPorts(c1, c2Svc1Name, map[string]uint32{"port-80": 80, "port-81": 81, "port-82": 82, "port-92": 92})
 		AssertWEPorts(c1, c3Svc1Name, map[string]uint32{"port-80": 80, "port-81": 81, "port-82": 82, "port-93": 93})
 		AssertSE(c1, DesiredSE{Name: defaultSvc1Name})
@@ -613,7 +633,11 @@ func TestPeering(t *testing.T) {
 
 		// c1 global
 		c1.CreateService("svc1", true, ports1)
-		AssertWE(c1, DesiredWE{Name: c2Svc1Name}, DesiredWE{Name: c3Svc1Name})
+		AssertWE(
+			c1,
+			DesiredWE{Name: c2Svc1Name, Locality: c2.Locality()},
+			DesiredWE{Name: c3Svc1Name, Locality: c3.Locality()},
+		)
 		AssertWEPorts(c1, c2Svc1Name, map[string]uint32{"port-80": 80, "port-81": 81, "port-92": 92, "target-821": 82})
 		AssertWEPorts(c1, c3Svc1Name, map[string]uint32{"port-80": 80, "port-81": 81, "port-93": 93, "target-821": 82})
 		AssertSE(c1, DesiredSE{Name: defaultSvc1Name})
@@ -637,13 +661,23 @@ func TestPeering(t *testing.T) {
 		// c3 is cross-network
 		c2.CreateService("svc1", true, nil)
 		c2.CreatePod("svc1", "pod1", "1.2.3.4")
+		c2.CreatePodWithLocality("svc1", "pod-locality", "1.2.3.5", "custom-region", "custom-zone")
 		c3.CreateService("svc1", true, nil)
 		c3.CreatePod("svc1", "pod2", "2.3.4.5")
 
 		AssertWE(c1,
-			DesiredWE{Name: "autogen.c2.default.svc1"},                                      // aggregated ew gw. HACK unhealthy since we're flat
-			DesiredWE{Name: "autogenflat.c2.default.pod1.f2396f15c5c2", Address: "1.2.3.4"}, // direct to pod
-			DesiredWE{Name: "autogen.c3.default.svc1"},                                      // aggregated ew gw
+			// aggregated ew gw with gateway locality
+			DesiredWE{Name: "autogen.c2.default.svc1", Locality: "region-c2/zone-c2"},
+			// aggregated ew gw with gateway locality
+			DesiredWE{Name: "autogen.c3.default.svc1", Locality: "region-c3/zone-c3"},
+			// direct to pod with gateway locality
+			DesiredWE{Name: "autogenflat.c2.default.pod1.f2396f15c5c2", Address: "1.2.3.4", Locality: "region-c2/zone-c2"},
+			// direct to pod with custom locality
+			DesiredWE{
+				Name:     "autogenflat.c2.default.pod-locality.f2396f15c5c2",
+				Address:  "1.2.3.5",
+				Locality: "custom-region/custom-zone",
+			},
 		)
 		AssertSE(c1, DesiredSE{Name: "autogen.default.svc1"})
 
@@ -654,8 +688,14 @@ func TestPeering(t *testing.T) {
 		c2.DeletePod("pod1")
 		c1.Outage.setOutage(false)
 		AssertWE(c1,
-			DesiredWE{Name: "autogen.c2.default.svc1"},
-			DesiredWE{Name: "autogen.c3.default.svc1"},
+			DesiredWE{Name: "autogen.c2.default.svc1", Locality: "region-c2/zone-c2"},
+			DesiredWE{Name: "autogen.c3.default.svc1", Locality: "region-c3/zone-c3"},
+			// pod remains with gateway locality
+			DesiredWE{
+				Name:     "autogenflat.c2.default.pod-locality.f2396f15c5c2",
+				Address:  "1.2.3.5",
+				Locality: "custom-region/custom-zone",
+			},
 		)
 	})
 }
@@ -975,6 +1015,10 @@ type Cluster struct {
 	Outage          *OutageInjector
 }
 
+func (c *Cluster) Locality() string {
+	return fmt.Sprintf("region-%s/zone-%s", c.ClusterName, c.ClusterName)
+}
+
 func (c *Cluster) CreateService(name string, global bool, ports []corev1.ServicePort) {
 	if global {
 		c.CreateServiceLabel(name, peering.ServiceScopeGlobal, ports)
@@ -1028,6 +1072,25 @@ func (c *Cluster) DeletePod(podName string) {
 }
 
 func (c *Cluster) CreatePod(serviceName string, podName string, podIP string) {
+	c.CreatePodWithLocality(serviceName, podName, podIP, "", "")
+}
+
+func (c *Cluster) CreatePodWithLocality(serviceName, podName, podIP, region, zone string) {
+	var nodeName string
+	if region != "" || zone == "" {
+		nodeName = podName + "-node"
+		clienttest.NewWriter[*corev1.Node](c.t, c.Kube).CreateOrUpdate(&corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: nodeName,
+				Labels: map[string]string{
+					"topology.kubernetes.io/zone":   zone,
+					"topology.kubernetes.io/region": region,
+				},
+			},
+			Spec: corev1.NodeSpec{},
+		})
+	}
+
 	clienttest.NewWriter[*corev1.Pod](c.t, c.Kube).CreateOrUpdateStatus(&corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      podName,
@@ -1035,6 +1098,9 @@ func (c *Cluster) CreatePod(serviceName string, podName string, podIP string) {
 			Labels: map[string]string{
 				"app": serviceName,
 			},
+		},
+		Spec: corev1.PodSpec{
+			NodeName: nodeName,
 		},
 		Status: corev1.PodStatus{
 			Conditions: []corev1.PodCondition{
@@ -1248,8 +1314,10 @@ func (c *Cluster) ConnectTo(other *Cluster) {
 			Name:      "peer-to-" + other.ClusterName,
 			Namespace: "istio-system",
 			Labels: map[string]string{
-				label.TopologyNetwork.Name: other.NetworkName,
-				label.TopologyCluster.Name: other.ClusterName,
+				label.TopologyNetwork.Name:      other.NetworkName,
+				label.TopologyCluster.Name:      other.ClusterName,
+				"topology.kubernetes.io/region": "region-" + other.ClusterName,
+				"topology.kubernetes.io/zone":   "zone-" + other.ClusterName,
 			},
 		},
 		Spec: k8s.GatewaySpec{
@@ -1356,8 +1424,9 @@ func fakeMeshHolder(clusterName string) mesh.Watcher {
 }
 
 type DesiredWE struct {
-	Name    string
-	Address string
+	Name     string
+	Address  string
+	Locality string
 }
 
 func AssertWE(c *Cluster, we ...DesiredWE) {
@@ -1368,7 +1437,7 @@ func AssertWE(c *Cluster, we ...DesiredWE) {
 	fetch := func() []DesiredWE {
 		return slices.SortBy(
 			slices.MapFilter(c.WorkloadEntries.List(peering.PeeringNamespace, klabels.Everything()), func(a *networkingclient.WorkloadEntry) *DesiredWE {
-				return &DesiredWE{a.Name, a.Spec.Address}
+				return &DesiredWE{a.Name, a.Spec.Address, a.Spec.Locality}
 			}),
 			func(a DesiredWE) string {
 				return a.Name
