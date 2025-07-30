@@ -676,7 +676,7 @@ func TestPeering(t *testing.T) {
 			DesiredWE{
 				Name: "autogenflat.c2.default.pod-locality.f2396f15c5c2",
 				Address: "1.2.3.5",
-				Locality: "custom-region/custom-zone"
+				Locality: "custom-region/custom-zone",
 			},
 		)
 		AssertSE(c1, DesiredSE{Name: "autogen.default.svc1"})
@@ -694,7 +694,7 @@ func TestPeering(t *testing.T) {
 			DesiredWE{
 				Name: "autogenflat.c2.default.pod-locality.f2396f15c5c2",
 				Address: "1.2.3.5",
-				Locality: "custom-region/custom-zone"
+				Locality: "custom-region/custom-zone",
 			},
 		)
 	})
