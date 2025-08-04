@@ -668,6 +668,7 @@ func (lb *ListenerBuilder) buildWaypointInboundHTTPFilters(svc *model.Service, c
 			ServerName:                 ph.ServerName,
 			ServerHeaderTransformation: ph.ServerHeaderTransformation,
 			GenerateRequestId:          ph.GenerateRequestID,
+			AppendXForwardedPort:       ph.XForwardedPort,
 		},
 		suppressEnvoyDebugHeaders: ph.SuppressDebugHeaders,
 		protocol:                  cc.port.Protocol,
@@ -961,6 +962,7 @@ func (lb *ListenerBuilder) translateWaypointRoute(
 		IsTLS:                     false,
 		IsHTTP3AltSvcHeaderNeeded: false,
 		Mesh:                      lb.push.Mesh,
+		Push:                      lb.push,
 		LookupService:             lb.serviceForHostname,
 		LookupDestinationCluster:  lb.getWaypointDestinationCluster,
 		LookupHash: func(destination *networking.HTTPRouteDestination) *networking.LoadBalancerSettings_ConsistentHashLB {
