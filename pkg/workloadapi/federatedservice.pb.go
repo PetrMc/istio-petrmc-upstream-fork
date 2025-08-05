@@ -62,9 +62,11 @@ type FederatedService struct {
 	// Information about a remote waypoint, if any
 	Waypoint *RemoteWaypoint `protobuf:"bytes,7,opt,name=waypoint,proto3" json:"waypoint,omitempty"`
 	// WaypointFor is specified only if the Service itself is a waypoint.
-	WaypointFor   string `protobuf:"bytes,9,opt,name=waypoint_for,json=waypointFor,proto3" json:"waypoint_for,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	WaypointFor string `protobuf:"bytes,9,opt,name=waypoint_for,json=waypointFor,proto3" json:"waypoint_for,omitempty"`
+	// ProtocolsByPort maps service port numbers to their protocols (e.g., 80 -> "HTTP", 443 -> "HTTPS")
+	ProtocolsByPort map[uint32]string `protobuf:"bytes,10,rep,name=protocols_by_port,json=protocolsByPort,proto3" json:"protocols_by_port,omitempty" protobuf_key:"varint,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *FederatedService) Reset() {
@@ -160,6 +162,13 @@ func (x *FederatedService) GetWaypointFor() string {
 	return ""
 }
 
+func (x *FederatedService) GetProtocolsByPort() map[uint32]string {
+	if x != nil {
+		return x.ProtocolsByPort
+	}
+	return nil
+}
+
 type RemoteWaypoint struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Name represents the name for the service.
@@ -220,7 +229,7 @@ var File_workloadapi_federatedservice_proto protoreflect.FileDescriptor
 
 const file_workloadapi_federatedservice_proto_rawDesc = "" +
 	"\n" +
-	"\"workloadapi/federatedservice.proto\x12\x0eistio.workload\x1a\x1egoogle/protobuf/wrappers.proto\x1a\x1aworkloadapi/workload.proto\"\x84\x03\n" +
+	"\"workloadapi/federatedservice.proto\x12\x0eistio.workload\x1a\x1egoogle/protobuf/wrappers.proto\x1a\x1aworkloadapi/workload.proto\"\xab\x04\n" +
 	"\x10FederatedService\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1c\n" +
 	"\tnamespace\x18\x02 \x01(\tR\tnamespace\x12\x1a\n" +
@@ -230,7 +239,12 @@ const file_workloadapi_federatedservice_proto_rawDesc = "" +
 	"\x05ports\x18\x05 \x03(\v2\x14.istio.workload.PortR\x05ports\x128\n" +
 	"\bcapacity\x18\x06 \x01(\v2\x1c.google.protobuf.UInt32ValueR\bcapacity\x12:\n" +
 	"\bwaypoint\x18\a \x01(\v2\x1e.istio.workload.RemoteWaypointR\bwaypoint\x12!\n" +
-	"\fwaypoint_for\x18\t \x01(\tR\vwaypointFor\"B\n" +
+	"\fwaypoint_for\x18\t \x01(\tR\vwaypointFor\x12a\n" +
+	"\x11protocols_by_port\x18\n" +
+	" \x03(\v25.istio.workload.FederatedService.ProtocolsByPortEntryR\x0fprotocolsByPort\x1aB\n" +
+	"\x14ProtocolsByPortEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\rR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"B\n" +
 	"\x0eRemoteWaypoint\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1c\n" +
 	"\tnamespace\x18\x02 \x01(\tR\tnamespaceB\x11Z\x0fpkg/workloadapib\x06proto3"
@@ -247,22 +261,24 @@ func file_workloadapi_federatedservice_proto_rawDescGZIP() []byte {
 	return file_workloadapi_federatedservice_proto_rawDescData
 }
 
-var file_workloadapi_federatedservice_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
+var file_workloadapi_federatedservice_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
 var file_workloadapi_federatedservice_proto_goTypes = []any{
 	(*FederatedService)(nil),       // 0: istio.workload.FederatedService
 	(*RemoteWaypoint)(nil),         // 1: istio.workload.RemoteWaypoint
-	(*Port)(nil),                   // 2: istio.workload.Port
-	(*wrapperspb.UInt32Value)(nil), // 3: google.protobuf.UInt32Value
+	nil,                            // 2: istio.workload.FederatedService.ProtocolsByPortEntry
+	(*Port)(nil),                   // 3: istio.workload.Port
+	(*wrapperspb.UInt32Value)(nil), // 4: google.protobuf.UInt32Value
 }
 var file_workloadapi_federatedservice_proto_depIdxs = []int32{
-	2, // 0: istio.workload.FederatedService.ports:type_name -> istio.workload.Port
-	3, // 1: istio.workload.FederatedService.capacity:type_name -> google.protobuf.UInt32Value
+	3, // 0: istio.workload.FederatedService.ports:type_name -> istio.workload.Port
+	4, // 1: istio.workload.FederatedService.capacity:type_name -> google.protobuf.UInt32Value
 	1, // 2: istio.workload.FederatedService.waypoint:type_name -> istio.workload.RemoteWaypoint
-	3, // [3:3] is the sub-list for method output_type
-	3, // [3:3] is the sub-list for method input_type
-	3, // [3:3] is the sub-list for extension type_name
-	3, // [3:3] is the sub-list for extension extendee
-	0, // [0:3] is the sub-list for field type_name
+	2, // 3: istio.workload.FederatedService.protocols_by_port:type_name -> istio.workload.FederatedService.ProtocolsByPortEntry
+	4, // [4:4] is the sub-list for method output_type
+	4, // [4:4] is the sub-list for method input_type
+	4, // [4:4] is the sub-list for extension type_name
+	4, // [4:4] is the sub-list for extension extendee
+	0, // [0:4] is the sub-list for field type_name
 }
 
 func init() { file_workloadapi_federatedservice_proto_init() }
@@ -277,7 +293,7 @@ func file_workloadapi_federatedservice_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_workloadapi_federatedservice_proto_rawDesc), len(file_workloadapi_federatedservice_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   2,
+			NumMessages:   3,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

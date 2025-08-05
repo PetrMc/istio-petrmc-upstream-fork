@@ -46,6 +46,8 @@ message FederatedService {
   RemoteWaypoint waypoint = 7;
   // WaypointFor is specified only if the Service itself is a waypoint.
   string waypoint_for = 9;
+  // ProtocolsByPort maps service port numbers to their protocols (e.g., 80 -> "HTTP", 443 -> "HTTPS")
+  map<uint32, string> protocols_by_port = 10;
 }
 
 message RemoteWaypoint  {

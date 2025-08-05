@@ -312,20 +312,44 @@ func (c *NetworkWatcher) pruneRemovedGateways() {
 	}
 }
 
-func mergeRemotePorts(existing []*networking.ServicePort, incoming map[string]uint32) []*networking.ServicePort {
+func mergeRemotePorts(remoteServices []*clientnetworking.WorkloadEntry, federatedServices []*RemoteFederatedService) []*networking.ServicePort {
 	pmap := map[uint32]uint32{}
-	for _, t := range existing {
-		pmap[t.Number] = t.TargetPort
+	protocolMap := map[uint32]string{}
+
+	// Collect protocols from all federated services
+	// If federated services from different clusters disagree, fallback to TCP
+	for _, fs := range federatedServices {
+		if fs != nil && fs.Service != nil {
+			for port, protocol := range fs.Service.ProtocolsByPort {
+				if protocol != "" {
+					if existing, ok := protocolMap[port]; ok && existing != protocol {
+						// Protocol conflict detected, force TCP
+						protocolMap[port] = "TCP"
+						log.Warnf("Protocol conflict on %s for port %d, forcing TCP", fs.Service.Hostname, port)
+					} else {
+						protocolMap[port] = protocol
+					}
+				}
+			}
+		}
 	}
-	// New one arbitrarily takes precedence
-	for _, t := range incoming {
-		pmap[t] = t
+
+	// Merge all remote service port number mappings based on the generated WorkloadEntries
+	for _, remote := range remoteServices {
+		for _, t := range remote.Spec.Ports {
+			pmap[t] = t
+		}
 	}
+
 	res := []*networking.ServicePort{}
 	for k, v := range pmap {
+		protocol := protocolMap[k]
+		if protocol == "" {
+			protocol = "TCP" // Default to TCP if no protocol is specified
+		}
 		res = append(res, &networking.ServicePort{
 			Number:     k,
-			Protocol:   "TCP", // TODO? For L4 only it doesn't matter, but likely we will need to express the protocol on the wire.
+			Protocol:   protocol,
 			Name:       fmt.Sprintf("port-%d", k),
 			TargetPort: v,
 		})

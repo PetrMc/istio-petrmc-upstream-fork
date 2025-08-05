@@ -87,6 +87,14 @@ func (a *index) FederatedServicesCollection(
 		}
 
 		s := svc.Service
+
+		protocolsByPort := make(map[uint32]string, len(svc.ProtocolsByPort))
+		for port, protocol := range svc.ProtocolsByPort {
+			if !protocol.IsUnsupported() {
+				protocolsByPort[uint32(port)] = protocol.String()
+			}
+		}
+
 		fs := &workloadapi.FederatedService{
 			Name:                s.Name,
 			Namespace:           s.Namespace,
@@ -96,6 +104,7 @@ func (a *index) FederatedServicesCollection(
 			Capacity:            wrappers.UInt32(bucket(workloadCount)),
 			TrafficDistribution: svc.TrafficDistribution.String(),
 			WaypointFor:         waypointFor,
+			ProtocolsByPort:     protocolsByPort,
 		}
 		if s.Waypoint != nil {
 			fs.Waypoint = &workloadapi.RemoteWaypoint{

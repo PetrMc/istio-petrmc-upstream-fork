@@ -606,13 +606,26 @@ func (c *NetworkWatcher) reconcileServiceEntry(name types.NamespacedName) error 
 	}
 	se.Annotations = annos
 
+	// Collect all federated services for this service
+	var federatedServices []*RemoteFederatedService
+	for _, remote := range remoteServices {
+		if clusterID := remote.Labels[SourceClusterLabel]; clusterID != "" {
+			if pc := c.getClusterByID(cluster.ID(clusterID)); pc != nil {
+				ns := remote.Labels[ParentServiceNamespaceLabel]
+				serviceName := remote.Labels[ParentServiceLabel]
+				key := fmt.Sprintf("%s/%s/%s", clusterID, ns, serviceName)
+				if fs := pc.federatedServices.GetKey(key); fs != nil {
+					federatedServices = append(federatedServices, fs)
+				}
+			}
+		}
+	}
+
 	if localService != nil {
 		se.Spec.Ports = convertPorts(localService.Spec.Ports)
 		se.Spec.WorkloadSelector = &networking.WorkloadSelector{Labels: localService.Spec.Selector}
 	} else {
-		for _, remote := range remoteServices {
-			se.Spec.Ports = mergeRemotePorts(se.Spec.Ports, remote.Spec.Ports)
-		}
+		se.Spec.Ports = mergeRemotePorts(remoteServices, federatedServices)
 		se.Spec.WorkloadSelector = &networking.WorkloadSelector{Labels: map[string]string{
 			ParentServiceLabel:          name.Name,
 			ParentServiceNamespaceLabel: name.Namespace,

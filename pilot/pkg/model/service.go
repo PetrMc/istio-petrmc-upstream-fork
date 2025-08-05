@@ -1181,6 +1181,13 @@ type ServiceInfo struct {
 	LabelSelector LabelSelector
 	// PortNames provides a mapping of ServicePort -> port names. Note these are only used internally, not sent over XDS
 	PortNames map[int32]ServicePortName
+
+	// SOLO
+	// ProtocolsByPort, needed specifically for FederatedService to propagate protocol information
+	// This only needs to be populated for ServiceInfo based on Service, not from ServiceEntry.
+	ProtocolsByPort map[int32]protocol.Instance
+	// END SOLO
+
 	// Source is the type that introduced this service.
 	Source TypedObject
 	// Scope of the service - either local or global based on namespace or service label matching

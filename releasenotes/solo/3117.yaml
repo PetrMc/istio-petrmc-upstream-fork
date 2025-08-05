@@ -1,0 +1,15 @@
+apiVersion: release-notes/v2
+
+kind: bug-fix
+
+area: traffic-management
+
+issue:
+  - https://github.com/solo-io/istio/issues/3127
+
+releaseNotes:
+- |
+  **Fixed** if a Service only exists in the remote cluster, the local cluster
+  will now be able to apply L7 policy via a local sidecar or waypoint, as long
+  as the remote Service properly declares an L7 protocol via the port name or
+  appProtocol.

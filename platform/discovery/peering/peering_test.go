@@ -186,7 +186,7 @@ func TestPeering(t *testing.T) {
 		AssertWEPorts(c1, c2Svc1Name, map[string]uint32{"port-80": 80, "port-81": 81, "port-92": 92, "port-82": 82})
 		AssertSE(c1, DesiredSE{Name: defaultSvc1Name})
 		AssertSEPorts(c1, defaultSvc1Name, []*networking.ServicePort{
-			{Name: "port-80", Number: 80, Protocol: "TCP", TargetPort: 80},
+			{Name: "port-80", Number: 80, Protocol: "HTTP", TargetPort: 80},
 			{Name: "port-81", Number: 81, Protocol: "TCP", TargetPort: 81},
 			{Name: "port-82", Number: 82, Protocol: "TCP", TargetPort: 82},
 			{Name: "port-92", Number: 92, Protocol: "TCP", TargetPort: 92},
@@ -314,7 +314,7 @@ func TestPeering(t *testing.T) {
 		AssertWEPorts(c1, c2Svc1Name, map[string]uint32{"port-80": 80, "port-81": 81, "port-82": 82, "port-92": 92})
 		AssertSE(c1, DesiredSE{Name: defaultSvc1Name})
 		AssertSEPorts(c1, defaultSvc1Name, []*networking.ServicePort{
-			{Name: "port-80", Number: 80, Protocol: "TCP", TargetPort: 80},
+			{Name: "port-80", Number: 80, Protocol: "HTTP", TargetPort: 80},
 			{Name: "port-81", Number: 81, Protocol: "TCP", TargetPort: 81},
 			{Name: "port-82", Number: 82, Protocol: "TCP", TargetPort: 82},
 			{Name: "port-92", Number: 92, Protocol: "TCP", TargetPort: 92},
@@ -602,7 +602,7 @@ func TestPeering(t *testing.T) {
 		AssertWEPorts(c1, c3Svc1Name, map[string]uint32{"port-80": 80, "port-81": 81, "port-82": 82, "port-93": 93})
 		AssertSE(c1, DesiredSE{Name: defaultSvc1Name})
 		AssertSEPorts(c1, defaultSvc1Name, []*networking.ServicePort{
-			{Name: "port-80", Number: 80, Protocol: "TCP", TargetPort: 80},
+			{Name: "port-80", Number: 80, Protocol: "HTTP", TargetPort: 80},
 			{Name: "port-81", Number: 81, Protocol: "TCP", TargetPort: 81},
 			{Name: "port-82", Number: 82, Protocol: "TCP", TargetPort: 82},
 			{Name: "port-92", Number: 92, Protocol: "TCP", TargetPort: 92},
@@ -622,7 +622,7 @@ func TestPeering(t *testing.T) {
 		AssertWEPorts(c1, c3Svc1Name, map[string]uint32{"port-80": 80, "port-81": 81, "port-82": 82, "port-93": 93})
 		AssertSE(c1, DesiredSE{Name: defaultSvc1Name})
 		AssertSEPorts(c1, defaultSvc1Name, []*networking.ServicePort{
-			{Name: "port-80", Number: 80, Protocol: "TCP", TargetPort: 80},
+			{Name: "port-80", Number: 80, Protocol: "HTTP", TargetPort: 80},
 			{Name: "port-81", Number: 81, Protocol: "TCP", TargetPort: 81},
 			{Name: "port-82", Number: 82, Protocol: "TCP", TargetPort: 82},
 			{Name: "port-92", Number: 92, Protocol: "TCP", TargetPort: 92},
@@ -1635,4 +1635,43 @@ func (t *testStore) Get(typ config.GroupVersionKind, name, namespace string) *co
 		Spec:   &gw.Spec,
 		Status: &gw.Status,
 	}
+}
+
+func TestProtocolPropagation(t *testing.T) {
+	c1 := NewCluster(t, "c1", "c1")
+	c2 := NewCluster(t, "c2", "c2")
+	c1.ConnectTo(c2)
+
+	// Create a service with mixed protocols on c2 only
+	mixedProtocolPorts := []corev1.ServicePort{
+		{
+			Port:        80,
+			Protocol:    "TCP",
+			Name:        "http",
+			AppProtocol: ptr.Of("HTTP"),
+		},
+		{
+			Port:        9090,
+			Protocol:    "TCP",
+			Name:        "grpc",
+			AppProtocol: ptr.Of("GRPC"),
+		},
+		{
+			Port:     5000,
+			Protocol: "TCP",
+			Name:     "tcp-port",
+		},
+	}
+
+	// Service exists only on c2, not on c1
+	c2.CreateService("mixed-proto-svc", true, mixedProtocolPorts)
+
+	// Verify that the generated ServiceEntry on c1 has the correct protocols
+	seName := "autogen.default.mixed-proto-svc"
+	AssertSE(c1, DesiredSE{Name: seName})
+	AssertSEPorts(c1, seName, []*networking.ServicePort{
+		{Name: "port-80", Protocol: "HTTP", Number: 80, TargetPort: 80},
+		{Name: "port-5000", Protocol: "TCP", Number: 5000, TargetPort: 5000},
+		{Name: "port-9090", Protocol: "GRPC", Number: 9090, TargetPort: 9090},
+	})
 }

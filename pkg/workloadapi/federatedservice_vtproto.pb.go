@@ -74,6 +74,18 @@ func (this *FederatedService) EqualVT(that *FederatedService) bool {
 	if this.WaypointFor != that.WaypointFor {
 		return false
 	}
+	if len(this.ProtocolsByPort) != len(that.ProtocolsByPort) {
+		return false
+	}
+	for i, vx := range this.ProtocolsByPort {
+		vy, ok := that.ProtocolsByPort[i]
+		if !ok {
+			return false
+		}
+		if vx != vy {
+			return false
+		}
+	}
 	return string(this.unknownFields) == string(that.unknownFields)
 }
 
@@ -135,6 +147,23 @@ func (m *FederatedService) MarshalToSizedBufferVTStrict(dAtA []byte) (int, error
 	if m.unknownFields != nil {
 		i -= len(m.unknownFields)
 		copy(dAtA[i:], m.unknownFields)
+	}
+	if len(m.ProtocolsByPort) > 0 {
+		for k := range m.ProtocolsByPort {
+			v := m.ProtocolsByPort[k]
+			baseI := i
+			i -= len(v)
+			copy(dAtA[i:], v)
+			i = protohelpers.EncodeVarint(dAtA, i, uint64(len(v)))
+			i--
+			dAtA[i] = 0x12
+			i = protohelpers.EncodeVarint(dAtA, i, uint64(k))
+			i--
+			dAtA[i] = 0x8
+			i = protohelpers.EncodeVarint(dAtA, i, uint64(baseI-i))
+			i--
+			dAtA[i] = 0x52
+		}
 	}
 	if len(m.WaypointFor) > 0 {
 		i -= len(m.WaypointFor)
@@ -307,6 +336,14 @@ func (m *FederatedService) SizeVT() (n int) {
 	l = len(m.WaypointFor)
 	if l > 0 {
 		n += 1 + l + protohelpers.SizeOfVarint(uint64(l))
+	}
+	if len(m.ProtocolsByPort) > 0 {
+		for k, v := range m.ProtocolsByPort {
+			_ = k
+			_ = v
+			mapEntrySize := 1 + protohelpers.SizeOfVarint(uint64(k)) + 1 + len(v) + protohelpers.SizeOfVarint(uint64(len(v)))
+			n += mapEntrySize + 1 + protohelpers.SizeOfVarint(uint64(mapEntrySize))
+		}
 	}
 	n += len(m.unknownFields)
 	return n

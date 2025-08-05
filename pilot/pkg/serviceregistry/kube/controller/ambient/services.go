@@ -38,6 +38,8 @@ import (
 	"istio.io/istio/pkg/cluster"
 	"istio.io/istio/pkg/config"
 	"istio.io/istio/pkg/config/host"
+	configkube "istio.io/istio/pkg/config/kube"
+	"istio.io/istio/pkg/config/protocol"
 	"istio.io/istio/pkg/config/schema/gvk"
 	"istio.io/istio/pkg/config/schema/kubetypes"
 	"istio.io/istio/pkg/kube/controllers"
@@ -197,11 +199,13 @@ func serviceServiceBuilder(
 			return nil
 		}
 		portNames := map[int32]model.ServicePortName{}
+		protocols := make(map[int32]protocol.Instance, len(s.Spec.Ports))
 		for _, p := range s.Spec.Ports {
 			portNames[p.Port] = model.ServicePortName{
 				PortName:       p.Name,
 				TargetPortName: p.TargetPort.StrVal,
 			}
+			protocols[p.Port] = configkube.ConvertProtocol(p.Port, p.Name, p.Protocol, p.AppProtocol)
 		}
 		waypointStatus := model.WaypointBindingStatus{}
 		waypoint, wperr := fetchWaypointForService(ctx, waypoints, namespaces, services, s.ObjectMeta)
@@ -221,6 +225,7 @@ func serviceServiceBuilder(
 		return precomputeServicePtr(&model.ServiceInfo{
 			Service:             svc,
 			PortNames:           portNames,
+			ProtocolsByPort:     protocols,
 			LabelSelector:       model.NewSelector(s.Spec.Selector),
 			Source:              MakeSource(s),
 			Waypoint:            waypointStatus,
