@@ -9,7 +9,9 @@ package ambient
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -22,7 +24,13 @@ import (
 	"istio.io/istio/pkg/test/util/retry"
 )
 
+// rng is not used for security, just for some randomized suffixes
+// nolint: gosec
+var rnd = rand.New(rand.NewSource(time.Now().UnixNano()))
+
 func testNamespacedAutoWaypoint(t framework.TestContext) {
+	r := rnd.Intn(99999)
+	namespace := fmt.Sprintf("solo-auto-waypoint-namespace-%d", r)
 	_, err := t.Clusters().
 		Default().
 		Kube().
@@ -30,7 +38,7 @@ func testNamespacedAutoWaypoint(t framework.TestContext) {
 		Namespaces().
 		Create(context.Background(), &corev1.Namespace{
 			ObjectMeta: metav1.ObjectMeta{
-				Name: "solo-auto-waypoint-namespace",
+				Name: namespace,
 				Labels: map[string]string{
 					label.IoIstioUseWaypoint.Name: "auto",
 				},
@@ -42,7 +50,7 @@ func testNamespacedAutoWaypoint(t framework.TestContext) {
 			Default().
 			GatewayAPI().
 			GatewayV1().
-			Gateways("solo-auto-waypoint-namespace").
+			Gateways(namespace).
 			Get(context.Background(), "auto", metav1.GetOptions{})
 		if err != nil {
 			return err
@@ -55,10 +63,20 @@ func testNamespacedAutoWaypoint(t framework.TestContext) {
 		}
 		return nil
 	})
+	t.CleanupConditionally(func() {
+		t.Clusters().
+			Default().
+			Kube().
+			CoreV1().
+			Namespaces().
+			Delete(context.Background(), namespace, metav1.DeleteOptions{})
+	})
 }
 
 // This could very plausibly be moved into the normal test setup since it does not require it's own namespace to run per se
 func testServiceAutoWaypoint(t framework.TestContext) {
+	r := rnd.Intn(99999)
+	namespace := fmt.Sprintf("solo-service-auto-waypoint-namespace-%d", r)
 	_, err := t.Clusters().
 		Default().
 		Kube().
@@ -66,7 +84,7 @@ func testServiceAutoWaypoint(t framework.TestContext) {
 		Namespaces().
 		Create(context.Background(), &corev1.Namespace{
 			ObjectMeta: metav1.ObjectMeta{
-				Name: "solo-service-auto-waypoint-namespace",
+				Name: namespace,
 			},
 		}, metav1.CreateOptions{})
 	assert.NoError(t, err)
@@ -74,7 +92,7 @@ func testServiceAutoWaypoint(t framework.TestContext) {
 		Default().
 		Kube().
 		CoreV1().
-		Services("solo-service-auto-waypoint-namespace").
+		Services(namespace).
 		Create(context.Background(), &corev1.Service{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: "solo-service-auto-waypoint",
@@ -99,7 +117,7 @@ func testServiceAutoWaypoint(t framework.TestContext) {
 			Default().
 			GatewayAPI().
 			GatewayV1().
-			Gateways("solo-service-auto-waypoint-namespace").
+			Gateways(namespace).
 			Get(context.Background(), "auto", metav1.GetOptions{})
 		if err != nil {
 			return err
@@ -112,9 +130,19 @@ func testServiceAutoWaypoint(t framework.TestContext) {
 		}
 		return nil
 	})
+	t.CleanupConditionally(func() {
+		t.Clusters().
+			Default().
+			Kube().
+			CoreV1().
+			Namespaces().
+			Delete(context.Background(), namespace, metav1.DeleteOptions{})
+	})
 }
 
 func testServiceEntryAutoWaypoint(t framework.TestContext) {
+	r := rnd.Intn(99999)
+	namespace := fmt.Sprintf("solo-service-entry-auto-waypoint-namespace-%d", r)
 	_, err := t.Clusters().
 		Default().
 		Kube().
@@ -122,7 +150,7 @@ func testServiceEntryAutoWaypoint(t framework.TestContext) {
 		Namespaces().
 		Create(context.Background(), &corev1.Namespace{
 			ObjectMeta: metav1.ObjectMeta{
-				Name: "solo-service-entry-auto-waypoint-namespace",
+				Name: namespace,
 			},
 		}, metav1.CreateOptions{})
 	assert.NoError(t, err)
@@ -130,7 +158,7 @@ func testServiceEntryAutoWaypoint(t framework.TestContext) {
 		Default().
 		Istio().
 		NetworkingV1().
-		ServiceEntries("solo-service-entry-auto-waypoint-namespace").
+		ServiceEntries(namespace).
 		Create(context.Background(), &networkingv1.ServiceEntry{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: "solo-service-entry-auto-waypoint",
@@ -150,7 +178,7 @@ func testServiceEntryAutoWaypoint(t framework.TestContext) {
 			Default().
 			GatewayAPI().
 			GatewayV1().
-			Gateways("solo-service-entry-auto-waypoint-namespace").
+			Gateways(namespace).
 			Get(context.Background(), "auto", metav1.GetOptions{})
 		if err != nil {
 			return err
@@ -162,6 +190,14 @@ func testServiceEntryAutoWaypoint(t framework.TestContext) {
 			return fmt.Errorf("no addresses found for waypoint %s/%s", waypoint.Namespace, waypoint.Name)
 		}
 		return nil
+	})
+	t.CleanupConditionally(func() {
+		t.Clusters().
+			Default().
+			Kube().
+			CoreV1().
+			Namespaces().
+			Delete(context.Background(), namespace, metav1.DeleteOptions{})
 	})
 }
 
