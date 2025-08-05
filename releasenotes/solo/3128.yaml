@@ -1,0 +1,18 @@
+apiVersion: release-notes/v2
+
+kind: feature
+
+area: istioctl
+
+issue:
+  - https://github.com/solo-io/istio/issues/3123
+
+releaseNotes:
+- |
+  **Improved** the `istioctl multicluster check` command to use the new `gloo.solo.io/PeerConnected` gateway condition which accurately reflects the current connected status of istiod to remote peers.
+
+  Additional QoL changes:
+    - **Added** a flag to pass in multiple contexts and run checks against all of them.
+    - **Fixed** the pod check being inconsistently ordered.
+
+
