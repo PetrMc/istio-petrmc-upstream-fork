@@ -67,6 +67,8 @@ values:
     terminationGracePeriodSeconds: 5
     env:
       SECRET_TTL: 5m
+    podLabels:
+      networking.istio.io/tunnel: "http"
   meshConfig:
     defaultConfig:
       tracing: {} # disabled MeshConfig tracing options
@@ -97,6 +99,8 @@ values:
     terminationGracePeriodSeconds: 5
     env:
       SECRET_TTL: 5m
+    podLabels:
+      networking.istio.io/tunnel: "http"
   meshConfig:
     defaultConfig:
       tracing: {} # disabled MeshConfig tracing options
