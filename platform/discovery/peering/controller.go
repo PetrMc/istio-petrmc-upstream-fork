@@ -139,6 +139,7 @@ func (c *NetworkWatcher) reconcileGateway(name types.NamespacedName) error {
 		cluster := c.remoteClusters[oldClusterID]
 		oldNetworkID := cluster.networkName
 		if oldClusterID != peer.Cluster || oldNetworkID != peer.Network {
+			// total cluster update, id or network changed
 			log.Infof(
 				"cluster changed from %v/%v to %v/%v",
 				oldClusterID, oldNetworkID,
@@ -148,8 +149,36 @@ func (c *NetworkWatcher) reconcileGateway(name types.NamespacedName) error {
 			delete(c.remoteClusters, oldClusterID)
 			c.enqueueStatusUpdate(name)
 		} else {
-			// TODO: respect other changes other than just the cluster/network name
-			log.Infof("gateway changed but not in a meaningful way")
+			// partial cluster update
+			cluster.mu.Lock()
+			defer cluster.mu.Unlock()
+
+			changed := false
+			if cluster.locality != peer.Locality {
+				log.Infof(
+					"gateway for cluster %s locality changed from %v to %v",
+					peer.Cluster,
+					cluster.locality, peer.Locality,
+				)
+				cluster.locality = peer.Locality
+				changed = true
+			}
+
+			// TODO handle other changes to the cluster that affect the
+			// services/workloads from that cluster or use krt to automatically
+			// detect dependencies and changes
+			if changed {
+				// update all the generated resources for this cluster
+				c.queue.Add(typedNamespace{
+					NamespacedName: types.NamespacedName{
+						Name: cluster.clusterID.String(),
+					},
+					kind: Cluster,
+				})
+			} else {
+				log.Infof("gateway changed but not in a meaningful way")
+			}
+
 			return nil
 		}
 	}

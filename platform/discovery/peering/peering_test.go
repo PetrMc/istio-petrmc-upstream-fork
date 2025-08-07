@@ -698,6 +698,29 @@ func TestPeering(t *testing.T) {
 			},
 		)
 	})
+
+	t.Run("updates workload entry locality when gateway locality changes", func(t *testing.T) {
+		// two clusters, cross-network
+		c1 := NewCluster(t, "c1", "n1")
+		c2 := NewCluster(t, "c2", "n2")
+		c1.ConnectTo(c2)
+		c2.ConnectTo(c1)
+
+		c1.CreateService("svc1", true, nil)
+		c2.CreateService("svc2", true, nil)
+
+		// initial WEs have locality from the istio-remote gateway
+		AssertWE(c1, DesiredWE{Name: "autogen.c2.default.svc2", Locality: c2.Locality()})
+		AssertWE(c2, DesiredWE{Name: "autogen.c1.default.svc1", Locality: c1.Locality()})
+
+		// istio-remote locality labels changed
+		c2.RegionOverride = "updated-region"
+		c2.ZoneOverride = "updated-zone"
+		c1.ConnectTo(c2)
+
+		// workload entry gets updated locality
+		AssertWE(c1, DesiredWE{Name: "autogen.c2.default.svc2", Locality: "updated-region/updated-zone"})
+	})
 }
 
 func init() {
@@ -1003,20 +1026,29 @@ func init() {
 }
 
 type Cluster struct {
-	Peering         *peering.NetworkWatcher
-	Kube            kube.Client
-	Discovery       *xds.FakeDiscoveryServer
-	ClusterName     string
-	NetworkName     string
-	t               test.Failer
-	ServiceEntries  clienttest.TestClient[*networkingclient.ServiceEntry]
-	WorkloadEntries clienttest.TestClient[*networkingclient.WorkloadEntry]
-	Gateways        clienttest.TestClient[*k8sbeta.Gateway]
-	Outage          *OutageInjector
+	Peering                      *peering.NetworkWatcher
+	Kube                         kube.Client
+	Discovery                    *xds.FakeDiscoveryServer
+	ClusterName                  string
+	NetworkName                  string
+	t                            test.Failer
+	ServiceEntries               clienttest.TestClient[*networkingclient.ServiceEntry]
+	WorkloadEntries              clienttest.TestClient[*networkingclient.WorkloadEntry]
+	Gateways                     clienttest.TestClient[*k8sbeta.Gateway]
+	Outage                       *OutageInjector
+	ZoneOverride, RegionOverride string
+}
+
+func (c *Cluster) Zone() string {
+	return ptr.NonEmptyOrDefault(c.ZoneOverride, "zone-"+c.ClusterName)
+}
+
+func (c *Cluster) Region() string {
+	return ptr.NonEmptyOrDefault(c.RegionOverride, "region-"+c.ClusterName)
 }
 
 func (c *Cluster) Locality() string {
-	return fmt.Sprintf("region-%s/zone-%s", c.ClusterName, c.ClusterName)
+	return c.Region() + "/" + c.Zone()
 }
 
 func (c *Cluster) CreateService(name string, global bool, ports []corev1.ServicePort) {
@@ -1316,8 +1348,8 @@ func (c *Cluster) ConnectTo(other *Cluster) {
 			Labels: map[string]string{
 				label.TopologyNetwork.Name:      other.NetworkName,
 				label.TopologyCluster.Name:      other.ClusterName,
-				"topology.kubernetes.io/region": "region-" + other.ClusterName,
-				"topology.kubernetes.io/zone":   "zone-" + other.ClusterName,
+				"topology.kubernetes.io/region": other.Region(),
+				"topology.kubernetes.io/zone":   other.Zone(),
 			},
 		},
 		Spec: k8s.GatewaySpec{

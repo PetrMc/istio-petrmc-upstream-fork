@@ -1,0 +1,16 @@
+apiVersion: release-notes/v2
+
+kind: bug-fix
+
+area: traffic-management
+
+issue:
+  - https://github.com/solo-io/istio/issues/3165
+
+releaseNotes:
+- |
+  **Fixed** locality information was not being propagated for peered
+  multi-cluster resources when the `istio-remote` Gateway's
+  `topology.kubernetes.io/zone` and `topology.kubernetes.io/region` labels
+  are updated without restarting istiod. Now, the labels changing will trigger
+  an update without a restart.
