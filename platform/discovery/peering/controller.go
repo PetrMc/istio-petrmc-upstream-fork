@@ -514,7 +514,7 @@ func (c *NetworkWatcher) reconcileGatewayWorkloadEntry(tn types.NamespacedName) 
 	// Indicate we support tunneling. This is for Envoy dataplanes mostly.
 	labels[model.TunnelLabel] = model.TunnelHTTP
 	fss := fs.Service
-	if fss.Waypoint != nil {
+	if fss.Waypoint != nil && fss.Waypoint.Name != "" && fss.Waypoint.Namespace != "" {
 		labels[RemoteWaypointLabel] = AutogenHostname(fss.Waypoint.Name, fss.Waypoint.Namespace)
 	}
 

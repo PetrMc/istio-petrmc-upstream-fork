@@ -246,6 +246,7 @@ func NewController(kubeClient kubelib.Client, options Options) *Controller {
 		nodeInfoMap:              make(map[string]kubernetesNode),
 		workloadInstancesIndex:   workloadinstances.NewIndex(),
 		initialSyncTimedout:      atomic.NewBool(false),
+		ambientIndex:             ambient.NoopIndex{}, // prevent nil pointer dereference
 
 		configCluster: options.ConfigCluster,
 	}
@@ -317,7 +318,6 @@ func NewController(kubeClient kubelib.Client, options Options) *Controller {
 			},
 		})
 	}
-
 	c.exports = newServiceExportCache(c)
 	c.imports = newServiceImportCache(c)
 

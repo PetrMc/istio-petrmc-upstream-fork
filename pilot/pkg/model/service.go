@@ -1057,6 +1057,8 @@ func waypointKeyForProxy(node *Proxy, externalAddresses bool) WaypointKey {
 	return key
 }
 
+var _ AmbientIndexes = NoopAmbientIndexes{}
+
 // NoopAmbientIndexes provides an implementation of AmbientIndexes that always returns nil, to easily "skip" it.
 type NoopAmbientIndexes struct{}
 
