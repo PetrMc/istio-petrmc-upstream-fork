@@ -17,6 +17,7 @@ import (
 	"istio.io/istio/pkg/backoff"
 	"istio.io/istio/pkg/config/schema/gvr"
 	"istio.io/istio/pkg/licensing"
+	"istio.io/istio/pkg/log"
 	"istio.io/istio/pkg/version"
 	"istio.io/istio/platform/discovery/peering"
 )
@@ -27,6 +28,10 @@ func (s *Server) initPlatformIntegrations(args *PilotArgs) {
 
 func (s *Server) initPeeringDiscovery(args *PilotArgs) {
 	if !features.EnablePeering {
+		return
+	}
+	if !features.EnableAmbient {
+		log.Warnf("peering discovery is disabled because ambient controllers are not enabled")
 		return
 	}
 	if !licensing.CheckLicense(licensing.FeatureMultiCluster, features.EnablePeeringExplicitly) {
