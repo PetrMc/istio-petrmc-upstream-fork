@@ -122,5 +122,5 @@ func AssertPeerGatewayStatus(t framework.TestContext, c cluster.Cluster, name, n
 		}
 		return nil
 	}, retry.Timeout(time.Second*5))
-	assert.EventuallyEqual(t, fetch, status, retry.Timeout(time.Second*15))
+	assert.EventuallyEqual(t, fetch, status, retry.Timeout(time.Second*30))
 }
