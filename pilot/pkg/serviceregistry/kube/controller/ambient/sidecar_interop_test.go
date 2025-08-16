@@ -45,6 +45,10 @@ func TestWaypointInterop(t *testing.T) {
 			enableFeature: &features.EnableAmbientMultiNetwork,
 			serviceLabels: map[string]string{"istio.io/global": "true"},
 		},
+		{
+			name:          "SidecarWaypointInterop",
+			enableFeature: &features.EnableSidecarWaypointInterop,
+		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			if tt.enableFeature != nil {

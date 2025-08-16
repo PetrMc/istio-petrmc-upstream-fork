@@ -60,11 +60,12 @@ func RegisterEdsShim(
 	// Also, this flag shouldn't change once initialized, so this
 	// has slightly better cache locality.
 	multiNetworkEnabled := features.EnableAmbientMultiNetwork
+	sidecarWaypointInterop := features.EnableSidecarWaypointInterop
 	ServiceEds := krt.NewCollection(
 		Services,
 		func(ctx krt.HandlerContext, svc model.ServiceInfo) *serviceEDS {
 			useWaypoint := ingressUseWaypoint(svc, krt.FetchOne(ctx, Namespaces, krt.FilterKey(svc.Service.Namespace)))
-			if !useWaypoint && !features.EnableSidecarWaypointInterop && (!multiNetworkEnabled || svc.Scope != model.Global) {
+			if !useWaypoint && !sidecarWaypointInterop && (!multiNetworkEnabled || svc.Scope != model.Global) {
 				// Currently, we only need this for ingress/east west gateway -> waypoint usage
 				// If we extend this to sidecars, etc we can drop this.
 				return nil
