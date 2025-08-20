@@ -1,0 +1,13 @@
+apiVersion: release-notes/v2
+
+kind: bug-fix
+
+area: traffic-management
+
+issue:
+  - https://github.com/solo-io/istio/issues/3232
+
+releaseNotes:
+- |
+  **Fixed** ambient workloads attempting to send HBONE to plaintext workloads on other clusters
+  when using flat-network multicluster.

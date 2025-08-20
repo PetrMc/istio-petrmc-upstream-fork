@@ -27,6 +27,7 @@ import (
 	k8s "sigs.k8s.io/gateway-api/apis/v1"
 	k8sbeta "sigs.k8s.io/gateway-api/apis/v1beta1"
 
+	"istio.io/api/annotation"
 	"istio.io/api/label"
 	networking "istio.io/api/networking/v1alpha3"
 	networkingclient "istio.io/client-go/pkg/apis/networking/v1"
@@ -661,7 +662,7 @@ func TestPeering(t *testing.T) {
 		// c3 is cross-network
 		c2.CreateService("svc1", true, nil)
 		c2.CreatePod("svc1", "pod1", "1.2.3.4")
-		c2.CreatePodWithLocality("svc1", "pod-locality", "1.2.3.5", "custom-region", "custom-zone")
+		c2.CreatePodWithLocality("svc1", "pod-locality", "1.2.3.5", "custom-region", "custom-zone", true)
 		c3.CreateService("svc1", true, nil)
 		c3.CreatePod("svc1", "pod2", "2.3.4.5")
 
@@ -697,6 +698,32 @@ func TestPeering(t *testing.T) {
 				Locality: "custom-region/custom-zone",
 			},
 		)
+	})
+	t.Run("flat network tunnel mode", func(t *testing.T) {
+		c1 := NewCluster(t, "c1", "net1")
+		c2 := NewCluster(t, "c2", "net1")
+		c1.ConnectTo(c2)
+		c2.ConnectTo(c1)
+
+		// svc on both
+		c1.CreateService("svc1", true, nil)
+		c2.CreateService("svc1", true, nil)
+
+		// in c2, the pod is a sidecar
+		c1.CreatePod("svc1", "pod1", "1.2.3.4")
+		c2.CreateSidecarPod("svc1", "pod2", "4.3.2.1")
+
+		AssertWE(c1,
+			DesiredWE{Name: "autogen.c2.default.svc1", Locality: "region-c2/zone-c2"},
+			DesiredWE{Name: "autogenflat.c2.default.pod2.f2396f15c5c2", Address: "4.3.2.1", Locality: "region-c2/zone-c2", NonHBONE: true},
+		)
+		AssertSE(c1, DesiredSE{Name: "autogen.default.svc1"})
+
+		AssertWE(c2,
+			DesiredWE{Name: "autogen.c1.default.svc1", Locality: "region-c1/zone-c1"},
+			DesiredWE{Name: "autogenflat.c1.default.pod1.f2396f15c5c2", Address: "1.2.3.4", Locality: "region-c1/zone-c1"},
+		)
+		AssertSE(c2, DesiredSE{Name: "autogen.default.svc1"})
 	})
 
 	t.Run("updates workload entry locality when gateway locality changes", func(t *testing.T) {
@@ -1104,10 +1131,14 @@ func (c *Cluster) DeletePod(podName string) {
 }
 
 func (c *Cluster) CreatePod(serviceName string, podName string, podIP string) {
-	c.CreatePodWithLocality(serviceName, podName, podIP, "", "")
+	c.CreatePodWithLocality(serviceName, podName, podIP, "", "", true)
 }
 
-func (c *Cluster) CreatePodWithLocality(serviceName, podName, podIP, region, zone string) {
+func (c *Cluster) CreateSidecarPod(serviceName string, podName string, podIP string) {
+	c.CreatePodWithLocality(serviceName, podName, podIP, "", "", false)
+}
+
+func (c *Cluster) CreatePodWithLocality(serviceName, podName, podIP, region, zone string, ambient bool) {
 	var nodeName string
 	if region != "" || zone == "" {
 		nodeName = podName + "-node"
@@ -1122,14 +1153,18 @@ func (c *Cluster) CreatePodWithLocality(serviceName, podName, podIP, region, zon
 			Spec: corev1.NodeSpec{},
 		})
 	}
+	labels := map[string]string{
+		"app": serviceName,
+	}
+	if ambient {
+		labels[model.TunnelLabel] = model.TunnelHTTP
+	}
 
 	clienttest.NewWriter[*corev1.Pod](c.t, c.Kube).CreateOrUpdateStatus(&corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      podName,
 			Namespace: "default",
-			Labels: map[string]string{
-				"app": serviceName,
-			},
+			Labels:    labels,
 		},
 		Spec: corev1.PodSpec{
 			NodeName: nodeName,
@@ -1459,6 +1494,7 @@ type DesiredWE struct {
 	Name     string
 	Address  string
 	Locality string
+	NonHBONE bool
 }
 
 func AssertWE(c *Cluster, we ...DesiredWE) {
@@ -1469,7 +1505,7 @@ func AssertWE(c *Cluster, we ...DesiredWE) {
 	fetch := func() []DesiredWE {
 		return slices.SortBy(
 			slices.MapFilter(c.WorkloadEntries.List(peering.PeeringNamespace, klabels.Everything()), func(a *networkingclient.WorkloadEntry) *DesiredWE {
-				return &DesiredWE{a.Name, a.Spec.Address, a.Spec.Locality}
+				return &DesiredWE{a.Name, a.Spec.Address, a.Spec.Locality, !isHbone(a)}
 			}),
 			func(a DesiredWE) string {
 				return a.Name
@@ -1477,6 +1513,11 @@ func AssertWE(c *Cluster, we ...DesiredWE) {
 		)
 	}
 	assert.EventuallyEqual(c.t, fetch, have)
+}
+
+func isHbone(a *networkingclient.WorkloadEntry) bool {
+	return a.Labels[model.TunnelLabel] == model.TunnelHTTP &&
+		a.Annotations[annotation.AmbientRedirection.Name] == constants.AmbientRedirectionEnabled
 }
 
 func AssertWELabels(c *Cluster, name string, labels map[string]string) {

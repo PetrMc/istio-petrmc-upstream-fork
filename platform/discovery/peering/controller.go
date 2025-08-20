@@ -336,6 +336,7 @@ func (c *NetworkWatcher) reconcileFlatWorkloadEntry(tn types.NamespacedName) err
 		// so that this WE can be seelcted alongside local pods
 		// TODO right now we never re-use this map, so it's not cloned
 		labels := servicesWithMergedSelector.selector
+		annos := map[string]string{}
 
 		// label to let us list these for cleanup
 		labels[SourceWorkloadLabel] = weGroupLabel
@@ -344,14 +345,10 @@ func (c *NetworkWatcher) reconcileFlatWorkloadEntry(tn types.NamespacedName) err
 		// Indicate we support tunneling. This is for Envoy dataplanes mostly.
 		if workload.TunnelProtocol == workloadapi.TunnelProtocol_HBONE {
 			labels[model.TunnelLabel] = model.TunnelHTTP
+			annos[annotation.AmbientRedirection.Name] = constants.AmbientRedirectionEnabled
 		}
 		if workload.GetCanonicalName() != "" {
 			labels[label.ServiceWorkloadName.Name] = workload.GetCanonicalName()
-		}
-
-		annos := map[string]string{
-			// Signal we should use HBONE
-			annotation.AmbientRedirection.Name: constants.AmbientRedirectionEnabled,
 		}
 
 		svcNames := slices.Map(servicesWithMergedSelector.services, serviceForWorkload.federatedName)
