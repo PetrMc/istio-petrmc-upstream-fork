@@ -19,23 +19,20 @@ type servicesForWorkload struct {
 	services []serviceForWorkload
 }
 type serviceForWorkload struct {
-	federated *RemoteFederatedService
+	namespace string
+	name      string
 	ports     []*workloadapi.Port
 
 	local *corev1.Service // maybe nil
 }
 
 func (sw serviceForWorkload) federatedName() string {
-	return sw.federated.Service.Namespace + "/" + sw.federated.Service.Name
+	return sw.namespace + "/" + sw.name
 }
 
 // mergedServicesForWorkload grabs all the Services that this workload
 // is a part of and merged selectors that would otherwise fully overlap (subsets)
-func (c *NetworkWatcher) mergedServicesForWorkload(
-	clusterID string,
-	peerCluster *peerCluster,
-	workload *RemoteWorkload,
-) []servicesForWorkload {
+func (c *NetworkWatcher) mergedServicesForWorkload(workload *RemoteWorkload) []servicesForWorkload {
 	var unmerged []servicesForWorkload
 	for s, servicePorts := range workload.Services {
 		// we want to find something like 'ns/name.ns.mesh.internal'
@@ -52,15 +49,6 @@ func (c *NetworkWatcher) mergedServicesForWorkload(
 		svcName, svcNs, ok := strings.Cut(nsname, ".")
 		if !ok {
 			// not a valid service?
-			continue
-		}
-
-		fsKey := clusterID + "/" + svcNs + "/" + svcName
-		fs := peerCluster.federatedServices.GetKey(fsKey)
-		if fs == nil {
-			// No federated service exists, remove
-			// TODO how to do cleanup with this model...
-			// return controllers.IgnoreNotFound(c.workloadEntries.Delete(weName, PeeringNamespace))
 			continue
 		}
 
@@ -97,9 +85,11 @@ func (c *NetworkWatcher) mergedServicesForWorkload(
 		unmerged = append(unmerged, servicesForWorkload{
 			selector: labels,
 			services: []serviceForWorkload{{
-				federated: fs,
-				local:     localService,
+				name:      svcName,
+				namespace: svcNs,
 				ports:     servicePorts.GetPorts(),
+
+				local: localService,
 			}},
 		})
 	}

@@ -328,7 +328,7 @@ func (c *NetworkWatcher) reconcileFlatWorkloadEntry(tn types.NamespacedName) err
 		return reconcile(nil)
 	}
 
-	mergedServices := c.mergedServicesForWorkload(clusterID, cluster, workload)
+	mergedServices := c.mergedServicesForWorkload(workload)
 
 	// potentially write multiple workloadEntries so we can be selected by multiple services
 	wantEntries := slices.MapFilter(mergedServices, func(servicesWithMergedSelector servicesForWorkload) **clientnetworking.WorkloadEntry {
@@ -535,6 +535,11 @@ func (c *NetworkWatcher) reconcileGatewayWorkloadEntry(tn types.NamespacedName) 
 		annos[annotation.NetworkingTrafficDistribution.Name] = td
 	}
 
+	// store protocols for use on the ServiceEntry
+	if protocolsStr := serializeProtocolsByPort(fss.ProtocolsByPort); protocolsStr != "" {
+		annos[ServiceProtocolsAnnotation] = protocolsStr
+	}
+
 	weight := uint32(0)
 	if fss.Capacity != nil {
 		weight = fss.Capacity.GetValue()
@@ -578,6 +583,10 @@ func (c *NetworkWatcher) reconcileGatewayWorkloadEntry(tn types.NamespacedName) 
 	return nil
 }
 
+// reconcileServiceEntry converts the WorkloadEntry from reconcileGatewayWorkloadEntry
+// into a ServiceEntry. Do not query the FederatedService from the krt collection/xds here.
+// The WorkloadEntry persists info from the FederatedService so that it will be available
+// even during a loss of connection to the remote cluster or istiod restart.
 func (c *NetworkWatcher) reconcileServiceEntry(name types.NamespacedName) error {
 	log := log.WithLabels("federatedservice", name)
 	hostname := AutogenHostname(name.Name, name.Namespace)
@@ -632,26 +641,11 @@ func (c *NetworkWatcher) reconcileServiceEntry(name types.NamespacedName) error 
 	}
 	se.Annotations = annos
 
-	// Collect all federated services for this service
-	var federatedServices []*RemoteFederatedService
-	for _, remote := range remoteServices {
-		if clusterID := remote.Labels[SourceClusterLabel]; clusterID != "" {
-			if pc := c.getClusterByID(cluster.ID(clusterID)); pc != nil {
-				ns := remote.Labels[ParentServiceNamespaceLabel]
-				serviceName := remote.Labels[ParentServiceLabel]
-				key := fmt.Sprintf("%s/%s/%s", clusterID, ns, serviceName)
-				if fs := pc.federatedServices.GetKey(key); fs != nil {
-					federatedServices = append(federatedServices, fs)
-				}
-			}
-		}
-	}
-
 	if localService != nil {
 		se.Spec.Ports = convertPorts(localService.Spec.Ports)
 		se.Spec.WorkloadSelector = &networking.WorkloadSelector{Labels: localService.Spec.Selector}
 	} else {
-		se.Spec.Ports = mergeRemotePorts(remoteServices, federatedServices)
+		se.Spec.Ports = mergeRemotePorts(remoteServices)
 		se.Spec.WorkloadSelector = &networking.WorkloadSelector{Labels: map[string]string{
 			ParentServiceLabel:          name.Name,
 			ParentServiceNamespaceLabel: name.Namespace,

@@ -8,8 +8,6 @@ import (
 	"sort"
 	"strings"
 	"testing"
-
-	"istio.io/istio/pkg/workloadapi"
 )
 
 func TestMergedServicesForWorkload(t *testing.T) {
@@ -113,11 +111,7 @@ func sortSvcForWorkload(arr []servicesForWorkload) {
 
 func makeSvc(ns, name string) serviceForWorkload {
 	return serviceForWorkload{
-		federated: &RemoteFederatedService{
-			Service: &workloadapi.FederatedService{
-				Namespace: ns,
-				Name:      name,
-			},
-		},
+		namespace: ns,
+		name:      name,
 	}
 }

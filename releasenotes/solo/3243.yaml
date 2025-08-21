@@ -1,0 +1,13 @@
+apiVersion: release-notes/v2
+
+kind: bug-fix
+
+area: traffic-management
+
+issue:
+  - https://github.com/solo-io/istio/issues/3243
+
+releaseNotes:
+- |
+  **Fixed** protocol being reset to TCP on global services after an istiod restart.
+  When using waypoints, this could suddenty stop HTTPRoutes or other L7 policy from applying.

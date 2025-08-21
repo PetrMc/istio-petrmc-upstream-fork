@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strconv"
+	"strings"
 	"sync"
 
 	"google.golang.org/protobuf/proto"
@@ -312,23 +314,20 @@ func (c *NetworkWatcher) pruneRemovedGateways() {
 	}
 }
 
-func mergeRemotePorts(remoteServices []*clientnetworking.WorkloadEntry, federatedServices []*RemoteFederatedService) []*networking.ServicePort {
+func mergeRemotePorts(remoteServices []*clientnetworking.WorkloadEntry) []*networking.ServicePort {
 	pmap := map[uint32]uint32{}
 	protocolMap := map[uint32]string{}
 
-	// Collect protocols from all federated services
-	// If federated services from different clusters disagree, fallback to TCP
-	for _, fs := range federatedServices {
-		if fs != nil && fs.Service != nil {
-			for port, protocol := range fs.Service.ProtocolsByPort {
-				if protocol != "" {
-					if existing, ok := protocolMap[port]; ok && existing != protocol {
-						// Protocol conflict detected, force TCP
-						protocolMap[port] = "TCP"
-						log.Warnf("Protocol conflict on %s for port %d, forcing TCP", fs.Service.Hostname, port)
-					} else {
-						protocolMap[port] = protocol
-					}
+	for _, remote := range remoteServices {
+		if protocolsStr, ok := remote.Annotations[ServiceProtocolsAnnotation]; ok && protocolsStr != "" {
+			protocols := deserializeProtocolsByPort(protocolsStr)
+			for port, protocol := range protocols {
+				if existing, ok := protocolMap[port]; ok && existing != protocol {
+					// Protocol conflict detected, force TCP
+					protocolMap[port] = "TCP"
+					log.Warnf("Protocol conflict from WE annotation for port %d, forcing TCP", port)
+				} else {
+					protocolMap[port] = protocol
 				}
 			}
 		}
@@ -406,7 +405,42 @@ const (
 	// This lets us
 	ServiceEndpointStatus          = "solo.io/endpoint-status"
 	ServiceEndpointStatusUnhealthy = "unheathy"
+
+	// ServiceProtocolsAnnotation stores the port-to-protocol mapping from FederatedService
+	// Format: "80:HTTP,443:HTTPS,9090:GRPC"
+	ServiceProtocolsAnnotation = "solo.io/service-protocols"
 )
+
+// serializeProtocolsByPort converts a map of port->protocol to annotation string format
+func serializeProtocolsByPort(protocolsByPort map[uint32]string) string {
+	if len(protocolsByPort) == 0 {
+		return ""
+	}
+	var protocolPairs []string
+	for port, protocol := range protocolsByPort {
+		protocolPairs = append(protocolPairs, fmt.Sprintf("%d:%s", port, protocol))
+	}
+	return strings.Join(slices.Sort(protocolPairs), ",")
+}
+
+// deserializeProtocolsByPort parses annotation string format to map of port->protocol
+func deserializeProtocolsByPort(annotation string) map[uint32]string {
+	if annotation == "" {
+		return nil
+	}
+	result := make(map[uint32]string)
+	pairs := strings.Split(annotation, ",")
+	for _, pair := range pairs {
+		parts := strings.Split(pair, ":")
+		if len(parts) == 2 {
+			port, err := strconv.ParseUint(parts[0], 10, 32)
+			if err == nil {
+				result[uint32(port)] = parts[1]
+			}
+		}
+	}
+	return result
+}
 
 func HasGlobalLabel(labels map[string]string) bool {
 	v := labels[ServiceScopeLabel]
