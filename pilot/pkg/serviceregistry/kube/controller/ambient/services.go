@@ -60,8 +60,9 @@ func (a *index) ServicesCollection(
 	namespaces krt.Collection[*v1.Namespace],
 	meshConfig krt.Singleton[MeshConfig],
 	opts krt.OptionsBuilder,
+	precompute bool,
 ) krt.Collection[model.ServiceInfo] {
-	ServicesInfo := krt.NewCollection(services, a.serviceServiceBuilder(waypoints, namespaces, services, serviceEntries, meshConfig),
+	ServicesInfo := krt.NewCollection(services, a.serviceServiceBuilder(waypoints, namespaces, services, serviceEntries, meshConfig, precompute),
 		append(
 			opts.WithName("ServicesInfo"),
 			krt.WithMetadata(krt.Metadata{
@@ -123,8 +124,7 @@ func GlobalMergedWorkloadServicesCollection(
 			}
 			waypoints := *waypointsPtr
 			namespaces := cluster.Namespaces()
-			// We can't have duplicate collections (otherwise FetchOne will panic) so use
-			// sync.Once to ensure we only create the collection once and return that same value
+			// N.B Never precompute the service info for remote clusters; the merge function will do that
 			servicesInfo := krt.NewCollection(services, serviceServiceBuilder(
 				waypoints,
 				namespaces,
@@ -142,7 +142,7 @@ func GlobalMergedWorkloadServicesCollection(
 						return ""
 					}
 					return nw.Network
-				}), opts.With(
+				}, false), opts.With(
 				append(
 					opts.WithName(fmt.Sprintf("ServiceServiceInfos[%s]", cluster.ID)),
 					krt.WithMetadata(krt.Metadata{
@@ -175,6 +175,7 @@ func serviceServiceBuilder(
 	localCluster bool,
 	checkServiceScope bool,
 	networkGetter func(ctx krt.HandlerContext) network.ID,
+	precompute bool,
 ) krt.TransformationSingle[*v1.Service, model.ServiceInfo] {
 	return func(ctx krt.HandlerContext, s *v1.Service) *model.ServiceInfo {
 		serviceScope := model.Local
@@ -222,7 +223,7 @@ func serviceServiceBuilder(
 
 		svc := constructService(ctx, s, waypoint, serviceEntries, domainSuffix, networkGetter)
 
-		return precomputeServicePtr(&model.ServiceInfo{
+		svcInfo := &model.ServiceInfo{
 			Service:             svc,
 			PortNames:           portNames,
 			ProtocolsByPort:     protocols,
@@ -232,7 +233,12 @@ func serviceServiceBuilder(
 			Scope:               serviceScope,
 			TrafficDistribution: model.MaybeGetTrafficDistribution(s.Spec.TrafficDistribution, s.GetAnnotations()),
 			GlobalService:       peering.HasGlobalLabel(s.Labels),
-		})
+		}
+		if precompute {
+			return precomputeServicePtr(svcInfo)
+		}
+
+		return svcInfo
 	}
 }
 
@@ -330,6 +336,7 @@ func (a *index) serviceServiceBuilder(
 	services krt.Collection[*v1.Service],
 	serviceEntries krt.Collection[*networkingclient.ServiceEntry],
 	meshConfig krt.Singleton[MeshConfig],
+	precompute bool,
 ) krt.TransformationSingle[*v1.Service, model.ServiceInfo] {
 	return serviceServiceBuilder(
 		waypoints,
@@ -343,6 +350,7 @@ func (a *index) serviceServiceBuilder(
 		func(ctx krt.HandlerContext) network.ID {
 			return a.Network(ctx)
 		},
+		precompute,
 	)
 }
 
