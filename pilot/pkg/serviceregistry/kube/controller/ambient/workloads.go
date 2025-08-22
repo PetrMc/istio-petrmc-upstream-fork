@@ -656,6 +656,7 @@ func workloadEntryWorkloadBuilder(
 	gatewaysByNetwork krt.Index[network.ID, NetworkGateway],
 	flags FeatureFlags,
 ) krt.TransformationSingle[*networkingclient.WorkloadEntry, model.WorkloadInfo] {
+	peeringEnabled := features.EnablePeering
 	return func(ctx krt.HandlerContext, wle *networkingclient.WorkloadEntry) *model.WorkloadInfo {
 		// WLE can put labels in multiple places; normalize this
 		wle = serviceentry.ConvertClientWorkloadEntry(wle)
@@ -742,14 +743,16 @@ func workloadEntryWorkloadBuilder(
 			w.Uid = arn
 		}
 
-		localNetwork := localNetworkGetter(ctx)
-		if network != localNetwork.String() {
-			// This is a remote workload that we'll never send directly; don't precompute
-			return &model.WorkloadInfo{
-				Workload:     w,
-				Labels:       wle.Labels,
-				Source:       kind.WorkloadEntry,
-				CreationTime: wle.CreationTimestamp.Time,
+		if !peeringEnabled {
+			localNetwork := localNetworkGetter(ctx)
+			if network != localNetwork.String() {
+				// This is a remote workload that we'll never send directly; don't precompute
+				return &model.WorkloadInfo{
+					Workload:     w,
+					Labels:       wle.Labels,
+					Source:       kind.WorkloadEntry,
+					CreationTime: wle.CreationTimestamp.Time,
+				}
 			}
 		}
 
