@@ -1078,6 +1078,7 @@ func TestServiceServices(t *testing.T) {
 				krttest.GetMockCollection[*v1.Service](mock),
 				krttest.GetMockCollection[*networkingclient.ServiceEntry](mock),
 				krttest.GetMockSingleton[MeshConfig](mock),
+				true,
 			)
 			res := builder(krt.TestingDummyContext{}, tt.svc)
 			if res == nil {
@@ -1215,6 +1216,7 @@ func TestServiceConditions(t *testing.T) {
 				krttest.GetMockCollection[*v1.Service](mock),
 				krttest.GetMockCollection[*networkingclient.ServiceEntry](mock),
 				krttest.GetMockSingleton[MeshConfig](mock),
+				true,
 			)
 			res := builder(krt.TestingDummyContext{}, tt.svc)
 			assert.Equal(t, res.GetConditions(), tt.conditions)
