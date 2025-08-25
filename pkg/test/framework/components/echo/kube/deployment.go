@@ -356,7 +356,7 @@ func deploymentParams(ctx resource.Context, cfg echo.Config, settings *resource.
 			"ImageFullPath":  settings.CustomGRPCEchoImage, // This overrides image hub/tag if it's not empty.
 			"ContainerPorts": grpcPorts,
 			"FallbackPort":   grpcFallbackPort,
-			"DisableCAFlag":  "true", // The old gRPC cpp echo app doesn't support the --ca flag, so we should not use it
+			"DisableCAFlag":  "true", // the old cpp image doesn't support this new flag, so we elide it in templating
 		})
 	}
 
