@@ -80,7 +80,16 @@ func ParseAutogenHostname(hostname string) (string, string, bool) {
 }
 
 func (c *NetworkWatcher) Reconcile(raw any) error {
+	if _, ok := raw.(cachesSyncedMarker); ok {
+		c.gatewaysProcessed = true
+		return nil
+	}
 	key := raw.(typedNamespace)
+	if key.kind != Gateway && !c.gatewaysProcessed {
+		log.WithLabels("kind", key.kind, "resource", key.NamespacedName).Debugf("requeueing %v because gateways are not synced", key.kind)
+		c.queue.Add(raw)
+		return nil
+	}
 	log.WithLabels("kind", key.kind, "resource", key.NamespacedName).Infof("reconciling")
 	switch key.kind {
 	case Gateway:

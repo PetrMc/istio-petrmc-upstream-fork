@@ -64,6 +64,8 @@ type NetworkWatcher struct {
 	sd                        model.ServiceDiscovery
 	remoteWaypointSync        krt.Syncer
 
+	gatewaysProcessed bool
+
 	queue       controllers.Queue
 	statusQueue controllers.Queue
 
@@ -221,6 +223,8 @@ func (c *NetworkWatcher) isGlobalWaypoint(o controllers.Object) bool {
 	return fw.GetKey(o.GetNamespace()+string(types.Separator)+o.GetName()) != nil
 }
 
+type cachesSyncedMarker struct{}
+
 func (c *NetworkWatcher) Run(stop <-chan struct{}) {
 	kube.WaitForCacheSync(
 		"peering",
@@ -231,6 +235,8 @@ func (c *NetworkWatcher) Run(stop <-chan struct{}) {
 		c.services.HasSynced,
 		c.remoteWaypointSync.HasSynced,
 	)
+	c.queue.Add(cachesSyncedMarker{})
+
 	c.localNetwork = tryFetchLocalNetworkForever(c.client, c.systemNamespace, stop)
 	c.pruneRemovedGateways()
 	log.Infof("informers synced, starting processing")
