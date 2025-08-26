@@ -1,0 +1,70 @@
+---
+# App ServiceEntry
+apiVersion: networking.istio.io/v1
+kind: ServiceEntry
+metadata:
+  name: {{.AppName}}.{{.Namespace}}.{{.GlobalServiceEntryName}}
+spec:
+  ports:
+    - number: 4443 # this is the real port external service is listening on for mTLS
+      name: https
+      protocol: HTTPS
+  hosts:
+    # Define a unique syntehtic host for your DR to bind to and your HTTPRoute to route to
+    - {{.AppName}}.{{.Namespace}}.{{.GlobalServiceEntryName}}
+  location: MESH_EXTERNAL
+  resolution: DNS
+  endpoints:
+    # It has one endpoint, the real host you are attempting to reach
+    # note: my "real" host is a kube service which is not in the mesh but this is just for demonstration
+    - address: {{.ExternalHost}}
+---
+# App DestinationRule
+apiVersion: networking.istio.io/v1
+kind: DestinationRule
+metadata:
+  name: {{.AppName}}.{{.Namespace}}.{{.GlobalServiceEntryName}}
+spec:
+  # DR binds by hostname, we want to bind to the unique sythetic for our app's routing
+  host: {{.AppName}}.{{.Namespace}}.{{.GlobalServiceEntryName}}
+  trafficPolicy:
+    tls:
+      subjectAltNames:
+        # this is the SAN configured in the cert used by this external workload
+        # see pkg/test/framework/components/echo/common/deployment/external.go
+        # to determine the certificate being loaded into the external workload
+        # and look at the generation scripts located near the cert being loaded
+        # for the SAN(s) being added to the certificate configuration
+        - server.default.svc
+      mode: MUTUAL
+      # define your credential with namespace/name format
+      # this is imporant when the egress gateway/waypoint is not in your namespace
+      credentialName: {{.CredentialName}}
+---
+# App HTTPRoute
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{.AppName}}.{{.Namespace}}.{{.GlobalServiceEntryName}}
+spec:
+  # hostnames:
+  #   # This is the host you are trying to reach, should match what is defined in the global SE
+  #   - external-host.foo.bar.invalid
+  parentRefs:
+    - name: {{.GlobalServiceEntryName}}
+      kind: ServiceEntry
+      group: networking.istio.io
+      namespace: {{.EgressNamespace}}
+  rules:
+    - matches:
+        - headers:
+            # Match on your own source principal, this allows routing based on your client idenity
+            - type: Exact
+              name: "%%source.principal%%"
+              value: {{.AppIdentity}}
+      backendRefs:
+        # Route towards your unique synthetic host as defined in the ServiceEntry
+        - group: networking.istio.io
+          kind: Hostname
+          name: {{.AppName}}.{{.Namespace}}.{{.GlobalServiceEntryName}}
+          port: 4443

@@ -57,6 +57,12 @@ var (
 const (
 	ambientControlPlaneValues = `
 values:
+  pilot:
+    env:
+      # SOLO
+      # used by solo_mtls_originate_test.go
+      PERMIT_CROSS_NAMESPACE_RESOURCE_ACCESS: "solo-mtls-originate-namespace/egress-gateway"
+      # END SOLO
   cni:
     # The CNI repair feature is disabled for these tests because this is a controlled environment,
     # and it is important to catch issues that might otherwise be automatically fixed.
@@ -89,6 +95,12 @@ values:
   pilot:
     env:
       AMBIENT_ENABLE_MULTI_NETWORK: "true"
+  cni:
+    # The CNI repair feature is disabled for these tests because this is a controlled environment,
+    # and it is important to catch issues that might otherwise be automatically fixed.
+    # Refer to issue #49207 for more context.
+    repair:
+      enabled: false
   ztunnel:
     terminationGracePeriodSeconds: 5
     env:
@@ -108,12 +120,6 @@ values:
     defaultConfig:
       tracing:
         sampling: 100
-  cni:
-    # The CNI repair feature is disabled for these tests because this is a controlled environment,
-    # and it is important to catch issues that might otherwise be automatically fixed.
-    # Refer to issue #49207 for more context.
-    repair:
-      enabled: false
 `
 )
 
@@ -146,6 +152,10 @@ type EchoDeployments struct {
 
 	// WaypointProxies by
 	WaypointProxies map[string]ambient.WaypointProxy
+
+	// SOLO MTLS ORIGINATE TEST
+	MTLSEchoClients echo.Instances
+	// END SOLO MTLS ORIGINATE TEST
 }
 
 // TestMain defines the entrypoint for pilot tests using a standard Istio installation.
@@ -207,6 +217,12 @@ const (
 	Global                    = "global"
 	Local                     = "local"
 	EastWestGateway           = "eastwest-gateway"
+
+	// SOLO MTLS ORIGINATE TEST
+	ClientA = "a"
+	ClientB = "b"
+	ClientC = "c"
+	// END SOLO MTLS ORIGINATE TEST
 )
 
 var inMesh = match.Matcher(func(instance echo.Instance) bool {
@@ -332,6 +348,45 @@ func SetupApps(t resource.Context, i istio.Instance, apps *EchoDeployments) erro
 			},
 		})
 
+	// SOLO MTLS ORIGINATE TEST
+	builder = builder.WithConfig(echo.Config{
+		Service:        ClientA,
+		Namespace:      apps.Namespace,
+		Ports:          ports.All(),
+		ServiceAccount: true,
+		Subsets: []echo.SubsetConfig{
+			{
+				Replicas: 1,
+				Version:  "v1",
+			},
+		},
+	}).
+		WithConfig(echo.Config{
+			Service:        ClientB,
+			Namespace:      apps.Namespace,
+			Ports:          ports.All(),
+			ServiceAccount: true,
+			Subsets: []echo.SubsetConfig{
+				{
+					Replicas: 1,
+					Version:  "v1",
+				},
+			},
+		}).
+		WithConfig(echo.Config{
+			Service:        ClientC,
+			Namespace:      apps.Namespace,
+			Ports:          ports.All(),
+			ServiceAccount: true,
+			Subsets: []echo.SubsetConfig{
+				{
+					Replicas: 1,
+					Version:  "v1",
+				},
+			},
+		})
+		// END SOLO MTLS ORIGINATE TEST
+
 	_, whErr := t.Clusters().Default().
 		Kube().AdmissionregistrationV1().MutatingWebhookConfigurations().
 		Get(context.Background(), "istio-sidecar-injector", metav1.GetOptions{})
@@ -392,6 +447,15 @@ func SetupApps(t resource.Context, i istio.Instance, apps *EchoDeployments) erro
 	apps.Sidecar = match.ServiceName(echo.NamespacedName{Name: Sidecar, Namespace: apps.Namespace}).GetMatches(echos)
 	apps.Mesh = inMesh.GetMatches(echos)
 	apps.MeshExternal = match.Not(inMesh).GetMatches(echos)
+
+	// SOLO MTLS ORIGINATE TEST
+	ClientA := match.ServiceName(echo.NamespacedName{Name: ClientA, Namespace: apps.Namespace}).GetMatches(echos)
+	ClientB := match.ServiceName(echo.NamespacedName{Name: ClientB, Namespace: apps.Namespace}).GetMatches(echos)
+	ClientC := match.ServiceName(echo.NamespacedName{Name: ClientC, Namespace: apps.Namespace}).GetMatches(echos)
+	apps.MTLSEchoClients = append(apps.MTLSEchoClients, ClientA...)
+	apps.MTLSEchoClients = append(apps.MTLSEchoClients, ClientB...)
+	apps.MTLSEchoClients = append(apps.MTLSEchoClients, ClientC...)
+	// END SOLO MTLS ORIGINATE TEST
 
 	if err := cdeployment.DeployExternalServiceEntry(t.ConfigIstio(), apps.Namespace, apps.ExternalNamespace, false).
 		Apply(apply.CleanupConditionally); err != nil {

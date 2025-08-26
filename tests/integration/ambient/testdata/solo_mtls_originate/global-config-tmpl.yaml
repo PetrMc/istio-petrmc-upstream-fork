@@ -1,0 +1,79 @@
+---
+# Global Service Entry
+apiVersion: networking.istio.io/v1
+kind: ServiceEntry
+metadata:
+  name: {{.ExternalHost}}
+  labels:
+    istio.io/use-waypoint: {{.GatewayName}} 
+spec:
+  hosts:
+  - {{.ExternalHost}}
+  location: MESH_EXTERNAL
+  ports:
+  - number: 80 # we'll listen on standard http, the gateway will egress as mTLS based on other configuration
+    name: http
+    protocol: HTTP
+  resolution: DNS
+---
+# Global Waypoint Gateway
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: {{.GatewayName}}
+spec:
+  gatewayClassName: istio-waypoint
+  listeners:
+  - name: mesh
+    port: 15008
+    protocol: HBONE
+    allowedRoutes:
+      namespaces:
+        from: All
+---
+# Global EnvoyFilter
+apiVersion: networking.istio.io/v1alpha3
+kind: EnvoyFilter
+metadata:
+  name: principal-routing-header-envoyfilter
+spec:
+  targetRefs:
+  - name: {{.GatewayName}}
+    kind: Gateway
+    group: gateway.networking.k8s.io
+  configPatches:
+    # HCM is a network filter, so we need to apply to NETWORK_FILTER
+    - applyTo: NETWORK_FILTER
+      match:
+        context: GATEWAY
+        listener:
+          filterChain:
+            filter:
+              name: "envoy.filters.network.http_connection_manager"
+      patch:
+        # We want to merge into the HCM
+        operation: MERGE
+        value:
+          typed_config:
+            # HCM level
+            "@type": "type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager"
+            # extension we want to merge into the HCM
+            early_header_mutation_extensions:
+              - name: src-principal-header-mutation
+                typed_config:
+                  "@type": type.googleapis.com/envoy.extensions.http.early_header_mutation.header_mutation.v3.HeaderMutation
+                  mutations:
+                  - append:
+                      header:
+                        key: "%%source.principal%%"
+                        value: "%FILTER_STATE(io.istio.peer_principal:PLAIN)%"
+                      # Do not let the client specify it's own idendity, overwrite it
+                      append_action: OVERWRITE_IF_EXISTS_OR_ADD
+    - applyTo: ROUTE_CONFIGURATION
+      match:
+        context: GATEWAY
+      patch:
+        operation: MERGE
+        value:
+          request_headers_to_remove:
+          - "%%source.principal%%"
