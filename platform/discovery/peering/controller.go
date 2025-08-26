@@ -347,6 +347,7 @@ func (c *NetworkWatcher) reconcileFlatWorkloadEntry(tn types.NamespacedName) err
 		labels := servicesWithMergedSelector.selector
 		annos := map[string]string{}
 
+		annos[PeeredWorkloadUIDAnnotation] = tn.Name
 		// label to let us list these for cleanup
 		labels[SourceWorkloadLabel] = weGroupLabel
 		// always write the source cluster
