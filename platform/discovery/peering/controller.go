@@ -14,6 +14,8 @@ import (
 
 	"google.golang.org/protobuf/proto"
 	corev1 "k8s.io/api/core/v1"
+	kerrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	klabels "k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/selection"
@@ -27,14 +29,12 @@ import (
 	networking "istio.io/api/networking/v1alpha3"
 	clientnetworking "istio.io/client-go/pkg/apis/networking/v1"
 	"istio.io/istio/pilot/pkg/model"
-	"istio.io/istio/pilot/pkg/model/kstatus"
-	"istio.io/istio/pilot/pkg/status"
 	"istio.io/istio/pkg/cluster"
 	"istio.io/istio/pkg/config"
 	"istio.io/istio/pkg/config/constants"
-	"istio.io/istio/pkg/config/schema/gvk"
 	"istio.io/istio/pkg/kube/controllers"
 	"istio.io/istio/pkg/kube/krt"
+	istiolog "istio.io/istio/pkg/log"
 	"istio.io/istio/pkg/maps"
 	networkid "istio.io/istio/pkg/network"
 	"istio.io/istio/pkg/ptr"
@@ -846,8 +846,7 @@ func (c *NetworkWatcher) reconcileGatewayStatus(name types.NamespacedName) error
 			Message:            fmt.Sprintf("no network started encountered error validating gateway: %v", err.Error()),
 			LastTransitionTime: metav1.Now(),
 		})
-		c.setGatewayStatus(gw, gatewayConditions)
-		return nil
+		return c.setGatewayStatus(log, gw, gatewayConditions)
 	}
 
 	// if the gateway is syntactically valid and has all the required fields for processing
@@ -889,41 +888,35 @@ func (c *NetworkWatcher) reconcileGatewayStatus(name types.NamespacedName) error
 			Message:            "network not yet synced check istiod log for more details",
 			LastTransitionTime: metav1.Now(),
 		})
-		c.setGatewayStatus(gw, gatewayConditions)
-		return nil
+	} else {
+		gatewayConditions = append(gatewayConditions, metav1.Condition{
+			ObservedGeneration: gw.Generation,
+			Type:               constants.SoloConditionPeeringSucceeded,
+			Status:             metav1.ConditionTrue,
+			Reason:             string(k8s.GatewayReasonProgrammed),
+			LastTransitionTime: metav1.Now(),
+		})
 	}
-
-	gatewayConditions = append(gatewayConditions, metav1.Condition{
-		ObservedGeneration: gw.Generation,
-		Type:               constants.SoloConditionPeeringSucceeded,
-		Status:             metav1.ConditionTrue,
-		Reason:             string(k8s.GatewayReasonProgrammed),
-		LastTransitionTime: metav1.Now(),
-	})
-	c.setGatewayStatus(gw, gatewayConditions)
-	return nil
+	return c.setGatewayStatus(log, gw, gatewayConditions)
 }
 
-func (c *NetworkWatcher) setGatewayStatus(gw *gateway.Gateway, conditions []metav1.Condition) {
-	// transform gateway into config.Config type so we can use the status mutator
-	meta := config.FromObjectMeta(gw.ObjectMeta)
-	meta.GroupVersionKind = gvk.KubernetesGateway
-	obj := &config.Config{
-		Meta:   meta,
-		Spec:   &gw.Spec,
-		Status: config.DeepCopy(&gw.Status),
+func (c *NetworkWatcher) setGatewayStatus(log *istiolog.Scope, gw *gateway.Gateway, conditions []metav1.Condition) error {
+	gw = gw.DeepCopy()
+	if gw.Status.Conditions == nil {
+		gw.Status.Conditions = []metav1.Condition{}
 	}
-
-	oldStatus := obj.Status.(*k8s.GatewayStatus)
-	newStatus := config.DeepCopy(&gw.Status).(*k8s.GatewayStatus)
-	existingConditions := oldStatus.Conditions
 	for _, condition := range conditions {
-		existingConditions = kstatus.UpdateConditionIfChanged(existingConditions, condition)
+		meta.SetStatusCondition(&gw.Status.Conditions, condition)
 	}
-	newStatus.Conditions = existingConditions
 
-	res := status.ResourceFromModelConfig(*obj)
-	c.statusController.EnqueueStatusUpdateResource(newStatus, res)
+	_, err := c.gateways.UpdateStatus(gw)
+	if err != nil {
+		if kerrors.IsNotFound(err) {
+			return nil
+		}
+		log.Errorf("Encountered unexpected error updating status: %s", err)
+	}
+	return err
 }
 
 func (c *NetworkWatcher) enqueueStatusUpdate(name types.NamespacedName) {

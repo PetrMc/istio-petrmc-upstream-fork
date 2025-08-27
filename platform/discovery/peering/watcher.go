@@ -69,8 +69,6 @@ type NetworkWatcher struct {
 	queue       controllers.Queue
 	statusQueue controllers.Queue
 
-	statusController *status.Controller
-
 	buildConfig func(clientName string) *adsc.DeltaADSConfig
 
 	meshConfigWatcher mesh.Watcher
@@ -102,9 +100,6 @@ func New(
 	sd model.ServiceDiscovery,
 	statusManager *status.Manager,
 ) *NetworkWatcher {
-	statusCtl := statusManager.CreateGenericController(func(status status.Manipulator, context any) {
-		status.SetInner(context)
-	})
 	c := &NetworkWatcher{
 		remoteClusters:    make(map[cluster.ID]*peerCluster),
 		gatewaysToCluster: make(map[types.NamespacedName]cluster.ID),
@@ -115,7 +110,6 @@ func New(
 		localCluster:      clusterID,
 		debugger:          debugger,
 		meshConfigWatcher: meshConfigWatcher,
-		statusController:  statusCtl,
 		sd:                sd,
 	}
 	c.gateways = kclient.New[*gateway.Gateway](client)
