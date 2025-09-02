@@ -24,6 +24,8 @@ import (
 	"strings"
 	"testing"
 
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	klabels "k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/apimachinery/pkg/types"
@@ -93,6 +95,41 @@ func TestAmbientInstall(t *testing.T) {
 	framework.
 		NewTest(t).
 		Run(setupInstallation(valuesAmbient, true, DefaultNamespaceConfig, ""))
+}
+
+// TestLicenseSecretInstall tests Istio ambient profile installation using Helm with a license key secret
+func TestLicenseSecretInstall(t *testing.T) {
+	values := map[string]interface{}{
+		"profile": "ambient",
+		"env": map[string]string{
+			"SKIP_LICENSE_CHECK":  "false",
+			"SOLO_LICENSE_SECRET": "default/license-secret",
+		},
+	}
+
+	licenseKey, err := createLicenseKey()
+	if err != nil {
+		t.Fatalf("Encountered error while creating license")
+	}
+
+	licenseSecret := &corev1.Secret{
+		TypeMeta: metav1.TypeMeta{
+			Kind:       "Secret",
+			APIVersion: "v1",
+		},
+		Type: corev1.SecretTypeOpaque,
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "license-secret",
+			Namespace: "default",
+		},
+		StringData: map[string]string{
+			"license-key": licenseKey,
+		},
+	}
+
+	framework.
+		NewTest(t).
+		Run(setupInstallationWithLicenseSecret(values, true, DefaultNamespaceConfig, "", licenseSecret))
 }
 
 func TestAmbientInstallMultiNamespace(t *testing.T) {
@@ -223,6 +260,30 @@ func setupInstallationWithCustomCheck(values map[string]interface{}, isAmbient b
 	check func(t framework.TestContext), revision string,
 ) func(t framework.TestContext) {
 	return baseSetup(values, isAmbient, config, check, revision)
+}
+
+func setupInstallationWithLicenseSecret(
+	values map[string]interface{},
+	isAmbient bool,
+	config NamespaceConfig,
+	revision string,
+	licenseSecret *corev1.Secret,
+) func(t framework.TestContext) {
+	return func(t framework.TestContext) {
+		_, err := t.Clusters().Default().Kube().CoreV1().Secrets("default").Create(context.TODO(), licenseSecret, metav1.CreateOptions{})
+		if err != nil {
+			t.Fatalf("failed to create license secret: %s", err.Error())
+			return
+		}
+
+		baseSetup(values, isAmbient, config, func(t framework.TestContext) {
+			sanitycheck.RunTrafficTest(t, isAmbient)
+		}, revision)(t)
+
+		t.Cleanup(func() {
+			_ = t.Clusters().Default().Kube().CoreV1().Secrets("default").Delete(context.TODO(), licenseSecret.GetName(), metav1.DeleteOptions{})
+		})
+	}
 }
 
 func baseSetup(values map[string]interface{}, isAmbient bool, config NamespaceConfig,
