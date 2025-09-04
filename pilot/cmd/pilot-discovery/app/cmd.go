@@ -28,7 +28,6 @@ import (
 	"istio.io/istio/pkg/collateral"
 	"istio.io/istio/pkg/config/constants"
 	"istio.io/istio/pkg/ctrlz"
-	"istio.io/istio/pkg/licensing"
 	"istio.io/istio/pkg/log"
 	"istio.io/istio/pkg/version"
 )
@@ -92,15 +91,6 @@ func newDiscoveryCommand() *cobra.Command {
 		},
 		RunE: func(c *cobra.Command, args []string) error {
 			cmd.PrintFlags(c.Flags())
-
-			if err := licensing.ValidateLTS(); err != nil {
-				log.Errorf("%v", err)
-				return err
-			}
-			if err := licensing.ValidateFIPS(); err != nil {
-				log.Errorf("%v", err)
-				return err
-			}
 
 			// Create the stop channel for all the servers.
 			stop := make(chan struct{})

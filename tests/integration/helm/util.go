@@ -25,6 +25,8 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/solo-io/licensing/pkg/defaults"
+	"github.com/solo-io/licensing/pkg/model"
 	"golang.org/x/sync/errgroup"
 	v1 "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
@@ -608,4 +610,16 @@ func AdoptPre123CRDResourcesIfNeeded() {
 			scopes.Framework.Infof("couldn't reannotate CRDs for Helm adoption: %s. Likely not needed for this release", annoToAdd)
 		}
 	}
+}
+
+func createLicenseKey() (string, error) {
+	keygen := defaults.KeyManager().KeyGenerator()
+	return keygen.GenerateKey(
+		context.TODO(),
+		time.Now(),
+		time.Now().AddDate(0, 0, 1),
+		model.LicenseType_Enterprise,
+		model.Product_GlooMesh,
+		nil,
+	)
 }
