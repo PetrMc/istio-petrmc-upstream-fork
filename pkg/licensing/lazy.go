@@ -22,7 +22,7 @@ type Lazy[I, O any] interface {
 type lazyImpl[I, O any] struct {
 	getter func(*I) (O, error)
 
-	// Cached responses
+	// Cached responses. Note: with retry enabled, this will be unset until a non-nil error
 	res   O
 	input *I
 	err   error
@@ -50,10 +50,6 @@ func (l *lazyImpl[I, O]) doSlow() (O, error) {
 	l.m.Lock()
 	defer l.m.Unlock()
 	if l.done == 0 {
-		if l.input == nil {
-			return *new(O), fmt.Errorf("invalid: SetInput never called")
-		}
-
 		done := uint32(1)
 		// Defer in case of panic
 		defer func() {

@@ -32,6 +32,8 @@ const IsLts = false
 
 var licenseState = NewLazy(defaultCheckLicense)
 
+// InitializeLicenseState *must* be called before any other functions that call licenseState.Get().
+// Otherwise, we will cache an invalid license state if the user expects to read their license from Kubernetes.
 func InitializeLicenseState(kc kubernetes.Interface) (LicenseState, error) {
 	if err := licenseState.SetInput(kc); err != nil {
 		return StateInvalid, err
