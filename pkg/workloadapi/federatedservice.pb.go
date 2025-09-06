@@ -36,6 +36,52 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+type ServiceScope int32
+
+const (
+	ServiceScope_GLOBAL      ServiceScope = 0
+	ServiceScope_GLOBAL_ONLY ServiceScope = 1
+)
+
+// Enum value maps for ServiceScope.
+var (
+	ServiceScope_name = map[int32]string{
+		0: "GLOBAL",
+		1: "GLOBAL_ONLY",
+	}
+	ServiceScope_value = map[string]int32{
+		"GLOBAL":      0,
+		"GLOBAL_ONLY": 1,
+	}
+)
+
+func (x ServiceScope) Enum() *ServiceScope {
+	p := new(ServiceScope)
+	*p = x
+	return p
+}
+
+func (x ServiceScope) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (ServiceScope) Descriptor() protoreflect.EnumDescriptor {
+	return file_workloadapi_federatedservice_proto_enumTypes[0].Descriptor()
+}
+
+func (ServiceScope) Type() protoreflect.EnumType {
+	return &file_workloadapi_federatedservice_proto_enumTypes[0]
+}
+
+func (x ServiceScope) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use ServiceScope.Descriptor instead.
+func (ServiceScope) EnumDescriptor() ([]byte, []int) {
+	return file_workloadapi_federatedservice_proto_rawDescGZIP(), []int{0}
+}
+
 type FederatedService struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Name represents the name for the service.
@@ -65,8 +111,10 @@ type FederatedService struct {
 	WaypointFor string `protobuf:"bytes,9,opt,name=waypoint_for,json=waypointFor,proto3" json:"waypoint_for,omitempty"`
 	// ProtocolsByPort maps service port numbers to their protocols (e.g., 80 -> "HTTP", 443 -> "HTTPS")
 	ProtocolsByPort map[uint32]string `protobuf:"bytes,10,rep,name=protocols_by_port,json=protocolsByPort,proto3" json:"protocols_by_port,omitempty" protobuf_key:"varint,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// ServiceScope indicates whether the service should do takeover.
+	Scope         ServiceScope `protobuf:"varint,11,opt,name=scope,proto3,enum=istio.workload.ServiceScope" json:"scope,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *FederatedService) Reset() {
@@ -169,6 +217,13 @@ func (x *FederatedService) GetProtocolsByPort() map[uint32]string {
 	return nil
 }
 
+func (x *FederatedService) GetScope() ServiceScope {
+	if x != nil {
+		return x.Scope
+	}
+	return ServiceScope_GLOBAL
+}
+
 type RemoteWaypoint struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Name represents the name for the service.
@@ -229,7 +284,7 @@ var File_workloadapi_federatedservice_proto protoreflect.FileDescriptor
 
 const file_workloadapi_federatedservice_proto_rawDesc = "" +
 	"\n" +
-	"\"workloadapi/federatedservice.proto\x12\x0eistio.workload\x1a\x1egoogle/protobuf/wrappers.proto\x1a\x1aworkloadapi/workload.proto\"\xab\x04\n" +
+	"\"workloadapi/federatedservice.proto\x12\x0eistio.workload\x1a\x1egoogle/protobuf/wrappers.proto\x1a\x1aworkloadapi/workload.proto\"\xdf\x04\n" +
 	"\x10FederatedService\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1c\n" +
 	"\tnamespace\x18\x02 \x01(\tR\tnamespace\x12\x1a\n" +
@@ -241,13 +296,18 @@ const file_workloadapi_federatedservice_proto_rawDesc = "" +
 	"\bwaypoint\x18\a \x01(\v2\x1e.istio.workload.RemoteWaypointR\bwaypoint\x12!\n" +
 	"\fwaypoint_for\x18\t \x01(\tR\vwaypointFor\x12a\n" +
 	"\x11protocols_by_port\x18\n" +
-	" \x03(\v25.istio.workload.FederatedService.ProtocolsByPortEntryR\x0fprotocolsByPort\x1aB\n" +
+	" \x03(\v25.istio.workload.FederatedService.ProtocolsByPortEntryR\x0fprotocolsByPort\x122\n" +
+	"\x05scope\x18\v \x01(\x0e2\x1c.istio.workload.ServiceScopeR\x05scope\x1aB\n" +
 	"\x14ProtocolsByPortEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\rR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"B\n" +
 	"\x0eRemoteWaypoint\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1c\n" +
-	"\tnamespace\x18\x02 \x01(\tR\tnamespaceB\x11Z\x0fpkg/workloadapib\x06proto3"
+	"\tnamespace\x18\x02 \x01(\tR\tnamespace*+\n" +
+	"\fServiceScope\x12\n" +
+	"\n" +
+	"\x06GLOBAL\x10\x00\x12\x0f\n" +
+	"\vGLOBAL_ONLY\x10\x01B\x11Z\x0fpkg/workloadapib\x06proto3"
 
 var (
 	file_workloadapi_federatedservice_proto_rawDescOnce sync.Once
@@ -261,24 +321,27 @@ func file_workloadapi_federatedservice_proto_rawDescGZIP() []byte {
 	return file_workloadapi_federatedservice_proto_rawDescData
 }
 
+var file_workloadapi_federatedservice_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
 var file_workloadapi_federatedservice_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
 var file_workloadapi_federatedservice_proto_goTypes = []any{
-	(*FederatedService)(nil),       // 0: istio.workload.FederatedService
-	(*RemoteWaypoint)(nil),         // 1: istio.workload.RemoteWaypoint
-	nil,                            // 2: istio.workload.FederatedService.ProtocolsByPortEntry
-	(*Port)(nil),                   // 3: istio.workload.Port
-	(*wrapperspb.UInt32Value)(nil), // 4: google.protobuf.UInt32Value
+	(ServiceScope)(0),              // 0: istio.workload.ServiceScope
+	(*FederatedService)(nil),       // 1: istio.workload.FederatedService
+	(*RemoteWaypoint)(nil),         // 2: istio.workload.RemoteWaypoint
+	nil,                            // 3: istio.workload.FederatedService.ProtocolsByPortEntry
+	(*Port)(nil),                   // 4: istio.workload.Port
+	(*wrapperspb.UInt32Value)(nil), // 5: google.protobuf.UInt32Value
 }
 var file_workloadapi_federatedservice_proto_depIdxs = []int32{
-	3, // 0: istio.workload.FederatedService.ports:type_name -> istio.workload.Port
-	4, // 1: istio.workload.FederatedService.capacity:type_name -> google.protobuf.UInt32Value
-	1, // 2: istio.workload.FederatedService.waypoint:type_name -> istio.workload.RemoteWaypoint
-	2, // 3: istio.workload.FederatedService.protocols_by_port:type_name -> istio.workload.FederatedService.ProtocolsByPortEntry
-	4, // [4:4] is the sub-list for method output_type
-	4, // [4:4] is the sub-list for method input_type
-	4, // [4:4] is the sub-list for extension type_name
-	4, // [4:4] is the sub-list for extension extendee
-	0, // [0:4] is the sub-list for field type_name
+	4, // 0: istio.workload.FederatedService.ports:type_name -> istio.workload.Port
+	5, // 1: istio.workload.FederatedService.capacity:type_name -> google.protobuf.UInt32Value
+	2, // 2: istio.workload.FederatedService.waypoint:type_name -> istio.workload.RemoteWaypoint
+	3, // 3: istio.workload.FederatedService.protocols_by_port:type_name -> istio.workload.FederatedService.ProtocolsByPortEntry
+	0, // 4: istio.workload.FederatedService.scope:type_name -> istio.workload.ServiceScope
+	5, // [5:5] is the sub-list for method output_type
+	5, // [5:5] is the sub-list for method input_type
+	5, // [5:5] is the sub-list for extension type_name
+	5, // [5:5] is the sub-list for extension extendee
+	0, // [0:5] is the sub-list for field type_name
 }
 
 func init() { file_workloadapi_federatedservice_proto_init() }
@@ -292,13 +355,14 @@ func file_workloadapi_federatedservice_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_workloadapi_federatedservice_proto_rawDesc), len(file_workloadapi_federatedservice_proto_rawDesc)),
-			NumEnums:      0,
+			NumEnums:      1,
 			NumMessages:   3,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
 		GoTypes:           file_workloadapi_federatedservice_proto_goTypes,
 		DependencyIndexes: file_workloadapi_federatedservice_proto_depIdxs,
+		EnumInfos:         file_workloadapi_federatedservice_proto_enumTypes,
 		MessageInfos:      file_workloadapi_federatedservice_proto_msgTypes,
 	}.Build()
 	File_workloadapi_federatedservice_proto = out.File

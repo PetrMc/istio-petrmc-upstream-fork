@@ -41,6 +41,7 @@ import (
 	configkube "istio.io/istio/pkg/config/kube"
 	"istio.io/istio/pkg/config/protocol"
 	"istio.io/istio/pkg/config/schema/gvk"
+	"istio.io/istio/pkg/config/schema/kind"
 	"istio.io/istio/pkg/config/schema/kubetypes"
 	"istio.io/istio/pkg/kube/controllers"
 	"istio.io/istio/pkg/kube/krt"
@@ -76,8 +77,20 @@ func (a *index) ServicesCollection(
 				multicluster.ClusterKRTMetadataKey: clusterID,
 			}),
 		)...)
-	WorkloadServices := krt.JoinCollection(
+	WorkloadServices := krt.JoinWithMergeCollection(
 		[]krt.Collection[model.ServiceInfo]{ServicesInfo, ServiceEntriesInfo},
+		func(conflicting []model.ServiceInfo) *model.ServiceInfo {
+			for _, c := range conflicting {
+				// TODO(stevenctl/solo) always preferring Service over ServiceEntry
+				// could break users who intentionally use ServiceEntries as an
+				// override. We should use the timestamp based conflict resolution here
+				// OR instead prefer non-peered over peered ServiceEntries.
+				if c.Source.Kind == kind.Service {
+					return &c
+				}
+			}
+			return &conflicting[0]
+		},
 		append(opts.WithName("WorkloadService"), krt.WithMetadata(
 			krt.Metadata{
 				multicluster.ClusterKRTMetadataKey: clusterID,
@@ -232,7 +245,7 @@ func serviceServiceBuilder(
 			Waypoint:            waypointStatus,
 			Scope:               serviceScope,
 			TrafficDistribution: model.MaybeGetTrafficDistribution(s.Spec.TrafficDistribution, s.GetAnnotations()),
-			GlobalService:       peering.HasGlobalLabel(s.Labels),
+			SoloServiceScope:    s.Labels[peering.ServiceScopeLabel],
 		}
 		if precompute {
 			return precomputeServicePtr(svcInfo)
@@ -432,8 +445,8 @@ func serviceEntriesInfo(
 			Waypoint:            waypoint,
 			TrafficDistribution: model.MaybeGetTrafficDistribution(nil, s.GetAnnotations()),
 
-			GlobalService:  peering.HasGlobalLabel(s.Labels),
-			RemoteWaypoint: s.Labels[peering.RemoteWaypointLabel] != "",
+			SoloServiceScope: s.Labels[peering.ServiceScopeLabel],
+			RemoteWaypoint:   s.Labels[peering.RemoteWaypointLabel] != "",
 		})
 	})
 }

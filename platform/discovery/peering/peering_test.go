@@ -922,6 +922,29 @@ func TestPeering(t *testing.T) {
 		c1.ServiceEntries.Delete("se1", "default")
 		AssertSE(c1, DesiredSE{Name: defaultSvc1Name}, DesiredSE{Name: defaultSvc2Name})
 	})
+
+	t.Run("remote only global-only service with hostname generation", func(t *testing.T) {
+		c1, c2 := setup(t)
+		// c2 has a global-only service (no local service in c1)
+		c2.CreateServiceLabel("svc1", peering.ServiceScopeGlobalOnly, ports2)
+
+		// c1 should create a SE with k8s hostname variants since the service is global-only and doesn't exist locally
+		AssertWE(c1, DesiredWE{Name: c2Svc1Name, Locality: c2.Locality()})
+		AssertSE(c1, DesiredSE{Name: defaultSvc1Name})
+
+		// c1's SE has the k8s FQDN since there is no local service
+		AssertSEHosts(c1, defaultSvc1Name, []string{
+			"svc1.default.mesh.internal",     // federated service hostname
+			"svc1.default.svc.cluster.local", // kubernetes standard FQDN
+		})
+
+		// c2 doesn't need additional hosts since the local service will provide DNS
+		AssertWE(c2)
+		AssertSE(c2, DesiredSE{Name: defaultSvc1Name})
+		AssertSEHosts(c2, defaultSvc1Name, []string{
+			"svc1.default.mesh.internal", // federated service hostname
+		})
+	})
 }
 
 func init() {
@@ -1775,6 +1798,30 @@ func AssertServicePorts(c *Cluster, name string, ports []corev1.ServicePort) {
 		return s.Spec.Ports
 	}
 	assert.EventuallyEqual(c.t, fetch, ports)
+}
+
+func AssertSEHosts(c *Cluster, name string, expectedHosts []string) {
+	c.t.Helper()
+	fetch := func() []string {
+		se := c.ServiceEntries.Get(name, peering.PeeringNamespace)
+		if se == nil {
+			return nil
+		}
+		return se.Spec.GetHosts()
+	}
+	assert.EventuallyEqual(c.t, fetch, expectedHosts)
+}
+
+func AssertSEHostCount(c *Cluster, name string, expectedCount int) {
+	c.t.Helper()
+	fetch := func() int {
+		se := c.ServiceEntries.Get(name, peering.PeeringNamespace)
+		if se == nil {
+			return 0
+		}
+		return len(se.Spec.GetHosts())
+	}
+	assert.EventuallyEqual(c.t, fetch, expectedCount)
 }
 
 type OutageInjector struct {

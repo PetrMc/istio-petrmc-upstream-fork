@@ -15,6 +15,7 @@ import (
 	"istio.io/istio/pkg/spiffe"
 	"istio.io/istio/pkg/util/sets"
 	"istio.io/istio/pkg/workloadapi"
+	"istio.io/istio/platform/discovery/peering"
 )
 
 func (a *index) FederatedServicesCollection(
@@ -29,7 +30,7 @@ func (a *index) FederatedServicesCollection(
 	krt.Collection[krt.Named],
 ) {
 	globalServiceByWaypoint := krt.NewIndex(Services, "globalServiceByWaypoint", func(s model.ServiceInfo) []string {
-		if s.GlobalService && s.Waypoint.ResourceName != "" {
+		if s.GlobalService() && s.Waypoint.ResourceName != "" {
 			return []string{s.Waypoint.ResourceName}
 		}
 		return nil
@@ -47,7 +48,7 @@ func (a *index) FederatedServicesCollection(
 		}
 
 		isGlobalWaypoint := isGlobalWaypoint(ctx, svc.Service.GetName(), svc.GetNamespace())
-		if !svc.GlobalService && !isGlobalWaypoint {
+		if !svc.GlobalService() && !isGlobalWaypoint {
 			return nil
 		}
 
@@ -105,6 +106,7 @@ func (a *index) FederatedServicesCollection(
 			TrafficDistribution: svc.TrafficDistribution.String(),
 			WaypointFor:         waypointFor,
 			ProtocolsByPort:     protocolsByPort,
+			Scope:               peering.ConvertScope(svc.SoloServiceScope),
 		}
 		if s.Waypoint != nil {
 			fs.Waypoint = &workloadapi.RemoteWaypoint{

@@ -233,21 +233,38 @@ func (c *NetworkWatcher) reconcileGateway(name types.NamespacedName) error {
 }
 
 // reconcileClusterSync is called when a cluster watch has synced. This is used to cleanup stale resources
-func (c *NetworkWatcher) reconcileClusterSync(cluster string) error {
+func (c *NetworkWatcher) reconcileClusterSync(clusterID string) error {
 	// Get all current workload entries. This appears "racy" to look at one time and act on it, but
 	// since we are cleaning up stale resources this is not a problem.
 	currentWorkloadEntries := c.workloadEntries.List(PeeringNamespace, klabels.SelectorFromSet(map[string]string{
-		SourceClusterLabel: cluster,
+		SourceClusterLabel: clusterID,
 	}))
 	for _, w := range currentWorkloadEntries {
 		// Enqueue it; if it no longer exists it will be removed
 		c.queue.Add(typedNamespace{
 			NamespacedName: types.NamespacedName{
-				Namespace: cluster,
+				Namespace: clusterID,
 				Name:      w.Labels[ParentServiceNamespaceLabel] + "/" + w.Labels[ParentServiceLabel],
 			},
 			kind: WorkloadEntry,
 		})
+	}
+
+	// Also enqueue all federated services from this cluster to ensure gateway workload entries are created
+	// if not already done.
+	c.clustersMu.RLock()
+	pc := c.remoteClusters[cluster.ID(clusterID)]
+	c.clustersMu.RUnlock()
+	if pc != nil && pc.HasSynced() {
+		for _, fs := range pc.federatedServices.List() {
+			c.queue.Add(typedNamespace{
+				NamespacedName: types.NamespacedName{
+					Namespace: clusterID,
+					Name:      config.NamespacedName(fs.Service).String(),
+				},
+				kind: WorkloadEntry,
+			})
+		}
 	}
 	return nil
 }
@@ -497,7 +514,7 @@ func (c *NetworkWatcher) reconcileGatewayWorkloadEntry(tn types.NamespacedName) 
 	}
 
 	localService := c.services.Get(name, ns)
-	weScope := ServiceScopeGlobal
+	weScope := ConvertScopeFromWorkloadAPI(fs.Service.Scope)
 	var localPorts []corev1.ServicePort
 	if localService != nil && !HasGlobalLabel(localService.Labels) {
 		// It's not global, so ignore it
@@ -614,12 +631,30 @@ func (c *NetworkWatcher) reconcileServiceEntry(name types.NamespacedName) error 
 		},
 	}
 
+	remoteServices := c.workloadEntryServiceIndex.Lookup(name)
+
+	var globalOnly bool
+	for _, remote := range remoteServices {
+		if remote.Labels[ServiceScopeLabel] == ServiceScopeGlobalOnly {
+			globalOnly = true
+			break
+		}
+	}
+
 	localService := c.services.Get(name.Name, name.Namespace)
+	if localService == nil && globalOnly {
+		// if the local service does not exist at all (regardless of it existing but not being global)
+		// and the FederatedService is global-only, add the standard k8s fqdn to the SE's hosts.
+		// We don't need to add the variants here, zTunnel DNS will handle that.
+		se.Spec.Hosts = append(se.Spec.Hosts,
+			fmt.Sprintf("%s.%s.svc.%s", name.Name, name.Namespace, c.clusterDomain),
+		)
+	}
+
 	if localService != nil && !HasGlobalLabel(localService.Labels) && !c.isGlobalWaypoint(localService) {
 		// It's not global, so ignore it
 		localService = nil
 	}
-	remoteServices := c.workloadEntryServiceIndex.Lookup(name)
 
 	if localService == nil && len(remoteServices) == 0 {
 		log.Infof("service entry will be deleted (no local or remote services)")

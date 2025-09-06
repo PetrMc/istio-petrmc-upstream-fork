@@ -3034,19 +3034,19 @@ var ValidateServiceEntry = RegisterValidateFunc("ValidateServiceEntry",
 		// however, for plain TCP there is no way to differentiate between the
 		// hosts so we consider it invalid, unless the resolution type is NONE
 		// (because the hosts are ignored).
-		if serviceEntry.Resolution != networking.ServiceEntry_NONE && len(serviceEntry.Hosts) > 1 {
-			for _, port := range serviceEntry.Ports {
-				if port == nil {
-					errs = AppendValidation(errs, errors.New("ports cannot be nil"))
-					continue
-				}
-				p := protocol.Parse(port.Protocol)
-				if !p.IsHTTP() && !p.IsTLS() {
-					errs = AppendValidation(errs, fmt.Errorf("multiple hosts provided with non-HTTP, non-TLS ports"))
-					break
-				}
-			}
-		}
+		// if serviceEntry.Resolution != networking.ServiceEntry_NONE && len(serviceEntry.Hosts) > 1 {
+		// 	for _, port := range serviceEntry.Ports {
+		// 		if port == nil {
+		// 			errs = AppendValidation(errs, errors.New("ports cannot be nil"))
+		// 			continue
+		// 		}
+		// 		p := protocol.Parse(port.Protocol)
+		// 		if !p.IsHTTP() && !p.IsTLS() {
+		// 			errs = AppendValidation(errs, fmt.Errorf("multiple hosts provided with non-HTTP, non-TLS ports"))
+		// 			break
+		// 		}
+		// 	}
+		// }
 
 		errs = AppendValidation(errs, validateExportTo(cfg.Namespace, serviceEntry.ExportTo, true, false))
 		return errs.Unwrap()

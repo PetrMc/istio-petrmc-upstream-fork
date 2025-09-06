@@ -4,6 +4,7 @@
 package peering
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 
@@ -59,7 +60,16 @@ func (c *NetworkWatcher) mergedServicesForWorkload(workload *RemoteWorkload) []s
 		}
 
 		labels := map[string]string{}
-		weScope := ServiceScopeGlobal
+
+		// Query the gateway WorkloadEntry from this Workload's cluster to get the scope
+		// This ensures consistency even after istiod restarts
+		weScope := ServiceScopeGlobal // default to global if WE not found
+		weName := fmt.Sprintf("autogen.%v.%v.%v", workload.ClusterId, svcNs, svcName)
+		if we := c.workloadEntries.Get(weName, PeeringNamespace); we != nil {
+			if scope, ok := we.Labels[ServiceScopeLabel]; ok {
+				weScope = scope
+			}
+		}
 
 		if localService != nil {
 			weScope = localService.Labels[ServiceScopeLabel]

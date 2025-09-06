@@ -680,10 +680,10 @@ func workloadEntryWorkloadBuilder(
 			}))
 			if wle.Labels[peering.ServiceScopeLabel] == peering.ServiceScopeGlobalOnly {
 				// If we are taking over the Service, also attach to that
-				svcKey := fmt.Sprintf("%s/%s.%s.svc.%s", wle.Namespace, svc, wle.Namespace, domainSuffix)
-				services = append(services, krt.Fetch(ctx, workloadServices, krt.FilterKey(svcKey), krt.FilterGeneric(func(a any) bool {
-					return a.(model.ServiceInfo).Source.Kind == kind.Service
-				}))...)
+				services = append(services, krt.Fetch(
+					ctx, workloadServices,
+					krt.FilterKey(fmt.Sprintf("%s/%s.%s.svc.%s", wle.Namespace, svc, wle.Namespace, domainSuffix)),
+				)...)
 			}
 		} else {
 			fo := []krt.FetchOption{krt.FilterIndex(workloadServicesNamespaceIndex, wle.Namespace), krt.FilterSelectsNonEmpty(wle.GetLabels())}

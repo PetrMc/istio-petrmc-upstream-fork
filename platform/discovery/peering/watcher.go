@@ -518,7 +518,25 @@ func deserializeProtocolsByPort(annotation string) map[uint32]string {
 
 func HasGlobalLabel(labels map[string]string) bool {
 	v := labels[ServiceScopeLabel]
-	return v == ServiceScopeGlobal || v == ServiceScopeGlobalOnly
+	return IsGlobal(v)
+}
+
+func IsGlobal(scope string) bool {
+	return scope == ServiceScopeGlobal || scope == ServiceScopeGlobalOnly
+}
+
+func ConvertScope(scope string) workloadapi.ServiceScope {
+	if scope == ServiceScopeGlobalOnly {
+		return workloadapi.ServiceScope_GLOBAL_ONLY
+	}
+	return workloadapi.ServiceScope_GLOBAL
+}
+
+func ConvertScopeFromWorkloadAPI(scope workloadapi.ServiceScope) string {
+	if scope == workloadapi.ServiceScope_GLOBAL_ONLY {
+		return ServiceScopeGlobalOnly
+	}
+	return ServiceScopeGlobal
 }
 
 var (

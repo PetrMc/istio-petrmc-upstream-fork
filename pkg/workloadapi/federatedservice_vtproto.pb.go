@@ -86,6 +86,9 @@ func (this *FederatedService) EqualVT(that *FederatedService) bool {
 			return false
 		}
 	}
+	if this.Scope != that.Scope {
+		return false
+	}
 	return string(this.unknownFields) == string(that.unknownFields)
 }
 
@@ -147,6 +150,11 @@ func (m *FederatedService) MarshalToSizedBufferVTStrict(dAtA []byte) (int, error
 	if m.unknownFields != nil {
 		i -= len(m.unknownFields)
 		copy(dAtA[i:], m.unknownFields)
+	}
+	if m.Scope != 0 {
+		i = protohelpers.EncodeVarint(dAtA, i, uint64(m.Scope))
+		i--
+		dAtA[i] = 0x58
 	}
 	if len(m.ProtocolsByPort) > 0 {
 		for k := range m.ProtocolsByPort {
@@ -344,6 +352,9 @@ func (m *FederatedService) SizeVT() (n int) {
 			mapEntrySize := 1 + protohelpers.SizeOfVarint(uint64(k)) + 1 + len(v) + protohelpers.SizeOfVarint(uint64(len(v)))
 			n += mapEntrySize + 1 + protohelpers.SizeOfVarint(uint64(mapEntrySize))
 		}
+	}
+	if m.Scope != 0 {
+		n += 1 + protohelpers.SizeOfVarint(uint64(m.Scope))
 	}
 	n += len(m.unknownFields)
 	return n

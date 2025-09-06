@@ -1196,7 +1196,9 @@ type ServiceInfo struct {
 	Scope    ServiceScope
 	Waypoint WaypointBindingStatus
 
-	GlobalService bool
+	// SoloServiceScope set by the label
+	SoloServiceScope string
+
 	// RemoteWaypoint marks this as having a waypoint - but on a remote cluster
 	RemoteWaypoint bool
 	// TrafficDistribution preserves the control plane value of TrafficDistribution (rather than the LoadBalancing which applies defaulting to Any)
@@ -1208,6 +1210,11 @@ type ServiceInfo struct {
 	// AsAddress contains a pre-created AddressInfo representation. This ensures we do not need repeated conversions on
 	// the hotpath
 	AsAddress AddressInfo
+}
+
+func (i ServiceInfo) GlobalService() bool {
+	// can't import peering here; would cause a cycle
+	return i.SoloServiceScope == "global" || i.SoloServiceScope == "global-only"
 }
 
 func (i ServiceInfo) GetLabelSelector() map[string]string {
@@ -1314,7 +1321,7 @@ func (i ServiceInfo) Equals(other ServiceInfo) bool {
 		i.Source == other.Source &&
 		i.Scope == other.Scope &&
 		i.Waypoint.Equals(other.Waypoint) &&
-		i.GlobalService == other.GlobalService &&
+		i.SoloServiceScope == other.SoloServiceScope &&
 		i.RemoteWaypoint == other.RemoteWaypoint
 }
 

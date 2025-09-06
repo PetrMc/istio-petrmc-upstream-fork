@@ -6,6 +6,7 @@ area: traffic-management
 
 issue:
   - https://github.com/solo-io/istio/issues/3127
+  - https://github.com/solo-io/istio/issues/2996
 
 releaseNotes:
 - |
@@ -13,3 +14,7 @@ releaseNotes:
   will now be able to apply L7 policy via a local sidecar or waypoint, as long
   as the remote Service properly declares an L7 protocol via the port name or
   appProtocol.
+- |
+  **Fixed** Services with `solo.io/service-scope=global-only` will now be reachable via
+  standard Kubernetes service hostnames whether the local cluster has a copy of the
+  service or not.

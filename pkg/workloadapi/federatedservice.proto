@@ -20,6 +20,11 @@ import "workloadapi/workload.proto";
 package istio.workload;
 option go_package="pkg/workloadapi";
 
+enum ServiceScope {
+  GLOBAL = 0;
+  GLOBAL_ONLY = 1;
+}
+
 message FederatedService {
   // Name represents the name for the service.
   // For Kubernetes, this is the Service name.
@@ -48,6 +53,8 @@ message FederatedService {
   string waypoint_for = 9;
   // ProtocolsByPort maps service port numbers to their protocols (e.g., 80 -> "HTTP", 443 -> "HTTPS")
   map<uint32, string> protocols_by_port = 10;
+  // ServiceScope indicates whether the service should do takeover.
+  ServiceScope scope = 11;
 }
 
 message RemoteWaypoint  {

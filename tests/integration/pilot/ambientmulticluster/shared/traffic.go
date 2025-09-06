@@ -33,7 +33,7 @@ type TrafficContext struct {
 }
 
 func globalName(serviceName string, appsNs namespace.Instance) string {
-	if serviceName == ServiceGlobalTakeover {
+	if serviceName == ServiceGlobalTakeover || serviceName == ServiceRemoteOnlyTakeover {
 		return fmt.Sprintf("%s.%s.svc.cluster.local", serviceName, appsNs.Name())
 	}
 	return fmt.Sprintf("%s.%s%s", serviceName, appsNs.Name(), peering.DomainSuffix)
@@ -89,6 +89,7 @@ func testFromZtunnel(t TrafficContext) {
 	call(ServiceRemoteGlobal, check.And(IsL4(), check.OK(), hitRemoteClusters(t)))
 	call(ServiceAllGlobal, check.And(IsL4(), check.OK(), hitAllClusters(t)))
 	call(ServiceGlobalTakeover, check.And(IsL4(), check.OK(), hitAllClusters(t)))
+	call(ServiceRemoteOnlyTakeover, check.And(IsL4(), check.OK(), hitRemoteClusters(t)))
 
 	// Calls should always go to the local waypoint, then sent to all backends.
 	call(ServiceLocalWaypoint, WaypointLocalClusterToAll)

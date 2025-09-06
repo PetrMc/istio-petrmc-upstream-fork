@@ -91,6 +91,12 @@ func SetupApps(t resource.Context, apps *EchoDeployments) error {
 	deployToAllClusters(ServiceAllWaypoint, ServiceSettings{Scope: gbl, Waypoint: true}, ServiceSettings{Scope: gbl, Waypoint: true})
 	deployToAllClusters(ServiceGlobalTakeover, ServiceSettings{Scope: peering.ServiceScopeGlobalOnly}, ServiceSettings{Scope: peering.ServiceScopeGlobalOnly})
 
+	remoteBuilder.WithConfig(ServiceSettings{
+		Name:      ServiceRemoteOnlyTakeover,
+		Namespace: apps.Namespace,
+		Scope:     peering.ServiceScopeGlobalOnly,
+	}.ToConfig())
+
 	remoteNetworkBuilder := deployment.New(t).DeployServicesOnlyToCluster().WithClusters(
 		t.Clusters().GetByName(RemoteNetworkCluster),
 	)
@@ -193,6 +199,11 @@ const (
 	ServiceAllWaypoint = "all-waypoint"
 	// ServiceGlobalTakeover is a service that is marked as global-only, taking over the .cluster.local DNS name
 	ServiceGlobalTakeover = "global-takeover"
+
+	// ServiceRemoteOnlyTakeover is a service that is marked as global-only, taking over the .cluster.local DNS name
+	// This service only exists in the remote clusters (not LocalCluster), but calling from the LocalCluster can still
+	// resolve the standard Kubernetes Service DNS
+	ServiceRemoteOnlyTakeover = "remote-takeover"
 )
 
 var AllServices = []string{
@@ -207,6 +218,7 @@ var AllServices = []string{
 	ServiceCrossNetworkOnlyWaypoint,
 	ServiceAllWaypoint,
 	ServiceGlobalTakeover,
+	ServiceRemoteOnlyTakeover,
 }
 
 type ServiceSettings struct {
