@@ -37,8 +37,9 @@ type EchoDeployments struct {
 	// Namespace echo apps will be deployed
 	Namespace namespace.Instance
 	// App echo services
-	LocalApp echo.Instances
-	Sidecar  echo.Instances
+	LocalApp      echo.Instances
+	Sidecar       echo.Instances
+	LocalWaypoint echo.Instances
 }
 
 // SetupApps sets up a single workload. We will make multiple distinct services all selecting this workload
@@ -127,6 +128,7 @@ func SetupApps(t resource.Context, apps *EchoDeployments) error {
 	}
 	apps.LocalApp = match.ServiceName(echo.NamespacedName{Name: ServiceLocal, Namespace: apps.Namespace}).GetMatches(localApps)
 	apps.Sidecar = match.ServiceName(echo.NamespacedName{Name: ServiceSidecar, Namespace: apps.Namespace}).GetMatches(localApps)
+	apps.LocalWaypoint = match.ServiceName(echo.NamespacedName{Name: ServiceLocalWaypoint, Namespace: apps.Namespace}).GetMatches(localApps)
 
 	if _, err := ambient.NewWaypointProxyForCluster(t, apps.Namespace, WaypointXNet, t.Clusters().GetByName(RemoteNetworkCluster)); err != nil {
 		return err

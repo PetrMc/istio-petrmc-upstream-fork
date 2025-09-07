@@ -64,6 +64,25 @@ func hitRemoteNetwork(t framework.TestContext) echo.Checker {
 func testFromZtunnel(t TrafficContext) {
 	client := t.Apps.LocalApp[0]
 	appsNs := t.Apps.Namespace
+	localWaypoint := t.Apps.LocalWaypoint.Instances().ForCluster(LocalCluster)[0]
+
+	callWorkload := func(service echo.Instance, c echo.Checker) {
+		t.Helper()
+		t.NewSubTestf("to workload %v", service.ServiceName()).Run(func(t framework.TestContext) {
+			if c == nil {
+				c = check.Error()
+			} else {
+				c = check.And(c, DestinationWorkload(service.ServiceName()))
+			}
+			client.CallOrFail(t, echo.CallOptions{
+				ToWorkload: service,
+				Port:       echo.Port{WorkloadPort: 18081},
+				Scheme:     scheme.HTTP,
+				Count:      25,
+				Check:      c,
+			})
+		})
+	}
 
 	call := func(name string, c echo.Checker) {
 		t.Helper()
@@ -108,6 +127,9 @@ func testFromZtunnel(t TrafficContext) {
 
 	// Should hit remote and local, and in both cases be L7 (from the inbound sidecar)
 	call(ServiceSidecar, check.And(check.OK(), hitAllClusters(t), IsL7()))
+
+	// Make sure to-workload waypoint traffic works
+	callWorkload(localWaypoint, check.And(check.OK(), hitLocalCluster, IsL7()))
 }
 
 func testFromSidecar(t TrafficContext) {

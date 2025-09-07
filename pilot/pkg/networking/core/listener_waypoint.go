@@ -578,9 +578,9 @@ func buildConnectForwarder(push *model.PushContext, proxy *model.Proxy, class is
 		tcpProxy.TunnelingConfig = &tcp.TcpProxy_TunnelingConfig{
 			Hostname: "%DOWNSTREAM_LOCAL_ADDRESS%",
 		}
-		if features.EnablePeering {
-			// SOLO flat multi-network sends the hostname on HBONE using this metadata
-			tcpProxy.TunnelingConfig.Hostname = "%DYNAMIC_METADATA(istio:destination)%"
+		if features.EnablePeering { // TODO && !proxy.IsWaypoint() - waypoints don't need to send the hostname here unless we plan to chain waypoints
+			// SOLO flat multi-network sends the hostname on HBONE using this metadata when sending to a Service
+			tcpProxy.TunnelingConfig.Hostname = "%FILTER_STATE(io.istio.connect_destination:PLAIN)%"
 		}
 		// Set access logs. These are filtered down to only connection establishment errors, to avoid double logs in most cases.
 		accessLogBuilder.setHboneOriginationAccessLog(push, proxy, tcpProxy, class)
@@ -602,12 +602,15 @@ func buildConnectForwarder(push *model.PushContext, proxy *model.Proxy, class is
 			xdsfilters.OriginalDestination,
 		},
 		FilterChains: []*listener.FilterChain{{
-			Filters: []*listener.Filter{{
-				Name: wellknown.TCPProxy,
-				ConfigType: &listener.Filter_TypedConfig{
-					TypedConfig: protoconv.MessageToAny(tcpProxy),
+			Filters: []*listener.Filter{
+				xdsfilters.ConnectDestintationFilter,
+				{
+					Name: wellknown.TCPProxy,
+					ConfigType: &listener.Filter_TypedConfig{
+						TypedConfig: protoconv.MessageToAny(tcpProxy),
+					},
 				},
-			}},
+			},
 		}},
 	}
 	accessLogBuilder.setListenerAccessLog(push, proxy, l, class)

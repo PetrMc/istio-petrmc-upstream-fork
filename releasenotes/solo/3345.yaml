@@ -1,0 +1,13 @@
+apiVersion: release-notes/v2
+
+kind: bug-fix
+
+area: traffic-management
+
+issue:
+  - https://github.com/solo-io/istio/issues/3346
+
+releaseNotes:
+- |
+  **Fixed** to-workload traffic through a waypoint failing when peering is
+  enabled (regardless of actual multi-cluster installation or traffic).

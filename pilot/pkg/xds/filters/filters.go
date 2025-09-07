@@ -74,6 +74,9 @@ const (
 	// Authority Key is another filter state key where we store :authority. Because this is not a
 	// well-known filter state key, we can store non-IP address :authorities in here
 	AuthorityFilterStateKey = "io.istio.connect_authority"
+
+	// This is the :authority or Hostname for tunneling config (outbound)
+	ConnectDestinationFilterStateKey = "io.istio.connect_destination"
 )
 
 // Define static filters to be reused across the codebase. This avoids duplicate marshaling/unmarshaling
@@ -355,6 +358,53 @@ var (
 					},
 					SharedWithUpstream: sfsvalue.FilterStateValue_ONCE,
 				}},
+			}),
+		},
+	}
+
+	ConnectDestintationFilter = &listener.Filter{
+		Name: "connect_destination",
+		ConfigType: &listener.Filter_TypedConfig{
+			TypedConfig: protoconv.MessageToAny(&sfsnetwork.Config{
+				OnNewConnection: []*sfsvalue.FilterStateValue{
+					{
+						SkipIfEmpty: true, // fallback to DOWNSTREAM_LOCAL_ADDRESS if the istio:destination dynamic metadata is not set
+						Key: &sfsvalue.FilterStateValue_ObjectKey{
+							ObjectKey: ConnectDestinationFilterStateKey,
+						},
+						FactoryKey: "envoy.string",
+						Value: &sfsvalue.FilterStateValue_FormatString{
+							FormatString: &core.SubstitutionFormatString{
+								Format: &core.SubstitutionFormatString_TextFormatSource{
+									TextFormatSource: &core.DataSource{
+										Specifier: &core.DataSource_InlineString{
+											InlineString: "%DYNAMIC_METADATA(istio:destination)%",
+										},
+									},
+								},
+							},
+						},
+						SharedWithUpstream: sfsvalue.FilterStateValue_ONCE,
+					},
+					{
+						Key: &sfsvalue.FilterStateValue_ObjectKey{
+							ObjectKey: ConnectDestinationFilterStateKey,
+						},
+						FactoryKey: "envoy.string",
+						Value: &sfsvalue.FilterStateValue_FormatString{
+							FormatString: &core.SubstitutionFormatString{
+								Format: &core.SubstitutionFormatString_TextFormatSource{
+									TextFormatSource: &core.DataSource{
+										Specifier: &core.DataSource_InlineString{
+											InlineString: `%CEL(size(filter_state["` + ConnectDestinationFilterStateKey + `"]) > 1 ? filter_state["` + ConnectDestinationFilterStateKey + `"] :  destination.address)%`, // nolint: lll
+										},
+									},
+								},
+							},
+						},
+						SharedWithUpstream: sfsvalue.FilterStateValue_ONCE,
+					},
+				},
 			}),
 		},
 	}
