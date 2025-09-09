@@ -284,6 +284,7 @@ func NewController(
 		references,
 		c.domainSuffix,
 		c,
+		inputs.Services,
 		opts,
 	)
 
