@@ -521,6 +521,7 @@ func (d *DeploymentController) configureIstioGateway(log *istiolog.Scope, gw gat
 
 	input := TemplateInput{
 		Gateway:        &gw,
+		GatewayClass:   string(gw.Spec.GatewayClassName),
 		DeploymentName: model.GetOrDefault(gw.Annotations[annotation.GatewayNameOverride.Name], defaultName),
 		ServiceAccount: model.GetOrDefault(gw.Annotations[annotation.GatewayServiceAccount.Name], defaultName),
 		Ports:          extractServicePorts(gw, listenersFromListenerSets),
@@ -954,6 +955,7 @@ func (d *DeploymentController) canManage(gvr schema.GroupVersionResource, name, 
 
 type TemplateInput struct {
 	*gateway.Gateway
+	GatewayClass              string
 	DeploymentName            string
 	ServiceAccount            string
 	Ports                     []corev1.ServicePort
