@@ -1,0 +1,8 @@
+apiVersion: release-notes/v2
+kind: feature
+area: istioctl
+
+releaseNotes:
+- |
+  **Improved** the experience when using `istioctl multicluster check` against installations <1.27 by checking
+  the `gloo.solo.io/PeeringSucceeded` remote gateway condition.

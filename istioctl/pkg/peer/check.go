@@ -267,17 +267,24 @@ func checkPeers(cliClient kube.CLIClient, precheck bool) (success bool) {
 		for _, address := range gw.Status.Addresses {
 			verbosePrintf("- %s\n", address.Value)
 		}
+
+		verbosePrint("Conditions:\n")
+		connected := true
 		for _, condition := range gw.Status.Conditions {
-			if condition.Type != constants.SoloConditionPeerConnected {
-				continue
-			}
 			if condition.Status == metav1.ConditionTrue {
-				verbosePrint(color.GreenString("Status: connected ✅\n"))
+				verbosePrint(color.GreenString("- %s: %v\n", condition.Type, condition.Status))
 			} else {
-				verbosePrint(color.YellowString("Status: disconnected ⚠️\n"))
-				allConnected = false
+				verbosePrint(color.YellowString("- %s: %v\n", condition.Type, condition.Status))
 			}
-			break
+			if condition.Type == constants.SoloConditionPeeringSucceeded || condition.Type == constants.SoloConditionPeerConnected {
+				connected = connected && condition.Status == metav1.ConditionTrue
+			}
+		}
+		if connected {
+			verbosePrint(color.GreenString("Status: connected ✅\n"))
+		} else {
+			allConnected = false
+			verbosePrint(color.YellowString("Status: disconnected ⚠️\n"))
 		}
 		verbosePrint("\n")
 	}
