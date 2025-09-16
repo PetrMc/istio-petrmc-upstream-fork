@@ -137,7 +137,7 @@ func newPeerCluster(
 			// Translate it.
 			ns, hostname, _ := strings.Cut(resourceName, "/")
 			name, _, _ := strings.Cut(hostname, ".")
-			c.federatedServices.DeleteObject(fmt.Sprintf("%s/%s/%s", networkName, ns, name))
+			c.federatedServices.DeleteObject(fmt.Sprintf("%s/%s/%s", gateway.Cluster.String(), ns, name))
 		}
 	})
 	workloadsAdscHandler := adsc.Register(func(

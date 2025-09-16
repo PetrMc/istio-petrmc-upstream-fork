@@ -777,6 +777,18 @@ func TestPeering(t *testing.T) {
 				Locality: "custom-region/custom-zone",
 			},
 		)
+		AssertSE(c1, DesiredSE{Name: "autogen.default.svc1"})
+
+		// Delete services
+		c2.DeleteService("svc1")
+		AssertWE(c1,
+			DesiredWE{Name: "autogen.c3.default.svc1", Locality: "region-c3/zone-c3"},
+		)
+		AssertSE(c1, DesiredSE{Name: "autogen.default.svc1"})
+
+		c3.DeleteService("svc1")
+		AssertWE(c1)
+		AssertSE(c1)
 	})
 	t.Run("flat network tunnel mode", func(t *testing.T) {
 		c1 := NewCluster(t, "c1", "net1")

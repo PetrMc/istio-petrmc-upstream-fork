@@ -1,0 +1,12 @@
+apiVersion: release-notes/v2
+
+kind: bug-fix
+
+area: traffic-management
+
+issue:
+  - https://github.com/solo-io/istio/issues/3242
+
+releaseNotes:
+- |
+  **Fixed** deleting a remote service did not delete the corresponding service entry in the local cluster.
