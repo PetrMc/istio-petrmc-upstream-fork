@@ -1,0 +1,15 @@
+apiVersion: release-notes/v2
+
+kind: bug-fix
+
+area: traffic-management
+
+issue:
+  - https://github.com/solo-io/istio/issues/3378
+
+releaseNotes:
+- |
+  **Fixed** traffic routing through the local cluster's waypoint proxy when a
+  service exists only on remote cluster, but the same waypoint is also deployed
+  locally. Traffic now correctly routes to remote waypoint proxies when the
+  service only exists remotely.

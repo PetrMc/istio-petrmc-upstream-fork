@@ -278,6 +278,108 @@ func TestPeering(t *testing.T) {
 		AssertWE(c1)
 		AssertSE(c1)
 	})
+
+	t.Run("waypoint", func(t *testing.T) {
+		// c1, c2 flat
+		// c3 remote net
+		c1 := NewCluster(t, "c1", "net1")
+		c2 := NewCluster(t, "c2", "net1")
+		c3 := NewCluster(t, "c3", "net2")
+		c1.ConnectTo(c2)
+		c1.ConnectTo(c3)
+		c2.ConnectTo(c3)
+
+		// all clusters have a waypoint with the same name
+		deployWaypoint(c1, c2, c3)
+
+		// only c1 has "local-only""
+		c1.CreateServiceWithWaypoint("local-only", true, ports1)
+
+		// c1 and c2 have svc1
+		c1.CreateServiceWithWaypoint("svc1", true, ports1)
+		c2.CreateServiceWithWaypoint("svc1", true, ports1)
+
+		// only c3 (cross-net) has svc2
+		c3.CreateServiceWithWaypoint("svc2", true, ports1)
+
+		type DesiredSELabels struct {
+			ServiceEntry DesiredSE
+			Labels       map[string]string
+		}
+		fetch := func() []DesiredSELabels {
+			return slices.SortBy(
+				slices.Map(c1.ServiceEntries.List(metav1.NamespaceAll, klabels.Everything()), func(a *networkingclient.ServiceEntry) DesiredSELabels {
+					return DesiredSELabels{
+						ServiceEntry: DesiredSE{
+							Name:            a.Name,
+							ServiceAccounts: a.Spec.SubjectAltNames,
+						},
+						Labels: a.Labels,
+					}
+				}),
+				func(a DesiredSELabels) string {
+					return a.ServiceEntry.Name
+				},
+			)
+		}
+
+		expected := []DesiredSELabels{
+			// local-only
+			{
+				ServiceEntry: DesiredSE{Name: "autogen.default.local-only"},
+				Labels: map[string]string{
+					peering.ParentServiceLabel:          "local-only",
+					peering.ParentServiceNamespaceLabel: "default",
+
+					// local service has everything copied
+					label.IoIstioUseWaypoint.Name: "waypoint",
+					peering.ServiceScopeLabel:     peering.ServiceScopeGlobal,
+
+					// NOTE: no other clusters have this service, so no remote-waypoint usage
+				},
+			},
+			// svc1
+			{
+				ServiceEntry: DesiredSE{
+					Name:            "autogen.default.svc1",
+					ServiceAccounts: []string{"spiffe://cluster.local/ns/default/sa/waypoint"},
+				},
+				Labels: map[string]string{
+					peering.ParentServiceLabel:          "svc1",
+					peering.ParentServiceNamespaceLabel: "default",
+					// svc1 is network local, use the global copy so we use all waypoint instances on the network
+					peering.RemoteWaypointLabel:    "true",
+					peering.UseGlobalWaypointLabel: "waypoint.default.mesh.internal",
+					// we have a local service so we copy ALL labels
+					label.IoIstioUseWaypoint.Name: "waypoint",
+					peering.ServiceScopeLabel:     peering.ServiceScopeGlobal,
+				},
+			},
+			// svc2
+			{
+				ServiceEntry: DesiredSE{
+					Name:            "autogen.default.svc2",
+					ServiceAccounts: []string{"spiffe://cluster.local/ns/default/sa/waypoint"},
+				},
+				Labels: map[string]string{
+					peering.ParentServiceLabel:          "svc2",
+					peering.ParentServiceNamespaceLabel: "default",
+					// svc2 doesn't exist on the network, skip proc but don't use network local waypoint instances
+					peering.RemoteWaypointLabel: "true",
+				},
+			},
+			// waypoint global mirror
+			{
+				ServiceEntry: DesiredSE{Name: "autogen.default.waypoint"},
+				Labels: map[string]string{
+					peering.ParentServiceLabel:          "waypoint",
+					peering.ParentServiceNamespaceLabel: "default",
+				},
+			},
+		}
+		assert.EventuallyEqual(t, fetch, expected, retry.Timeout(time.Second*5))
+	})
+
 	t.Run("fully bidirection", func(t *testing.T) {
 		c1, c2 := setup(t)
 		c2.ConnectTo(c1)
@@ -612,8 +714,8 @@ func TestPeering(t *testing.T) {
 	})
 	t.Run("local service changes", func(t *testing.T) {
 		c1, c2 := setup(t)
-		c1.CreateServiceLabel("svc1", peering.ServiceScopeGlobal, ports1)
-		c2.CreateServiceLabel("svc1", peering.ServiceScopeGlobal, ports2)
+		c1.CreateServiceLabel("svc1", peering.ServiceScopeGlobal, "", ports1)
+		c2.CreateServiceLabel("svc1", peering.ServiceScopeGlobal, "", ports2)
 
 		AssertWE(c1, DesiredWE{Name: c2Svc1Name, Locality: c2.Locality()})
 		AssertWEPorts(c1, c2Svc1Name, map[string]uint32{"port-80": 80, "port-81": 81, "port-92": 92, "target-821": 82})
@@ -636,7 +738,7 @@ func TestPeering(t *testing.T) {
 		AssertWEPorts(c1, c2Svc1Name, map[string]uint32{"port-80": 80, "port-81": 81, "port-92": 92, "target-821": 82})
 
 		// Switch the label
-		c1.CreateServiceLabel("svc1", peering.ServiceScopeGlobalOnly, ports1)
+		c1.CreateServiceLabel("svc1", peering.ServiceScopeGlobalOnly, "", ports1)
 		lbls[peering.ServiceScopeLabel] = peering.ServiceScopeGlobalOnly
 		AssertWELabels(c1, c2Svc1Name, lbls)
 	})
@@ -938,7 +1040,7 @@ func TestPeering(t *testing.T) {
 	t.Run("remote only global-only service with hostname generation", func(t *testing.T) {
 		c1, c2 := setup(t)
 		// c2 has a global-only service (no local service in c1)
-		c2.CreateServiceLabel("svc1", peering.ServiceScopeGlobalOnly, ports2)
+		c2.CreateServiceLabel("svc1", peering.ServiceScopeGlobalOnly, "", ports2)
 
 		// c1 should create a SE with k8s hostname variants since the service is global-only and doesn't exist locally
 		AssertWE(c1, DesiredWE{Name: c2Svc1Name, Locality: c2.Locality()})
@@ -1290,16 +1392,27 @@ func (c *Cluster) Locality() string {
 
 func (c *Cluster) CreateService(name string, global bool, ports []corev1.ServicePort) {
 	if global {
-		c.CreateServiceLabel(name, peering.ServiceScopeGlobal, ports)
+		c.CreateServiceLabel(name, peering.ServiceScopeGlobal, "", ports)
 	} else {
-		c.CreateServiceLabel(name, "", ports)
+		c.CreateServiceLabel(name, "", "", ports)
 	}
 }
 
-func (c *Cluster) CreateServiceLabel(name string, lbl string, ports []corev1.ServicePort) {
+func (c *Cluster) CreateServiceWithWaypoint(name string, global bool, ports []corev1.ServicePort) {
+	if global {
+		c.CreateServiceLabel(name, peering.ServiceScopeGlobal, "waypoint", ports)
+	} else {
+		c.CreateServiceLabel(name, "", "waypoint", ports)
+	}
+}
+
+func (c *Cluster) CreateServiceLabel(name string, scope string, waypoint string, ports []corev1.ServicePort) {
 	labels := map[string]string{}
-	if lbl != "" {
-		labels[peering.ServiceScopeLabel] = lbl
+	if scope != "" {
+		labels[peering.ServiceScopeLabel] = scope
+	}
+	if waypoint != "" {
+		labels[label.IoIstioUseWaypoint.Name] = waypoint
 	}
 	c.Services.CreateOrUpdate(&corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
@@ -2010,4 +2123,30 @@ func TestProtocolPropagation(t *testing.T) {
 		{Name: "port-5000", Protocol: "TCP", Number: 5000, TargetPort: 5000},
 		{Name: "port-9090", Protocol: "GRPC", Number: 9090, TargetPort: 9090},
 	})
+}
+
+func deployWaypoint(clusters ...*Cluster) {
+	for _, c := range clusters {
+		c.CreateService("waypoint", false, []corev1.ServicePort{{Name: "HBONE", Protocol: "TCP", Port: 15008}})
+		c.CreateGateway(&k8sbeta.Gateway{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "waypoint",
+				Namespace: "default",
+			},
+			Spec: k8sbeta.GatewaySpec{
+				GatewayClassName: "istio-waypoint",
+				Listeners: []k8sbeta.Listener{{
+					Name:     "hbone",
+					Protocol: "HTTP",
+					Port:     15008,
+				}},
+			},
+			Status: k8sbeta.GatewayStatus{
+				Addresses: []k8s.GatewayStatusAddress{{
+					Type:  ptr.Of(k8sbeta.IPAddressType),
+					Value: "1.2.3.4",
+				}},
+			},
+		})
+	}
 }

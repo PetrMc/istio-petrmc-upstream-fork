@@ -539,7 +539,7 @@ func (c *NetworkWatcher) reconcileGatewayWorkloadEntry(tn types.NamespacedName) 
 	labels[model.TunnelLabel] = model.TunnelHTTP
 	fss := fs.Service
 	if fss.Waypoint != nil && fss.Waypoint.Name != "" && fss.Waypoint.Namespace != "" {
-		labels[RemoteWaypointLabel] = AutogenHostname(fss.Waypoint.Name, fss.Waypoint.Namespace)
+		labels[UseGlobalWaypointLabel] = AutogenHostname(fss.Waypoint.Name, fss.Waypoint.Namespace)
 	}
 
 	ports := map[string]uint32{}
@@ -697,34 +697,41 @@ func (c *NetworkWatcher) reconcileServiceEntry(name types.NamespacedName) error 
 		}}
 	}
 
-	// Semantics: sidecar will skip processing if there is a local waypoint (determined by standard waypoint codepath)
-	// OR if any cluster has a remote waypoint (determined by remote waypoint label).
-	// This has a few awkward edge cases...
-	// * If there are 2 remote clusters, and only 1 has a remote waypoint, then the sidecar will skip processing regardless.
-	// * If there is a local service but no local waypoint, the sidecar will do processing
-
-	remoteWaypoint := ""
+	globalWaypointHost := ""
+	haveLocalNet := localService != nil
 	for _, remote := range remoteServices {
-		if rw, f := remote.Labels[RemoteWaypointLabel]; f && rw != "" {
-			remoteWaypoint = rw
+		haveLocalNet = haveLocalNet || remote.Labels[label.TopologyNetwork.Name] == string(c.localNetwork)
+		if rw, f := remote.Labels[UseGlobalWaypointLabel]; f && rw != "" {
+			globalWaypointHost = rw
 			break // TODO handle the case where two remote clusters disagree...
 		}
 	}
-	if remoteWaypoint != "" {
-		// this label now effectively overrides use-waypoint!
-		// we should only overwrite the label if the local doesn't use-waypoint,
-		// or use-waypoint points to the same logical service
-		remoteWaypointName, remoteWaypointNs, useRemote := ParseAutogenHostname(remoteWaypoint)
-		if useRemote && localService != nil {
-			localWaypointName := localService.GetLabels()[label.IoIstioUseWaypoint.Name]
-			localWaypointNs := ptr.NonEmptyOrDefault(localService.GetLabels()[label.IoIstioUseWaypointNamespace.Name], localService.Namespace)
-			if localWaypointName != "" && (localWaypointName != remoteWaypointName || localWaypointNs != remoteWaypointNs) {
-				useRemote = false
-			}
-		}
+	if globalWaypointHost != "" {
+		// Semantics: sidecar will skip processing if there is a local waypoint (determined by standard waypoint codepath)
+		// OR if any cluster has a remote waypoint (determined by remote waypoint label).
+		// This has a few awkward edge cases...
+		// * If there are 2 remote clusters, and only 1 has a remote waypoint, then the sidecar will skip processing regardless.
+		// * If there is a local service but no local waypoint, the sidecar will do processing
+		labels[RemoteWaypointLabel] = "true"
 
-		if useRemote {
-			labels[RemoteWaypointLabel] = remoteWaypoint
+		// Making the ServiceEntry use the global version of the Waypoint
+		// is separate from deciding to skip processing. We only do it if the service is at least partially
+		// network local. We're effectively overriding istio.io/use-waypoint here.
+		if haveLocalNet {
+			remoteWaypointName, remoteWaypointNs, useRemote := ParseAutogenHostname(globalWaypointHost)
+
+			// local use-waypoint takes precedence
+			if useRemote && localService != nil {
+				localWaypointName := localService.GetLabels()[label.IoIstioUseWaypoint.Name]
+				localWaypointNs := ptr.NonEmptyOrDefault(localService.GetLabels()[label.IoIstioUseWaypointNamespace.Name], localService.Namespace)
+				if localWaypointName != "" && (localWaypointName != remoteWaypointName || localWaypointNs != remoteWaypointNs) {
+					useRemote = false
+				}
+			}
+
+			if useRemote {
+				labels[UseGlobalWaypointLabel] = globalWaypointHost
+			}
 		}
 	}
 

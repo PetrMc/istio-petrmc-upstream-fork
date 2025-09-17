@@ -461,8 +461,14 @@ type typedNamespace struct {
 }
 
 const (
-	// RemoteWaypointLabel should contain the hostname of the peered service for a remote waypoint
+	// RemoteWaypointLabel if set indicates there is a waypoint for the service (even if that's opaque to us)
+	// due to that waypoint only being on a remote cluster. We use it to make sidecars defer processing.
 	RemoteWaypointLabel = "solo.io/remote-waypoint"
+
+	// UseGlobalWaypointLabel indicates that this generated ServiceEntry can have its
+	// Waypoint attachment overidden to point to a global waypoint that is peered like other global services.
+	// This should only be set when the service exists in at least one cluster on the same network as the local cluster.
+	UseGlobalWaypointLabel = "solo.io/use-global-waypoint"
 
 	ServiceScopeLabel      = "solo.io/service-scope"
 	ServiceScopeGlobal     = "global"

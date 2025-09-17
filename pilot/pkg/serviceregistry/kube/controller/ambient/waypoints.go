@@ -168,7 +168,15 @@ func fetchRemoteWaypointForServiceEntry(
 	serviceEntries krt.Collection[*networkingclient.ServiceEntry],
 	o metav1.ObjectMeta,
 ) (*Waypoint, *model.StatusMessage) {
-	wpAutogenHost := o.Labels[peering.RemoteWaypointLabel]
+	wpAutogenHost := o.Labels[peering.UseGlobalWaypointLabel]
+	if wpAutogenHost == "" {
+		// backwards compat: RemoteWaypointLabel was used instead of UseGlobalWaypointLabel
+		// in prior versions. The controller will eventually change this to `"true"` and
+		// set UseGlobalWaypointLabel.
+		// If this value is `"true"` or not a hostname, ParseAutogenHostname will reject it.
+		wpAutogenHost = o.Labels[peering.RemoteWaypointLabel]
+	}
+
 	wpName, wpNs, ok := peering.ParseAutogenHostname(wpAutogenHost)
 	if !ok {
 		return nil, nil
