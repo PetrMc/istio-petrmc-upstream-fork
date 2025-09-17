@@ -1,0 +1,13 @@
+apiVersion: release-notes/v2
+
+kind: bug-fix
+
+area: traffic-management
+
+issue:
+  - https://github.com/solo-io/istio/issues/3353
+
+releaseNotes:
+- |
+  **Fixed** traffic breaking when a waypoint from the local cluster is deleted
+  while one still exists on the remote cluster.

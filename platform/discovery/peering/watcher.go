@@ -203,7 +203,7 @@ func New(
 		name := config.NamespacedName(o)
 		commonServiceHandler(name)
 	}, func(o controllers.Object) bool {
-		return HasGlobalLabel(o.GetLabels()) || c.isGlobalWaypoint(o)
+		return HasGlobalLabel(o.GetLabels())
 	}))
 	c.workloadEntries.AddEventHandler(controllers.FilteredObjectHandler(func(o controllers.Object) {
 		svc := o.GetLabels()[ParentServiceLabel]

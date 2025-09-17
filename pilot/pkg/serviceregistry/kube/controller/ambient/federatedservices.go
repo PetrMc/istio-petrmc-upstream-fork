@@ -11,6 +11,7 @@ import (
 	"istio.io/istio/pilot/pkg/model"
 	"istio.io/istio/pkg/config/schema/kind"
 	"istio.io/istio/pkg/kube/krt"
+	"istio.io/istio/pkg/log"
 	"istio.io/istio/pkg/slices"
 	"istio.io/istio/pkg/spiffe"
 	"istio.io/istio/pkg/util/sets"
@@ -85,6 +86,8 @@ func (a *index) FederatedServicesCollection(
 			uniqueSANS.InsertAll(slices.Map(sas, func(sa string) string {
 				return spiffe.MustGenSpiffeURIForTrustDomain(meshCfg.GetTrustDomain(), waypoint.Namespace, sa)
 			})...)
+		} else {
+			log.Debugf("service %s/%s is global and references waypoint %q, but waypoint does not exist")
 		}
 
 		s := svc.Service
@@ -108,7 +111,7 @@ func (a *index) FederatedServicesCollection(
 			ProtocolsByPort:     protocolsByPort,
 			Scope:               peering.ConvertScope(svc.SoloServiceScope),
 		}
-		if s.Waypoint != nil {
+		if s.Waypoint != nil && waypoint != nil {
 			fs.Waypoint = &workloadapi.RemoteWaypoint{
 				Name:      waypoint.GetName(),
 				Namespace: waypoint.GetNamespace(),

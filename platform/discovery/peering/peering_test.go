@@ -380,6 +380,36 @@ func TestPeering(t *testing.T) {
 		assert.EventuallyEqual(t, fetch, expected, retry.Timeout(time.Second*5))
 	})
 
+	t.Run("local waypoint deletion", func(t *testing.T) {
+		c1, c2 := setup(t)
+
+		// Deploy waypoint gateways on both clusters first
+		deployWaypoint(c1, c2)
+
+		// Create global services with waypoints on both clusters
+		c1.CreateServiceWithWaypoint("svc1", true, ports1)
+		c2.CreateServiceWithWaypoint("svc1", true, ports1)
+
+		AssertWE(
+			c1,
+			DesiredWE{Name: c2Svc1Name, Locality: c2.Locality()},
+			// currently we bypass the "gateway" workloadentry for local "GlobalWaypoints"
+		)
+		AssertSE(c1,
+			DesiredSE{Name: defaultSvc1Name, ServiceAccounts: []string{"spiffe://cluster.local/ns/default/sa/waypoint"}},
+			// We have a global service locally using the waypoint, so we mirror the waypoint
+			// to the peering namespace implicitly
+			DesiredSE{Name: "autogen.default.waypoint"})
+
+		// Delete the local waypoint
+		c1.DeleteService("waypoint")
+		c1.DeleteGateway("waypoint", "default")
+
+		AssertSE(c1,
+			DesiredSE{Name: defaultSvc1Name, ServiceAccounts: []string{"spiffe://cluster.local/ns/default/sa/waypoint"}},
+		)
+	})
+
 	t.Run("fully bidirection", func(t *testing.T) {
 		c1, c2 := setup(t)
 		c2.ConnectTo(c1)
@@ -1761,6 +1791,7 @@ func newCluster(t test.Failer, premadeKubeClient kube.Client, stop chan struct{}
 			return premadeKubeClient
 		}
 	}
+	fo.DefaultClusterName = cluster.ID(clusterName)
 	ds := xds.NewFakeDiscoveryServer(t, fo)
 
 	kc := ds.KubeClient()
