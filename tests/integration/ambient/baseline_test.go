@@ -685,7 +685,7 @@ spec:
 				check.OK(),
 				check.RequestHeaders(map[string]string{
 					"X-Lua-Inbound":   "",
-					"X-Vhost-Inbound": "",
+					"X-Vhost-Inbound": "hello world",
 				}))
 			src.CallOrFail(t, opt)
 		})
@@ -713,7 +713,7 @@ spec:
   configPatches:
   - applyTo: HTTP_FILTER
     match:
-      context: SIDECAR_INBOUND
+      context: GATEWAY
       listener:
         filterChain:
           filter:
@@ -746,12 +746,11 @@ spec:
 `).ApplyOrFail(t)
 			opt.Count = 5
 			opt.Timeout = time.Second * 10
-			// Test that we do NOT apply this envoyfilter, since EnvoyFilter is not implemented for waypoints
 			opt.Check = check.And(
 				check.OK(),
 				check.RequestHeaders(map[string]string{
-					"X-Lua-Inbound":   "",
-					"X-Vhost-Inbound": "",
+					"X-Lua-Inbound":   "hello world",
+					"X-Vhost-Inbound": "hello world",
 				}))
 			src.CallOrFail(t, opt)
 		})
