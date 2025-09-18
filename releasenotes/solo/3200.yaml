@@ -1,0 +1,12 @@
+apiVersion: release-notes/v2
+
+kind: bug-fix
+
+area: installation
+
+issue:
+  - https://github.com/solo-io/istio/issues/3200
+
+releaseNotes:
+- |
+  **Fixed** istiod crash when supplying a license to a FIPS-compliant version using a license secret.
