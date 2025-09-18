@@ -217,6 +217,11 @@ type Config struct {
 
 	// DeployGatewayAPI indicates that the test should deploy Gateway API during tests execution
 	DeployGatewayAPI bool
+
+	// SetUniqueTrustDomain configures the meshConfig.trustDomain to equal the name of the cluster and
+	// sets meshConfig.trustDomainAliases to an array including all cluster names from the ctx.
+	// This will override any trust domain settings in the cfg.ControlPlaneValues.
+	SetUniqueTrustDomain bool
 }
 
 func (c *Config) OverridesYAML(s *resource.Settings) string {

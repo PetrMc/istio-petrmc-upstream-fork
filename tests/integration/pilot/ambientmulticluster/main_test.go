@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/clientcmd/api/latest"
@@ -28,7 +29,7 @@ import (
 	"istio.io/istio/pkg/test/framework/components/namespace"
 	testlabel "istio.io/istio/pkg/test/framework/label"
 	"istio.io/istio/pkg/test/framework/resource"
-	"istio.io/istio/pkg/test/util/tmpl"
+	"istio.io/istio/pkg/test/util/retry"
 	"istio.io/istio/pkg/util/sets"
 	"istio.io/istio/tests/integration/pilot/ambientmulticluster/shared"
 	"istio.io/istio/tests/integration/security/util/cert"
@@ -77,12 +78,12 @@ func TestMain(m *testing.M) {
 			ctx.Settings().SkipVMs()                 // can't deploy VMs in this mode
 			cfg.DeployEastWestGW = false             // this is the sidecar/SNI eastwest
 			cfg.SkipDeployCrossClusterSecrets = true // TODO disable this, secrets shouldn't break peering
-
-			tm := `
+			cfg.SetUniqueTrustDomain = true
+			cfg.ControlPlaneValues = `
 profile: ambient
 values:
   meshConfig:
-    trustDomain: "{{.}}.local"
+    accessLogFile: "/dev/stdout"
     defaultHttpRetryPolicy:
       attempts: 0 # Do not hide failures with retries
   pilot:
@@ -97,11 +98,12 @@ values:
     peering:
       enabled: true
   ztunnel:
+    env:
+      SKIP_VALIDATE_TRUST_DOMAIN: "true"
     platforms:
       peering:
         enabled: true
 `
-			cfg.ControlPlaneValues = tmpl.MustEvaluate(tm, "primary")
 		}, cert.CreateCASecret)).
 		Setup(func(ctx resource.Context) error {
 			if err := crd.DeployGatewayAPI(ctx); err != nil {
@@ -155,13 +157,23 @@ values:
 				return err
 			}
 
-			stdout, stderr, err := istioctl.NewKubeManualConfig(filepath.Join(dir, "kubeconfig")).
-				Invoke([]string{"multicluster", "link", "--contexts", strings.Join(contexts, ","), "-n", "istio-gateway"})
+			ictl := istioctl.NewKubeManualConfig(filepath.Join(dir, "kubeconfig"))
+
+			stdout, stderr, err := ictl.Invoke([]string{"multicluster", "link", "--contexts", strings.Join(contexts, ","), "-n", "istio-gateway"})
+			log.Infof("istioctl link: %s, %s", stdout, stderr)
 			if err != nil {
 				return err
 			}
-			log.Infof("istioctl link: %s, %s", stdout, stderr)
-			return nil
+
+			// Note: this will only work for 1.27+
+			return retry.UntilSuccess(func() error {
+				stdout, stderr, err := ictl.Invoke([]string{"multicluster", "check"})
+				log.Infof("istioctl mc check: %s, %s", stdout, stderr)
+				if err != nil {
+					return err
+				}
+				return nil
+			}, retry.Timeout(1*time.Minute))
 		}).
 		Setup(func(t resource.Context) error {
 			return shared.SetupApps(t, apps)

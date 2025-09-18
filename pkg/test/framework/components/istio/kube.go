@@ -443,6 +443,7 @@ func (i *istioImpl) installControlPlaneCluster(c cluster.Cluster) error {
 	}
 
 	args := commonInstallArgs(i.ctx, i.cfg, c, i.cfg.PrimaryClusterIOPFile, i.primaryIOP.file)
+
 	if i.ctx.Environment().IsMultiCluster() {
 		if i.externalControlPlane || i.cfg.IstiodlessRemotes {
 			// Enable namespace controller writing to remote clusters
@@ -609,6 +610,13 @@ func commonInstallArgs(ctx resource.Context, cfg Config, c cluster.Cluster, defa
 			"values.global.imagePullPolicy=" + ctx.Settings().Image.PullPolicy,
 			"values.global.variant=" + ctx.Settings().Image.Variant,
 		},
+	}
+
+	// set the trust domain for the current installation equal to the name of the cluster
+	// and set the trust domain aliases to the list of all cluster names
+	if cfg.SetUniqueTrustDomain {
+		args.AppendSet("meshConfig.trustDomain", c.Name())
+		args.AppendSlice("meshConfig.trustDomainAliases", ctx.AllClusters().Names())
 	}
 
 	if ctx.Environment().IsMultiNetwork() && c.NetworkName() != "" {

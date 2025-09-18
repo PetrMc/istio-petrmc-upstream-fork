@@ -49,6 +49,16 @@ func (args *installArgs) AppendSet(key, value string) {
 	args.Set = append(args.Set, fmt.Sprintf("%s=%s", key, value))
 }
 
+// AppendSlice is used for array arguments like meshConfig.trustDomainAliases where
+// the input is of the form {value1,value2}.
+func (args *installArgs) AppendSlice(key string, value []string) {
+	// this works around issues with proto marshaling when attempting
+	// to pass the value as a stringified array
+	for i, v := range value {
+		args.Set = append(args.Set, fmt.Sprintf("%s[%d]=%s", key, i, v))
+	}
+}
+
 type installer struct {
 	ctx       resource.Context
 	workDir   string
