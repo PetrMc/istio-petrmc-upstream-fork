@@ -1462,9 +1462,10 @@ func TranslateFault(in *networking.HTTPFaultInjection) *xdshttpfault.HTTPFault {
 func TranslateRequestMirrorPolicy(cluster string, mp *core.RuntimeFractionalPercent,
 ) *route.RouteAction_RequestMirrorPolicy {
 	return &route.RouteAction_RequestMirrorPolicy{
-		Cluster:         cluster,
-		RuntimeFraction: mp,
-		TraceSampled:    &wrapperspb.BoolValue{Value: false},
+		Cluster:                       cluster,
+		RuntimeFraction:               mp,
+		TraceSampled:                  &wrapperspb.BoolValue{Value: false},
+		DisableShadowHostSuffixAppend: features.DisableShadowHostSuffix,
 	}
 }
 
