@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// nolint: gocritic
 package multicluster
 
 import (
@@ -238,7 +239,7 @@ func createRemoteSecretFromTokenAndServer(
 func waitForTokenData(client kube.CLIClient, secret *v1.Secret) (ca, token []byte, err error) {
 	ca, token, err = tokenDataFromSecret(secret)
 	if err == nil {
-		return
+		return ca, token, err
 	}
 
 	log.Infof("Waiting for data to be populated in %s", secret.Name)
@@ -252,7 +253,7 @@ func waitForTokenData(client kube.CLIClient, secret *v1.Secret) (ca, token []byt
 			return err
 		},
 		backoff.WithMaxRetries(backoff.NewConstantBackOff(tokenWaitBackoff), 5))
-	return
+	return ca, token, err
 }
 
 func tokenDataFromSecret(tokenSecret *v1.Secret) (ca, token []byte, err error) {
@@ -260,14 +261,14 @@ func tokenDataFromSecret(tokenSecret *v1.Secret) (ca, token []byte, err error) {
 	ca, ok = tokenSecret.Data[v1.ServiceAccountRootCAKey]
 	if !ok {
 		err = errMissingRootCAKey
-		return
+		return ca, token, err
 	}
 	token, ok = tokenSecret.Data[v1.ServiceAccountTokenKey]
 	if !ok {
 		err = errMissingTokenKey
-		return
+		return ca, token, err
 	}
-	return
+	return ca, token, err
 }
 
 func getServiceAccountSecret(client kube.CLIClient, opt RemoteSecretOptions) (*v1.Secret, error) {

@@ -2,6 +2,7 @@
 //
 // Licensed under a Solo commercial license, not Apache License, Version 2 or any other variant
 
+// nolint: gocritic
 package bootstrap
 
 import (
@@ -68,7 +69,7 @@ func getOrCreateServiceAccountSecret(
 func waitForTokenData(client kube.CLIClient, secret *v1.Secret) (ca, token []byte, err error) {
 	ca, token, err = tokenDataFromSecret(secret)
 	if err == nil {
-		return
+		return ca, token, err
 	}
 
 	log.Infof("Waiting for data to be populated in %s", secret.Name)
@@ -82,7 +83,7 @@ func waitForTokenData(client kube.CLIClient, secret *v1.Secret) (ca, token []byt
 			return err
 		},
 		backoff.WithMaxRetries(backoff.NewConstantBackOff(time.Second), 5))
-	return
+	return ca, token, err
 }
 
 func tokenDataFromSecret(tokenSecret *v1.Secret) (ca, token []byte, err error) {
@@ -90,14 +91,14 @@ func tokenDataFromSecret(tokenSecret *v1.Secret) (ca, token []byte, err error) {
 	ca, ok = tokenSecret.Data[v1.ServiceAccountRootCAKey]
 	if !ok {
 		err = errMissingRootCAKey
-		return
+		return ca, token, err
 	}
 	token, ok = tokenSecret.Data[v1.ServiceAccountTokenKey]
 	if !ok {
 		err = errMissingTokenKey
-		return
+		return ca, token, err
 	}
-	return
+	return ca, token, err
 }
 
 var (

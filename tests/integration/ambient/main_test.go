@@ -202,7 +202,7 @@ func TestMain(m *testing.M) {
 				if err != nil {
 					return err
 				}
-				return
+				return err
 			},
 		).
 		Run()
