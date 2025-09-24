@@ -19,6 +19,7 @@ package ambient
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
@@ -90,6 +91,10 @@ values:
         sampling: 100
 `
 
+	nativeNftablesValues = `
+  global:
+    nativeNftables: true
+`
 	ambientMultiNetworkControlPlaneValues = `
 values:
   pilot:
@@ -176,6 +181,12 @@ func TestMain(m *testing.M) {
 			cfg.EnableCNI = true
 			cfg.DeployEastWestGW = false
 			cfg.ControlPlaneValues = ambientControlPlaneValues
+
+			if ctx.Settings().NativeNftables {
+				scopes.Framework.Infof("Running the integration tests with nativeNftables enabled")
+				cfg.ControlPlaneValues = strings.TrimRight(ambientControlPlaneValues, "\n") + nativeNftablesValues
+			}
+
 			if ctx.Settings().AmbientMultiNetwork {
 				cfg.DeployEastWestGW = true
 				cfg.DeployGatewayAPI = true

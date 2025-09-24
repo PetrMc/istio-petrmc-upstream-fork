@@ -488,17 +488,29 @@ func constructServiceEntries(
 		})
 	}
 
-	trafficDistribution := model.GetTrafficDistribution(nil, svc.Annotations)
 	var lb *workloadapi.LoadBalancing
-	switch trafficDistribution {
-	case model.TrafficDistributionPreferSameZone:
-		lb = preferSameZoneLoadBalancer
-	case model.TrafficDistributionPreferSameNode:
-		lb = preferSameNodeLoadBalancer
-	case model.TrafficDistributionPreferNetwork:
-		lb = preferNetworkLoadBalancer
-	case model.TrafficDistributionPreferRegion:
-		lb = preferRegionLoadBalancer
+
+	// When resolution is NONE, we want to passthrough traffic to the destination address.
+	// In this case, we can skip attempting to get a traffic distribution because it is not applicable.
+	if svc.Spec.Resolution == v1alpha3.ServiceEntry_NONE {
+		lb = &workloadapi.LoadBalancing{
+			Mode: workloadapi.LoadBalancing_PASSTHROUGH,
+			// HealthPolicy is primarily aesthetic in this case, making the WDS easier to understand.
+			// We pass through to the endpoint called, so it seems weird if WDS has a OnlyHealthy LoadBalancer setting.
+			HealthPolicy: workloadapi.LoadBalancing_ALLOW_ALL,
+		}
+	} else {
+		trafficDistribution := model.GetTrafficDistribution(nil, svc.Annotations)
+		switch trafficDistribution {
+		case model.TrafficDistributionPreferSameZone:
+			lb = preferSameZoneLoadBalancer
+		case model.TrafficDistributionPreferSameNode:
+			lb = preferSameNodeLoadBalancer
+		case model.TrafficDistributionPreferNetwork:
+			lb = preferNetworkLoadBalancer
+		case model.TrafficDistributionPreferRegion:
+			lb = preferRegionLoadBalancer
+		}
 	}
 
 	// TODO this is only checking one controller - we may be missing service vips for instances in another cluster
