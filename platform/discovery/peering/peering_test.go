@@ -174,6 +174,34 @@ func TestPeering(t *testing.T) {
 		AssertWE(c1)
 		AssertSEPorts(c1, defaultSvc1Name, c1svc1Ports)
 	})
+
+	// Verify remote-only service on a flat network uses the global waypoint
+	t.Run("remote only flat network waypoint", func(t *testing.T) {
+		c1 := NewCluster(t, "c1", "net1")
+		c2 := NewCluster(t, "c2", "net1")
+		c1.ConnectTo(c2)
+
+		// Only the remote cluster has a waypoint and a service using it
+		deployWaypoint(c2)
+		c2.CreateServiceWithWaypoint("svc1", true, ports1)
+
+		seName := "autogen.default.svc1"
+		AssertSE(c1, DesiredSE{Name: seName, ServiceAccounts: []string{"spiffe://cluster.local/ns/default/sa/waypoint"}}, DesiredSE{Name: "autogen.default.waypoint"})
+
+		assert.EventuallyEqual(t, func() map[string]string {
+			se := c1.ServiceEntries.Get(seName, peering.PeeringNamespace)
+			if se == nil {
+				return nil
+			}
+			return map[string]string{
+				peering.RemoteWaypointLabel:    se.Labels[peering.RemoteWaypointLabel],
+				peering.UseGlobalWaypointLabel: se.Labels[peering.UseGlobalWaypointLabel],
+			}
+		}, map[string]string{
+			peering.RemoteWaypointLabel:    "true",
+			peering.UseGlobalWaypointLabel: "waypoint.default.mesh.internal",
+		})
+	})
 	t.Run("local exported", func(t *testing.T) {
 		c1, c2 := setup(t)
 		c1.CreateService("svc1", true, ports1)

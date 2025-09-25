@@ -700,7 +700,7 @@ func (c *NetworkWatcher) reconcileServiceEntry(name types.NamespacedName) error 
 	globalWaypointHost := ""
 	haveLocalNet := localService != nil
 	for _, remote := range remoteServices {
-		haveLocalNet = haveLocalNet || remote.Labels[label.TopologyNetwork.Name] == string(c.localNetwork)
+		haveLocalNet = haveLocalNet || remote.Spec.Network == string(c.localNetwork)
 		if rw, f := remote.Labels[UseGlobalWaypointLabel]; f && rw != "" {
 			globalWaypointHost = rw
 			break // TODO handle the case where two remote clusters disagree...
