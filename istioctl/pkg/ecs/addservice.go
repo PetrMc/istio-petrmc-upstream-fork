@@ -75,6 +75,7 @@ func ListRolesCmd(ctx cli.Context) *cobra.Command {
 
 func AddServiceCmd(ctx cli.Context, cluster string) *cobra.Command {
 	var serviceAccount string
+	var external bool
 	var platform string
 	cmd := &cobra.Command{
 		Use:   "add-service",
@@ -132,7 +133,7 @@ func AddServiceCmd(ctx cli.Context, cluster string) *cobra.Command {
 
 				// Now we need to generate a bootstrap token for them.
 				// Since this uses platform=ecs, there is no auth credentials in it, so safe to just put directly into the task definition.
-				bootstrapToken, err := fetchBootstrapToken(kc, ctx, printer, serviceAccount, *exRole)
+				bootstrapToken, err := fetchBootstrapToken(kc, ctx, printer, serviceAccount, *exRole, external)
 				if err != nil {
 					return fmt.Errorf("failed to generate bootstrap token: %v", err)
 				}
@@ -165,6 +166,7 @@ func AddServiceCmd(ctx cli.Context, cluster string) *cobra.Command {
 			return nil
 		},
 	}
+	cmd.PersistentFlags().BoolVar(&external, "external", external, "The workload is external to the network")
 	cmd.PersistentFlags().StringVarP(&serviceAccount, "service-account", "s", serviceAccount, "The service account the workload will run as.")
 	cmd.PersistentFlags().StringVarP(&platform, "platform", "p", platform, "The runtime platform we want to use. Valid options: [ecs, ecs-ec2]")
 	cmd.PersistentFlags().StringVar(&cluster, "cluster", "", "ECS cluster name to use")
@@ -350,7 +352,7 @@ func fetchService(ec *ecs.Client, service string, cluster string) (ecstypes.Serv
 	return current, nil
 }
 
-func fetchBootstrapToken(kc kube.CLIClient, ctx cli.Context, printer bootstrap.Printer, sa string, role string) (string, error) {
+func fetchBootstrapToken(kc kube.CLIClient, ctx cli.Context, printer bootstrap.Printer, sa string, role string, external bool) (string, error) {
 	serviceAccount := model.GetOrDefault(sa, "default") // TODO
 	ns := ctx.NamespaceOrDefault(ctx.Namespace())
 	sac := kc.Kube().CoreV1().ServiceAccounts(ns)
@@ -372,7 +374,7 @@ func fetchBootstrapToken(kc kube.CLIClient, ctx cli.Context, printer bootstrap.P
 
 	args := bootstrap.BootstrapArgs{
 		Printer:        printer,
-		External:       false, // Assume we are always in the VPC, at least for now.
+		External:       external,
 		Platform:       "ecs",
 		ServiceAccount: serviceAccount,
 		Namespace:      ns,

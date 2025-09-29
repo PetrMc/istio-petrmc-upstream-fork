@@ -17,8 +17,9 @@ import (
 )
 
 const (
-	ExposeIstiodLabel     = "istio.io/expose-istiod"
-	ExposeIstiodModeLabel = "istio.io/expose-istiod-mode"
+	ExposeIstiodLabel             = "istio.io/expose-istiod"
+	ExposeIstiodModeLabel         = "istio.io/expose-istiod-mode"
+	ExposeIstiodAddressAnnotation = "istio.io/expose-istiod-address"
 )
 
 func fetchIstiodURL(kc kube.CLIClient, p Printer, external bool) (string, error) {
@@ -76,6 +77,9 @@ func fetchIstiodURL(kc kube.CLIClient, p Printer, external bool) (string, error)
 
 func extractExternalAddress(istiod *v1.Service) string {
 	var base string
+	if addr, f := istiod.Annotations[ExposeIstiodAddressAnnotation]; f {
+		return addr
+	}
 	if len(istiod.Status.LoadBalancer.Ingress) > 0 {
 		if ip := istiod.Status.LoadBalancer.Ingress[0].IP; ip != "" {
 			base = ip

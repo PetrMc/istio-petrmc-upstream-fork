@@ -7,6 +7,7 @@ package peer
 import (
 	"context"
 	"fmt"
+	"net/netip"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -267,6 +268,44 @@ func findGateway(istioNamespace string, kc kube.CLIClient, revision string) (rem
 		return remoteGateway{}, fmt.Errorf("no services with %q label", bootstrap.ExposeIstiodLabel)
 	}
 	for _, svc := range svcs.Items {
+		if addr, f := svc.Annotations[bootstrap.ExposeIstiodAddressAnnotation]; f {
+			var gwAddr gateway.GatewaySpecAddress
+			if ip, err := netip.ParseAddr(addr); err == nil {
+				gwAddr = gateway.GatewaySpecAddress{
+					Type:  ptr.Of(gateway.IPAddressType),
+					Value: ip.String(),
+				}
+			} else {
+				gwAddr = gateway.GatewaySpecAddress{
+					Type:  ptr.Of(gateway.HostnameAddressType),
+					Value: addr,
+				}
+			}
+			gw := remoteGateway{
+				name:    svc.Name,
+				address: gwAddr,
+				region:  svc.Labels[labelutil.LabelTopologyRegion],
+				zone:    svc.Labels[labelutil.LabelTopologyZone],
+				network: svc.Labels[label.TopologyNetwork.Name],
+				cluster: svc.Labels[label.TopologyCluster.Name],
+			}
+			if gw.network == "" {
+				network, err := fetchNetwork(istioNamespace, kc)
+				if err != nil {
+					return remoteGateway{}, err
+				}
+				gw.network = string(network)
+			}
+			if gw.cluster == "" {
+				cls, err := fetchCluster(istioNamespace, kc, revision)
+				if err != nil {
+					// Fallback to network name as cluster name
+					cls = cluster.ID(gw.network)
+				}
+				gw.cluster = string(cls)
+			}
+			return gw, nil
+		}
 		if lb := svc.Status.LoadBalancer.Ingress; len(lb) > 0 {
 			var addr *gateway.GatewaySpecAddress
 			if lb[0].IP != "" {
