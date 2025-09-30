@@ -1,0 +1,12 @@
+apiVersion: release-notes/v2
+
+kind: feature
+
+area: traffic-management
+
+issue:
+  - https://github.com/solo-io/istio/issues/3276
+
+releaseNotes:
+- |
+  **Added** support for labeling Namespaces with `solo.io/service-scope` to allow setting the default scope for all services in the namespace. Labeling individual Services will take precedence over the Namespace label. Setting the scope to "cluster" allows opting out an individual service when the namespace is marked as "global" or "global-only". 

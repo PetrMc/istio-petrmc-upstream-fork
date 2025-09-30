@@ -376,4 +376,11 @@ func RunAllTrafficTests(t framework.TestContext, apps *EchoDeployments) {
 	RunCase("test-from-ztunnel", testFromZtunnel)
 	RunCase("test-from-sidecar", testFromSidecar)
 	RunCase("test-from-gateway", testFromGateway)
+
+	t.NewSubTest("namespace-service-scope_traffic-tests").Run(func(t framework.TestContext) {
+		SetupApps(t, apps, true)
+		RunCase("test-from-ztunnel", testFromZtunnel)
+		RunCase("test-from-sidecar", testFromSidecar)
+		RunCase("test-from-gateway", testFromGateway)
+	})
 }

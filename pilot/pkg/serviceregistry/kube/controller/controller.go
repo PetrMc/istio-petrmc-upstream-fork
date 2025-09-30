@@ -424,7 +424,6 @@ func (c *Controller) onServiceEvent(pre, curr *v1.Service, event model.Event) er
 
 	// Create the standard (cluster.local) service.
 	svcConv := kube.ConvertService(*curr, c.opts.DomainSuffix, c.Cluster(), c.meshWatcher.Mesh())
-
 	switch event {
 	case model.EventDelete:
 		c.deleteService(svcConv)

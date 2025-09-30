@@ -176,7 +176,7 @@ values:
 			}, retry.Timeout(1*time.Minute))
 		}).
 		Setup(func(t resource.Context) error {
-			return shared.SetupApps(t, apps)
+			return shared.SetupApps(t, apps, false)
 		}).
 		Run()
 }

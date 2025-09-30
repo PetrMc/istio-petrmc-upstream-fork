@@ -241,7 +241,8 @@ func serviceServiceBuilder(
 		}
 		waypointStatus.Error = wperr
 
-		svc := constructService(ctx, s, waypoint, serviceEntries, domainSuffix, networkGetter)
+		soloScope := getServiceScope(ctx, namespaces, s)
+		svc := constructService(ctx, s, waypoint, serviceEntries, domainSuffix, soloScope, networkGetter)
 
 		svcInfo := &model.ServiceInfo{
 			Service:             svc,
@@ -252,7 +253,7 @@ func serviceServiceBuilder(
 			Waypoint:            waypointStatus,
 			Scope:               serviceScope,
 			TrafficDistribution: model.MaybeGetTrafficDistribution(s.Spec.TrafficDistribution, s.GetAnnotations()),
-			SoloServiceScope:    s.Labels[peering.ServiceScopeLabel],
+			SoloServiceScope:    soloScope,
 		}
 		if precompute {
 			return precomputeServicePtr(svcInfo)
@@ -350,6 +351,22 @@ func matchServiceScope(ctx krt.HandlerContext, meshCfg *MeshConfig, namespaces k
 	return model.Local
 }
 
+func getServiceScope(ctx krt.HandlerContext, namespaces krt.Collection[*v1.Namespace], s *v1.Service) string {
+	ns := ptr.OrEmpty[v1.Namespace](ptr.Flatten(krt.FetchOne[*v1.Namespace](ctx, namespaces, krt.FilterKey(s.GetNamespace()))))
+
+	return peering.CalculateScope(s.GetLabels(), ns.GetLabels())
+}
+
+func getServiceEntryScope(ctx krt.HandlerContext, namespaces krt.Collection[*v1.Namespace], se *networkingclient.ServiceEntry) string {
+	nn := se.Namespace
+	if pnn, ok := se.Labels[peering.ParentServiceNamespaceLabel]; ok {
+		nn = pnn
+	}
+
+	ns := ptr.OrEmpty[v1.Namespace](ptr.Flatten(krt.FetchOne[*v1.Namespace](ctx, namespaces, krt.FilterKey(nn))))
+	return peering.CalculateScope(se.GetLabels(), ns.GetLabels())
+}
+
 func (a *index) serviceServiceBuilder(
 	waypoints krt.Collection[Waypoint],
 	namespaces krt.Collection[*v1.Namespace],
@@ -392,6 +409,8 @@ func (a *index) serviceEntryServiceBuilder(
 		var wasPeerObject bool
 		s, wasPeerObject = convertSENamespace(s)
 
+		scope := getServiceEntryScope(ctx, namespaces, s)
+
 		var waypoint *Waypoint
 		var waypointError *model.StatusMessage
 
@@ -409,7 +428,7 @@ func (a *index) serviceEntryServiceBuilder(
 		nwGetter := func(ctx krt.HandlerContext) network.ID {
 			return a.Network(ctx)
 		}
-		return serviceEntriesInfo(ctx, s, waypoint, waypointError, wasPeerObject, nwGetter)
+		return serviceEntriesInfo(ctx, s, waypoint, waypointError, wasPeerObject, scope, nwGetter)
 	}
 }
 
@@ -419,6 +438,7 @@ func serviceEntriesInfo(
 	w *Waypoint,
 	wperr *model.StatusMessage,
 	wasPeerObject bool,
+	scope string,
 	networkGetter func(ctx krt.HandlerContext) network.ID,
 ) []model.ServiceInfo {
 	sel := model.NewSelector(s.Spec.GetWorkloadSelector().GetLabels())
@@ -452,7 +472,7 @@ func serviceEntriesInfo(
 			Waypoint:            waypoint,
 			TrafficDistribution: model.MaybeGetTrafficDistribution(nil, s.GetAnnotations()),
 
-			SoloServiceScope: s.Labels[peering.ServiceScopeLabel],
+			SoloServiceScope: scope,
 			RemoteWaypoint:   s.Labels[peering.RemoteWaypointLabel] != "",
 		})
 	})
@@ -546,6 +566,7 @@ func constructService(
 	w *Waypoint,
 	serviceEntries krt.Collection[*networkingclient.ServiceEntry],
 	domainSuffix string,
+	scope string,
 	networkGetter func(krt.HandlerContext) network.ID,
 ) *workloadapi.Service {
 	ports := make([]*workloadapi.Port, 0, len(svc.Spec.Ports))
@@ -611,7 +632,7 @@ func constructService(
 	// only check the local serviceentries to gather SANs
 	// as remote SANs will be placed on the peered SE
 	var sans []string
-	if svc.Labels[peering.ServiceScopeLabel] == peering.ServiceScopeGlobalOnly {
+	if scope == peering.ServiceScopeGlobalOnly {
 		name := fmt.Sprintf("%s/autogen.%s.%s", peering.PeeringNamespace, svc.Namespace, svc.Name)
 		se := ptr.Flatten(krt.FetchOne(ctx, serviceEntries, krt.FilterKey(name)))
 		if se != nil {

@@ -694,7 +694,8 @@ func workloadEntryWorkloadBuilder(
 			services = krt.Fetch(ctx, workloadServices, krt.FilterKey(svcKey), krt.FilterGeneric(func(a any) bool {
 				return a.(model.ServiceInfo).Source.Kind == kind.ServiceEntry
 			}))
-			if wle.Labels[peering.ServiceScopeLabel] == peering.ServiceScopeGlobalOnly {
+			// use empty map for namespace labels to re-use the calculate scope function
+			if peering.CalculateScope(wle.GetLabels(), map[string]string{}) == peering.ServiceScopeGlobalOnly {
 				// If we are taking over the Service, also attach to that
 				services = append(services, krt.Fetch(
 					ctx, workloadServices,
@@ -1166,6 +1167,9 @@ func serviceEntryWorkloadBuilder(
 	return func(ctx krt.HandlerContext, se *networkingclient.ServiceEntry) []model.WorkloadInfo {
 		se, _ = convertSENamespace(se) // TODO: do we need it?
 		eps := se.Spec.Endpoints
+
+		scope := getServiceEntryScope(ctx, namespaces, se)
+
 		// If we have a DNS service, endpoints are not required
 		implicitEndpoints := len(eps) == 0 &&
 			(se.Spec.Resolution == networkingv1alpha3.ServiceEntry_DNS || se.Spec.Resolution == networkingv1alpha3.ServiceEntry_DNS_ROUND_ROBIN) &&
@@ -1178,7 +1182,7 @@ func serviceEntryWorkloadBuilder(
 		cluster := clusterGetter(ctx)
 		// here we don't care about the *service* waypoint (hence it is nil); we are only going to use a subset of the info in
 		// `allServiceInfos` (since we are building workloads here, not services).
-		allServiceInfos := serviceEntriesInfo(ctx, se, nil, nil, false, networkGetter)
+		allServiceInfos := serviceEntriesInfo(ctx, se, nil, nil, false, scope, networkGetter)
 		if implicitEndpoints {
 			eps = slices.Map(allServiceInfos, func(si model.ServiceInfo) *networkingv1alpha3.WorkloadEntry {
 				return &networkingv1alpha3.WorkloadEntry{Address: si.Service.Hostname}

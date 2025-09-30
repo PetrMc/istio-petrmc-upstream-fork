@@ -394,6 +394,7 @@ func TestPeering(t *testing.T) {
 					peering.ParentServiceNamespaceLabel: "default",
 					// svc2 doesn't exist on the network, skip proc but don't use network local waypoint instances
 					peering.RemoteWaypointLabel: "true",
+					peering.ServiceScopeLabel:   peering.ServiceScopeCluster,
 				},
 			},
 			// waypoint global mirror
@@ -402,6 +403,7 @@ func TestPeering(t *testing.T) {
 				Labels: map[string]string{
 					peering.ParentServiceLabel:          "waypoint",
 					peering.ParentServiceNamespaceLabel: "default",
+					peering.ServiceScopeLabel:           peering.ServiceScopeCluster,
 				},
 			},
 		}
@@ -770,6 +772,38 @@ func TestPeering(t *testing.T) {
 			{Name: "3001", Number: 3001, TargetPort: 3001},
 		})
 	})
+
+	t.Run("namesace_service-scope", func(t *testing.T) {
+		c1, c2 := setup(t)
+
+		// set the global flag to false, it should inherit from the ns
+		c1.CreateService("svc1", false, ports1)
+		c2.CreateService("svc1", false, ports1)
+
+		// use default namespace since this is hardcoded for the
+		// service creation helper
+		c1.CreateNamespaceWithLabels("default", map[string]string{
+			peering.ServiceScopeLabel: peering.ServiceScopeGlobal,
+		})
+		c2.CreateNamespaceWithLabels("default", map[string]string{
+			peering.ServiceScopeLabel: peering.ServiceScopeGlobal,
+		})
+
+		// validate the namespace service-scope label change
+		// had the appropriate effect on the resources
+		AssertSE(c1, DesiredSE{Name: defaultSvc1Name})
+		AssertWE(c1, DesiredWE{Name: c2Svc1Name, Locality: c2.Locality()})
+		lbls := map[string]string{
+			"app":                               "svc1",
+			peering.ParentServiceLabel:          "svc1",
+			peering.ServiceScopeLabel:           peering.ServiceScopeGlobal,
+			peering.ParentServiceNamespaceLabel: "default",
+			peering.SourceClusterLabel:          "c2",
+			model.TunnelLabel:                   model.TunnelHTTP,
+		}
+		AssertWELabels(c1, c2Svc1Name, lbls)
+	})
+
 	t.Run("local service changes", func(t *testing.T) {
 		c1, c2 := setup(t)
 		c1.CreateServiceLabel("svc1", peering.ServiceScopeGlobal, "", ports1)
@@ -1432,6 +1466,7 @@ type Cluster struct {
 	WorkloadEntries              clienttest.TestClient[*networkingclient.WorkloadEntry]
 	Gateways                     clienttest.TestClient[*k8sbeta.Gateway]
 	Services                     clienttest.TestClient[*corev1.Service]
+	Namespaces                   clienttest.TestClient[*corev1.Namespace]
 	Outage                       *OutageInjector
 	ZoneOverride, RegionOverride string
 }
@@ -1489,6 +1524,19 @@ func (c *Cluster) CreateServiceLabel(name string, scope string, waypoint string,
 
 func (c *Cluster) DeleteService(name string) {
 	c.Services.Delete(name, "default")
+}
+
+func (c *Cluster) CreateNamespaceWithLabels(name string, labels map[string]string) {
+	c.Namespaces.CreateOrUpdate(&corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   name,
+			Labels: labels,
+		},
+	})
+}
+
+func (c *Cluster) DeleteNamespace(name string) {
+	c.Namespaces.Delete(name, "")
 }
 
 func (c *Cluster) CreateWorkload(serviceName string, workloadName string, serviceAccount string, ports map[string]uint32) {
@@ -1863,6 +1911,7 @@ func newCluster(t test.Failer, premadeKubeClient kube.Client, stop chan struct{}
 		WorkloadEntries: clienttest.NewDirectClient[*networkingclient.WorkloadEntry, *networkingclient.WorkloadEntry, *networkingclient.WorkloadEntryList](t, kc),
 		Gateways:        clienttest.NewDirectClient[*k8sbeta.Gateway, k8sbeta.Gateway, *k8sbeta.GatewayList](t, kc),
 		Services:        clienttest.NewDirectClient[*corev1.Service, corev1.Service, *corev1.ServiceList](t, kc),
+		Namespaces:      clienttest.NewDirectClient[*corev1.Namespace, corev1.Namespace, *corev1.NamespaceList](t, kc),
 		t:               t,
 	}
 }

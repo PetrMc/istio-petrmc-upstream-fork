@@ -56,6 +56,7 @@ var log = istiolog.RegisterScope("peering", "")
 type NetworkWatcher struct {
 	client kube.Client
 
+	namespaces                kclient.Client[*corev1.Namespace]
 	gateways                  kclient.Client[*gateway.Gateway]
 	workloadEntries           kclient.Client[*clientnetworking.WorkloadEntry]
 	workloadEntryServiceIndex kclient.Index[types.NamespacedName, *clientnetworking.WorkloadEntry]
@@ -199,11 +200,35 @@ func New(
 		log.Error("failed to watch FederatedWaypoints from the local cluster")
 	}
 
+	// this namespace event handler reprocesses all services in a namespace if there is an
+	// update event. this allows handling service-scope namespace label changes
+	nsChanged := func(o controllers.Object) {
+		name := o.GetName()
+		services := c.services.List(name, klabels.Everything())
+		for _, service := range services {
+			// common services handler locks so we don't lock here
+			commonServiceHandler(config.NamespacedName(service))
+		}
+	}
+	c.namespaces = kclient.NewFiltered[*corev1.Namespace](client, kclient.Filter{})
+	c.namespaces.AddEventHandler(controllers.EventHandler[controllers.Object]{
+		UpdateFunc: func(oldObj, newObj controllers.Object) {
+			// TO-DO: should we do some label comparison here
+			// in the future to only reprocess if we absolutely
+			// have to?
+
+			// arbitrarily using the oldobj here since all we
+			// from it is the name
+			nsChanged(oldObj)
+		},
+	})
+
 	c.services.AddEventHandler(controllers.FilteredObjectHandler(func(o controllers.Object) {
 		name := config.NamespacedName(o)
 		commonServiceHandler(name)
 	}, func(o controllers.Object) bool {
-		return HasGlobalLabel(o.GetLabels())
+		ns := ptr.OrEmpty[corev1.Namespace](kclient.New[*corev1.Namespace](client).Get(o.GetNamespace(), ""))
+		return IsGlobal(CalculateScope(o.GetLabels(), ns.GetLabels()))
 	}))
 	c.workloadEntries.AddEventHandler(controllers.FilteredObjectHandler(func(o controllers.Object) {
 		svc := o.GetLabels()[ParentServiceLabel]
@@ -301,6 +326,7 @@ func (c *NetworkWatcher) Run(stop <-chan struct{}) {
 		c.workloadEntries.HasSynced,
 		c.services.HasSynced,
 		c.remoteWaypointSync.HasSynced,
+		c.namespaces.HasSynced,
 	)
 	c.queue.Add(cachesSyncedMarker{})
 
@@ -473,6 +499,7 @@ const (
 	ServiceScopeLabel      = "solo.io/service-scope"
 	ServiceScopeGlobal     = "global"
 	ServiceScopeGlobalOnly = "global-only"
+	ServiceScopeCluster    = "cluster"
 
 	ServiceSubjectAltNamesAnnotation = "solo.io/subject-alt-names"
 	ParentServiceLabel               = "solo.io/parent-service"
@@ -525,6 +552,18 @@ func deserializeProtocolsByPort(annotation string) map[uint32]string {
 func HasGlobalLabel(labels map[string]string) bool {
 	v := labels[ServiceScopeLabel]
 	return IsGlobal(v)
+}
+
+func CalculateScope(svcl, nsl map[string]string) string {
+	if val, ok := svcl[ServiceScopeLabel]; ok {
+		return val
+	}
+
+	if val, ok := nsl[ServiceScopeLabel]; ok {
+		return val
+	}
+
+	return ServiceScopeCluster
 }
 
 func IsGlobal(scope string) bool {

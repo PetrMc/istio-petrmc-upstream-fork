@@ -32,7 +32,9 @@ import (
 	"istio.io/istio/pkg/cluster"
 	"istio.io/istio/pkg/config"
 	"istio.io/istio/pkg/config/constants"
+	"istio.io/istio/pkg/kube"
 	"istio.io/istio/pkg/kube/controllers"
+	"istio.io/istio/pkg/kube/kclient"
 	"istio.io/istio/pkg/kube/krt"
 	istiolog "istio.io/istio/pkg/log"
 	"istio.io/istio/pkg/maps"
@@ -481,6 +483,12 @@ func workloadEntryChanged(desired *clientnetworking.WorkloadEntry, live *clientn
 	return proto.Equal(&desired.Spec, &live.Spec)
 }
 
+func GetSoloScope(client kube.Client, ns string, labels map[string]string) string {
+	namespace := ptr.OrEmpty(kclient.New[*corev1.Namespace](client).Get(ns, ""))
+
+	return CalculateScope(labels, namespace.GetLabels())
+}
+
 func (c *NetworkWatcher) reconcileGatewayWorkloadEntry(tn types.NamespacedName) error {
 	log := log.WithLabels("workloadentry", tn)
 
@@ -516,20 +524,23 @@ func (c *NetworkWatcher) reconcileGatewayWorkloadEntry(tn types.NamespacedName) 
 	localService := c.services.Get(name, ns)
 	weScope := ConvertScopeFromWorkloadAPI(fs.Service.Scope)
 	var localPorts []corev1.ServicePort
-	if localService != nil && !HasGlobalLabel(localService.Labels) {
-		// It's not global, so ignore it
-		localService = nil
-	}
 	if localService != nil {
-		weScope = localService.Labels[ServiceScopeLabel]
-		// If the local service exists, the SE is going to set the label selectors to the service's so we can select the Pod
-		// We need to include those
-		labels = maps.Clone(localService.Spec.Selector)
-		if labels == nil {
-			labels = map[string]string{}
+		scope := GetSoloScope(c.client, localService.GetNamespace(), localService.GetLabels())
+		if !IsGlobal(scope) {
+			// It's not global, so ignore it
+			localService = nil
+		} else {
+			weScope = scope
+			// If the local service exists, the SE is going to set the label selectors to the service's so we can select the Pod
+			// We need to include those
+			labels = maps.Clone(localService.Spec.Selector)
+			if labels == nil {
+				labels = map[string]string{}
+			}
+			localPorts = localService.Spec.Ports
 		}
-		localPorts = localService.Spec.Ports
 	}
+
 	// Add our identification labels always. If there is no labels this will be used as the selector in the SE
 	labels[ParentServiceLabel] = name
 	labels[ServiceScopeLabel] = weScope
@@ -651,9 +662,13 @@ func (c *NetworkWatcher) reconcileServiceEntry(name types.NamespacedName) error 
 		)
 	}
 
-	if localService != nil && !HasGlobalLabel(localService.Labels) && !c.isGlobalWaypoint(localService) {
-		// It's not global, so ignore it
-		localService = nil
+	scope := ServiceScopeCluster
+	if localService != nil {
+		scope = GetSoloScope(c.client, localService.GetNamespace(), localService.GetLabels())
+		if !IsGlobal(scope) && !c.isGlobalWaypoint(localService) {
+			// It's not global, so ignore it
+			localService = nil
+		}
 	}
 
 	if localService == nil && len(remoteServices) == 0 {
@@ -667,6 +682,7 @@ func (c *NetworkWatcher) reconcileServiceEntry(name types.NamespacedName) error 
 	}
 	labels[ParentServiceLabel] = name.Name
 	labels[ParentServiceNamespaceLabel] = name.Namespace
+	labels[ServiceScopeLabel] = scope
 	se.Labels = labels
 
 	annos := make(map[string]string)

@@ -11,7 +11,9 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
 
+	"istio.io/istio/pkg/kube/kclient"
 	"istio.io/istio/pkg/maps"
+	"istio.io/istio/pkg/ptr"
 	"istio.io/istio/pkg/workloadapi"
 )
 
@@ -53,12 +55,6 @@ func (c *NetworkWatcher) mergedServicesForWorkload(workload *RemoteWorkload) []s
 			continue
 		}
 
-		localService := c.services.Get(svcName, svcNs)
-		if localService != nil && !HasGlobalLabel(localService.Labels) && !c.isGlobalWaypoint(localService) {
-			// It's not global, so ignore it
-			localService = nil
-		}
-
 		labels := map[string]string{}
 
 		// Query the gateway WorkloadEntry from this Workload's cluster to get the scope
@@ -71,13 +67,21 @@ func (c *NetworkWatcher) mergedServicesForWorkload(workload *RemoteWorkload) []s
 			}
 		}
 
+		localService := c.services.Get(svcName, svcNs)
 		if localService != nil {
-			weScope = localService.Labels[ServiceScopeLabel]
-			// If the local service exists, the SE is going to set the label selectors to the service's so we can select the Pod
-			// We need to include those
-			labels = maps.Clone(localService.Spec.Selector)
-			if labels == nil {
-				labels = map[string]string{}
+			ns := ptr.OrEmpty(kclient.New[*corev1.Namespace](c.client).Get(localService.GetNamespace(), ""))
+			scope := CalculateScope(localService.GetLabels(), ns.GetLabels())
+			if !IsGlobal(scope) && !c.isGlobalWaypoint(localService) {
+				// It's not global, so ignore it
+				localService = nil
+			} else {
+				weScope = scope
+				// If the local service exists, the SE is going to set the label selectors to the service's so we can select the Pod
+				// We need to include those
+				labels = maps.Clone(localService.Spec.Selector)
+				if labels == nil {
+					labels = map[string]string{}
+				}
 			}
 		}
 
