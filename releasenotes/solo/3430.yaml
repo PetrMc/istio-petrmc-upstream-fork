@@ -1,0 +1,15 @@
+apiVersion: release-notes/v2
+
+kind: bug-fix
+
+area: traffic-management
+
+issue:
+  - https://github.com/solo-io/istio/issues/3430
+
+releaseNotes:
+- |
+  **Fixed** For connections to east/west gateways from Envoy proxies
+  (sidecar, waypoint, ingress), the outer HBONE connection used port 15008,
+  rather than the HBONE port specified in the istio-remote gateway.  This
+  presented a problem when specifying NodePort east/west gateways.

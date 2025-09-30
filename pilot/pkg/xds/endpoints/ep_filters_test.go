@@ -1037,3 +1037,59 @@ func TestCrossNetworkHBONEEndpointUniqueIds(t *testing.T) {
 		t.Errorf("Expected at least %d unique EndpointIds, got %d", len(ewGateways), len(endpointIDs))
 	}
 }
+
+// Validates that the cross-network HBONE dest uses actual gateway ip:port specified in
+// the remote gateway.
+func TestCrossNetworkHBONEEndpointContainsGatewayPort(t *testing.T) {
+	test.SetForTest(t, &features.EnableEnvoyMultiNetworkHBONE, true)
+
+	ewGateways := []model.NetworkGateway{
+		{Network: "network2", Cluster: "cluster2", Addr: "2.2.2.2", HBONEPort: 30225, Port: 30225},
+		{Network: "network3", Cluster: "cluster3", Addr: "3.3.3.3", HBONEPort: 31111, Port: 31111},
+	}
+
+	ds := xds.NewFakeDiscoveryServer(t, xds.FakeOptions{
+		Services: []*model.Service{{
+			Hostname:   "example.ns.svc.cluster.local",
+			Attributes: model.ServiceAttributes{Name: "example", Namespace: "ns"},
+			Ports:      model.PortList{{Port: 80, Protocol: protocol.HTTP, Name: "http"}},
+		}},
+		Gateways: ewGateways,
+	})
+
+	// need synthetic endpoints to exist
+	for _, gw := range ewGateways {
+		ie := &model.IstioEndpoint{
+			Network:         gw.Network,
+			Addresses:       []string{"10.0.0.1"},
+			ServicePortName: "http",
+			Namespace:       "ns",
+			HostName:        "example.ns.svc.cluster.local",
+			EndpointPort:    80,
+			TLSMode:         "istio",
+			Locality:        model.Locality{ClusterID: gw.Cluster},
+		}
+		shardKey := model.ShardKey{Cluster: gw.Cluster}
+		ds.Discovery.Env.EndpointIndex.UpdateServiceEndpoints(shardKey, string("example.ns.svc.cluster.local"), "ns", []*model.IstioEndpoint{ie}, false)
+	}
+
+	proxy := &model.Proxy{Type: model.Waypoint, Metadata: &model.NodeMetadata{Network: "network1", ClusterID: "cluster1"}}
+	testProxy := ds.SetupProxy(proxy)
+	cn := "outbound|80||example.ns.svc.cluster.local"
+	b := endpoints.NewEndpointBuilder(cn, testProxy, ds.PushContext())
+	cla := b.BuildClusterLoadAssignment(ds.Discovery.Env.EndpointIndex)
+
+	found := map[string]bool{}
+	for _, loc := range cla.GetEndpoints() {
+		for _, ep := range loc.GetLbEndpoints() {
+			if md := ep.GetMetadata().GetFilterMetadata()[util.OriginalDstMetadataKey]; md != nil {
+				if v := md.GetFields()["local"].GetStringValue(); v == "2.2.2.2:30225" || v == "3.3.3.3:31111" {
+					found[v] = true
+				}
+			}
+		}
+	}
+	if !found["2.2.2.2:30225"] || !found["3.3.3.3:31111"] {
+		t.Fatalf("expected both gateway ports in metadata, got: %#v", found)
+	}
+}

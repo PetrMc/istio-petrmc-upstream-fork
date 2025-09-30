@@ -210,13 +210,6 @@ func (cb *ClusterBuilder) buildConnectOriginateOuter(proxy *model.Proxy, push *m
 		CleanupInterval:               durationpb.New(60 * time.Second),
 		CircuitBreakers:               &cluster.CircuitBreakers{Thresholds: []*cluster.CircuitBreakers_Thresholds{getDefaultCircuitBreakerThresholds()}},
 		TypedExtensionProtocolOptions: h2connectUpgrade(),
-		LbConfig: &cluster.Cluster_OriginalDstLbConfig_{
-			OriginalDstLbConfig: &cluster.Cluster_OriginalDstLbConfig{
-				UpstreamPortOverride: &wrappers.UInt32Value{
-					Value: model.HBoneInboundListenPort,
-				},
-			},
-		},
 		TransportSocket: &core.TransportSocket{
 			Name: "tls",
 			ConfigType: &core.TransportSocket_TypedConfig{TypedConfig: protoconv.MessageToAny(&tlsv3.UpstreamTlsContext{
