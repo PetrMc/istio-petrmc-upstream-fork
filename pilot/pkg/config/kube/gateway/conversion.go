@@ -1618,6 +1618,7 @@ func unexpectedWaypointListener(l k8s.Listener) bool {
 	return false
 }
 
+// nolint: unused
 func unexpectedEastWestWaypointListener(l k8s.Listener) bool {
 	if l.Port != 15008 {
 		return true
@@ -2029,14 +2030,8 @@ func buildListener(
 		}
 	}
 
-	if controllerName == constants.ManagedGatewayEastWestController {
-		if unexpectedEastWestWaypointListener(l) {
-			listenerConditions[string(k8s.ListenerConditionAccepted)].error = &ConfigError{
-				Reason:  string(k8s.ListenerReasonUnsupportedProtocol),
-				Message: `Expected a single listener on port 15008 with protocol "HBONE" and TLS.Mode == Terminate`,
-			}
-		}
-	}
+	// Removed: OSS validation of east-west gateway listeners is not applicable to Solo's east-west gateway.
+
 	server := &istio.Server{
 		Port: &istio.Port{
 			// Name is required. We only have one server per Gateway, so we can just name them all the same

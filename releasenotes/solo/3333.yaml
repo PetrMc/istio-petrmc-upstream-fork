@@ -1,0 +1,12 @@
+apiVersion: release-notes/v2
+
+kind: bug-fix
+
+area: traffic-management
+
+issue:
+  - https://github.com/solo-io/istio/issues/3333
+
+releaseNotes:
+- |
+  **Removed** incorrect `UnsupportedProtocol` warning from Gateway resources for east-west gateways.
