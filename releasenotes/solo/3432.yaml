@@ -1,0 +1,12 @@
+apiVersion: release-notes/v2
+
+kind: bug-fix
+
+area: installation
+
+issue:
+  - https://github.com/solo-io/istio/issues/3432
+
+releaseNotes:
+- |
+  **Fixed** missing gateway reconciliation for service-type changes

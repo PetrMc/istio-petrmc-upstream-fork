@@ -848,8 +848,9 @@ func (c *NetworkWatcher) reconcileEastWestGateway(gw *gateway.Gateway) {
 		if !maps.Equal(desired.Labels, live.Labels) {
 			return false
 		}
+		// need to reprocess on annotation changes for service-type
 		if !maps.Equal(desired.Annotations, live.Annotations) {
-			return false
+			return true
 		}
 		return reflect.DeepEqual(desired, live)
 	})
