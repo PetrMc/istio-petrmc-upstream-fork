@@ -200,34 +200,24 @@ func New(
 		log.Error("failed to watch FederatedWaypoints from the local cluster")
 	}
 
-	// this namespace event handler reprocesses all services in a namespace if there is an
-	// update event. this allows handling service-scope namespace label changes
-	nsChanged := func(o controllers.Object) {
-		name := o.GetName()
+	c.namespaces = kclient.NewFiltered[*corev1.Namespace](client, kclient.Filter{})
+	c.namespaces.AddEventHandler(controllers.ObjectHandler(func(obj controllers.Object) {
+		// this namespace event handler reprocesses all services in a namespace if there is an
+		// update event. this allows handling service-scope namespace label changes
+		name := obj.GetName()
 		services := c.services.List(name, klabels.Everything())
 		for _, service := range services {
 			// common services handler locks so we don't lock here
 			commonServiceHandler(config.NamespacedName(service))
 		}
-	}
-	c.namespaces = kclient.NewFiltered[*corev1.Namespace](client, kclient.Filter{})
-	c.namespaces.AddEventHandler(controllers.EventHandler[controllers.Object]{
-		UpdateFunc: func(oldObj, newObj controllers.Object) {
-			// TO-DO: should we do some label comparison here
-			// in the future to only reprocess if we absolutely
-			// have to?
-
-			// arbitrarily using the oldobj here since all we
-			// from it is the name
-			nsChanged(oldObj)
-		},
-	})
+	}))
 
 	c.services.AddEventHandler(controllers.FilteredObjectHandler(func(o controllers.Object) {
 		name := config.NamespacedName(o)
 		commonServiceHandler(name)
 	}, func(o controllers.Object) bool {
-		ns := ptr.OrEmpty[corev1.Namespace](kclient.New[*corev1.Namespace](client).Get(o.GetNamespace(), ""))
+		ns := ptr.OrEmpty(c.namespaces.Get(o.GetNamespace(), ""))
+		// TODO: is this broken when removing global label?
 		return IsGlobal(CalculateScope(o.GetLabels(), ns.GetLabels()))
 	}))
 	c.workloadEntries.AddEventHandler(controllers.FilteredObjectHandler(func(o controllers.Object) {

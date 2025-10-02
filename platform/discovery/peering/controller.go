@@ -32,7 +32,6 @@ import (
 	"istio.io/istio/pkg/cluster"
 	"istio.io/istio/pkg/config"
 	"istio.io/istio/pkg/config/constants"
-	"istio.io/istio/pkg/kube"
 	"istio.io/istio/pkg/kube/controllers"
 	"istio.io/istio/pkg/kube/kclient"
 	"istio.io/istio/pkg/kube/krt"
@@ -491,8 +490,8 @@ func workloadEntryChanged(desired *clientnetworking.WorkloadEntry, live *clientn
 	return proto.Equal(&desired.Spec, &live.Spec)
 }
 
-func GetSoloScope(client kube.Client, ns string, labels map[string]string) string {
-	namespace := ptr.OrEmpty(kclient.New[*corev1.Namespace](client).Get(ns, ""))
+func getSoloScope(kc kclient.Client[*corev1.Namespace], ns string, labels map[string]string) string {
+	namespace := ptr.OrEmpty(kc.Get(ns, ""))
 
 	return CalculateScope(labels, namespace.GetLabels())
 }
@@ -533,7 +532,7 @@ func (c *NetworkWatcher) reconcileGatewayWorkloadEntry(tn types.NamespacedName) 
 	weScope := ConvertScopeFromWorkloadAPI(fs.Service.Scope)
 	var localPorts []corev1.ServicePort
 	if localService != nil {
-		scope := GetSoloScope(c.client, localService.GetNamespace(), localService.GetLabels())
+		scope := getSoloScope(c.namespaces, localService.GetNamespace(), localService.GetLabels())
 		if !IsGlobal(scope) {
 			// It's not global, so ignore it
 			localService = nil
@@ -672,7 +671,7 @@ func (c *NetworkWatcher) reconcileServiceEntry(name types.NamespacedName) error 
 
 	scope := ServiceScopeCluster
 	if localService != nil {
-		scope = GetSoloScope(c.client, localService.GetNamespace(), localService.GetLabels())
+		scope = getSoloScope(c.namespaces, localService.GetNamespace(), localService.GetLabels())
 		if !IsGlobal(scope) && !c.isGlobalWaypoint(localService) {
 			// It's not global, so ignore it
 			localService = nil

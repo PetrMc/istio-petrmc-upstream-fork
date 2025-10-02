@@ -11,7 +11,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
 
-	"istio.io/istio/pkg/kube/kclient"
 	"istio.io/istio/pkg/maps"
 	"istio.io/istio/pkg/ptr"
 	"istio.io/istio/pkg/workloadapi"
@@ -69,7 +68,7 @@ func (c *NetworkWatcher) mergedServicesForWorkload(workload *RemoteWorkload) []s
 
 		localService := c.services.Get(svcName, svcNs)
 		if localService != nil {
-			ns := ptr.OrEmpty(kclient.New[*corev1.Namespace](c.client).Get(localService.GetNamespace(), ""))
+			ns := ptr.OrEmpty(c.namespaces.Get(localService.GetNamespace(), ""))
 			scope := CalculateScope(localService.GetLabels(), ns.GetLabels())
 			if !IsGlobal(scope) && !c.isGlobalWaypoint(localService) {
 				// It's not global, so ignore it
