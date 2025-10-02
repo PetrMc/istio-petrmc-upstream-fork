@@ -124,24 +124,32 @@ func (c *NetworkWatcher) reconcileGateway(name types.NamespacedName) error {
 	c.clustersMu.Lock()
 	defer c.clustersMu.Unlock()
 	log := log.WithLabels("gateway", name)
-	gw := c.gateways.Get(name.Name, name.Namespace)
-	if EnableAutomaticGatewayCreation {
-		c.reconcileEastWestGateway(gw)
-	}
-	peer, err := TranslatePeerGateway(gw)
-	if err != nil {
+
+	cleanupPeerCluster := func(err error) {
 		oldCluster, f := c.gatewaysToCluster[name]
 		delete(c.gatewaysToCluster, name)
 		if !f {
 			c.enqueueStatusUpdate(name)
 			log.Debugf("gateway is not a peer gateway (%v) and we were not tracking it", err)
-			return nil
+			return
 		}
 		log.Infof("gateway for cluster %q is no longer a peer gateway (%v), shutting down cluster controller", oldCluster, err)
 		peerCluster := c.remoteClusters[oldCluster]
 		peerCluster.shutdownNow()
 		delete(c.remoteClusters, oldCluster)
 		c.enqueueStatusUpdate(name)
+	}
+
+	gw := c.gateways.Get(name.Name, name.Namespace)
+	if EnableAutomaticGatewayCreation {
+		if err := c.reconcileEastWestGateway(gw); err != nil {
+			cleanupPeerCluster(err)
+			return err
+		}
+	}
+	peer, err := TranslatePeerGateway(gw)
+	if err != nil {
+		cleanupPeerCluster(err)
 		return nil
 	}
 
@@ -818,25 +826,25 @@ func computeTrafficDistribution(remoteServices []*clientnetworking.WorkloadEntry
 }
 
 // reconcileEastWestGateway creates/updates/deletes the generated istio-remote peer gateway for the given istio-eastwest gateway
-func (c *NetworkWatcher) reconcileEastWestGateway(gw *gateway.Gateway) {
+func (c *NetworkWatcher) reconcileEastWestGateway(gw *gateway.Gateway) error {
 	if gw == nil {
 		log.Debug("gateway was deleted")
-		return
+		return nil
 	}
 	if gw.Spec.GatewayClassName != constants.EastWestGatewayClassName {
 		log.Debugf("gateway is not an istio-eastwest gateway (was %q)", gw.Spec.GatewayClassName)
-		return
+		return nil
 	}
 	meshConfig := c.meshConfigWatcher.Mesh()
 	if meshConfig == nil {
 		log.Error("mesh config not found")
-		return
+		return nil
 	}
 	td := meshConfig.GetTrustDomain()
 	generatedPeer, err := TranslateEastWestGateway(gw, td)
 	if err != nil {
 		log.Warnf("failed to generate peer gateway: %v", err)
-		return
+		return nil
 	}
 	changed, err := CreateOrUpdateIfNeeded(c.gateways, generatedPeer, func(desired *gateway.Gateway, live *gateway.Gateway) bool {
 		if desired.Name != live.Name {
@@ -856,9 +864,10 @@ func (c *NetworkWatcher) reconcileEastWestGateway(gw *gateway.Gateway) {
 	})
 	if err != nil {
 		log.Errorf("failed to create or update peer gateway: %v", err)
-		return
+		return err
 	}
 	log.WithLabels("updated", changed).Infof("generated peer gateway %q processed", generatedPeer.Name)
+	return nil
 }
 
 func (c *NetworkWatcher) ReconcileStatus(raw any) error {
@@ -887,6 +896,7 @@ func (c *NetworkWatcher) reconcileGatewayStatus(name types.NamespacedName) error
 		return nil
 	}
 
+	now := metav1.Now()
 	var gatewayConditions []metav1.Condition
 	err := ValidatePeerGateway(*gw)
 	if err != nil {
@@ -896,14 +906,14 @@ func (c *NetworkWatcher) reconcileGatewayStatus(name types.NamespacedName) error
 			Status:             metav1.ConditionFalse,
 			Reason:             string(k8s.GatewayReasonInvalid),
 			Message:            fmt.Sprintf("no network started encountered error validating gateway: %v", err.Error()),
-			LastTransitionTime: metav1.Now(),
+			LastTransitionTime: now,
 		}, metav1.Condition{
 			ObservedGeneration: gw.Generation,
 			Type:               constants.SoloConditionPeerConnected,
 			Status:             metav1.ConditionFalse,
 			Reason:             string(k8s.GatewayReasonInvalid),
 			Message:            fmt.Sprintf("no network started encountered error validating gateway: %v", err.Error()),
-			LastTransitionTime: metav1.Now(),
+			LastTransitionTime: now,
 		})
 		return c.setGatewayStatus(log, gw, gatewayConditions)
 	}
@@ -925,7 +935,7 @@ func (c *NetworkWatcher) reconcileGatewayStatus(name types.NamespacedName) error
 			Type:               constants.SoloConditionPeerConnected,
 			Status:             metav1.ConditionTrue,
 			Reason:             string(k8s.GatewayReasonProgrammed),
-			LastTransitionTime: metav1.Now(),
+			LastTransitionTime: now,
 		})
 	} else {
 		gatewayConditions = append(gatewayConditions, metav1.Condition{
@@ -934,7 +944,7 @@ func (c *NetworkWatcher) reconcileGatewayStatus(name types.NamespacedName) error
 			Status:             metav1.ConditionFalse,
 			Reason:             string(k8s.GatewayReasonPending),
 			Message:            "not connected to peer",
-			LastTransitionTime: metav1.Now(),
+			LastTransitionTime: now,
 		})
 	}
 
@@ -945,7 +955,7 @@ func (c *NetworkWatcher) reconcileGatewayStatus(name types.NamespacedName) error
 			Status:             metav1.ConditionUnknown,
 			Reason:             string(k8s.GatewayReasonPending),
 			Message:            "network not yet synced check istiod log for more details",
-			LastTransitionTime: metav1.Now(),
+			LastTransitionTime: now,
 		})
 	} else {
 		gatewayConditions = append(gatewayConditions, metav1.Condition{
@@ -953,7 +963,7 @@ func (c *NetworkWatcher) reconcileGatewayStatus(name types.NamespacedName) error
 			Type:               constants.SoloConditionPeeringSucceeded,
 			Status:             metav1.ConditionTrue,
 			Reason:             string(k8s.GatewayReasonProgrammed),
-			LastTransitionTime: metav1.Now(),
+			LastTransitionTime: now,
 		})
 	}
 	return c.setGatewayStatus(log, gw, gatewayConditions)

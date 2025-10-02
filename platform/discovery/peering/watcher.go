@@ -689,9 +689,7 @@ func TranslatePeerGateway(gw *gateway.Gateway) (PeerGateway, error) {
 		return peer, err
 	}
 	peer.Network = networkid.ID(gw.Labels[label.TopologyNetwork.Name])
-	if peer.Network == "" {
-		return peer, fmt.Errorf("no network label found in gateway")
-	}
+
 	peer.Cluster = cluster.ID(gw.Labels[label.TopologyCluster.Name])
 	if peer.Cluster == "" {
 		log.Debugf(
@@ -700,13 +698,6 @@ func TranslatePeerGateway(gw *gateway.Gateway) (PeerGateway, error) {
 		)
 		// Fallback to cluster == network
 		peer.Cluster = cluster.ID(peer.Network)
-	}
-	if len(gw.Spec.Addresses) == 0 {
-		if len(gw.Status.Addresses) > 0 {
-			// We could support this, but right now it's an error and doesn't have a use case
-			return peer, fmt.Errorf("no spec.addresses found in gateway (but found status.addresses)")
-		}
-		return peer, fmt.Errorf("no addresses found in gateway")
 	}
 	// We can use hostname or IP, so don't need to check the type
 	host := gw.Spec.Addresses[0].Value
@@ -720,8 +711,8 @@ func TranslatePeerGateway(gw *gateway.Gateway) (PeerGateway, error) {
 	}
 	peer.Address = net.JoinHostPort(host, port)
 
-	region, rf := gw.Labels["topology.kubernetes.io/region"]
-	zone, zf := gw.Labels["topology.kubernetes.io/zone"]
+	region, rf := gw.Labels[corev1.LabelTopologyRegion]
+	zone, zf := gw.Labels[corev1.LabelTopologyZone]
 	if rf && zf {
 		peer.Locality = region + "/" + zone
 	} else if rf {
