@@ -10,9 +10,9 @@ metadata:
   annotations: {}
   labels:
     gateway.istio.io/managed: istio.io-eastwest-controller
-    gateway.networking.k8s.io/gateway-class-name: istio-east-west
+    gateway.networking.k8s.io/gateway-class-name: istio-eastwest
     gateway.networking.k8s.io/gateway-name: eastwestgateway
-    topology.istio.io/network: network-1
+    istio.io/dataplane-mode: none
   name: eastwestgateway
   namespace: istio-system
   ownerReferences:
@@ -27,9 +27,9 @@ metadata:
   annotations: {}
   labels:
     gateway.istio.io/managed: istio.io-eastwest-controller
-    gateway.networking.k8s.io/gateway-class-name: istio-east-west
+    gateway.networking.k8s.io/gateway-class-name: istio-eastwest
     gateway.networking.k8s.io/gateway-name: eastwestgateway
-    topology.istio.io/network: network-1
+    istio.io/dataplane-mode: none
   name: eastwestgateway
   namespace: istio-system
   ownerReferences:
@@ -50,13 +50,12 @@ spec:
         prometheus.io/scrape: "true"
       labels:
         gateway.istio.io/managed: istio.io-eastwest-controller
-        gateway.networking.k8s.io/gateway-class-name: istio-east-west
+        gateway.networking.k8s.io/gateway-class-name: istio-eastwest
         gateway.networking.k8s.io/gateway-name: eastwestgateway
         istio.io/dataplane-mode: none
         service.istio.io/canonical-name: eastwestgateway
         service.istio.io/canonical-revision: latest
         sidecar.istio.io/inject: "false"
-        topology.istio.io/network: network-1
     spec:
       containers:
       - args:
@@ -230,9 +229,9 @@ metadata:
     networking.istio.io/traffic-distribution: PreferClose
   labels:
     gateway.istio.io/managed: istio.io-eastwest-controller
-    gateway.networking.k8s.io/gateway-class-name: istio-east-west
+    gateway.networking.k8s.io/gateway-class-name: istio-eastwest
     gateway.networking.k8s.io/gateway-name: eastwestgateway
-    topology.istio.io/network: network-1
+    istio.io/dataplane-mode: none
   name: eastwestgateway
   namespace: istio-system
   ownerReferences:
