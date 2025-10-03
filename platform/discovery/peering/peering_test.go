@@ -812,7 +812,19 @@ func TestPeering(t *testing.T) {
 		AssertWE(c1, DesiredWE{Name: c2Svc1Name, Locality: c2.Locality()})
 		AssertWEPorts(c1, c2Svc1Name, map[string]uint32{"port-80": 80, "port-81": 81, "port-92": 92, "target-821": 82})
 		AssertSE(c1, DesiredSE{Name: defaultSvc1Name})
-		lbls := map[string]string{
+		AssertSEPorts(c1, defaultSvc1Name, []*networking.ServicePort{
+			{Name: "http", Protocol: "HTTP", Number: 80},
+			{Name: "81", Number: 81, TargetPort: 8081},
+			{Name: "target-821", Number: 82},
+			{Name: "extra1", Number: 91},
+		})
+		seLbls := map[string]string{
+			peering.ParentServiceLabel:          "svc1",
+			peering.ServiceScopeLabel:           peering.ServiceScopeGlobal,
+			peering.ParentServiceNamespaceLabel: "default",
+		}
+		AssertSELabels(c1, defaultSvc1Name, seLbls)
+		weLbls := map[string]string{
 			"app":                               "svc1",
 			peering.ParentServiceLabel:          "svc1",
 			peering.ServiceScopeLabel:           peering.ServiceScopeGlobal,
@@ -820,19 +832,22 @@ func TestPeering(t *testing.T) {
 			peering.SourceClusterLabel:          "c2",
 			model.TunnelLabel:                   model.TunnelHTTP,
 		}
-		AssertSEPorts(c1, defaultSvc1Name, []*networking.ServicePort{
-			{Name: "http", Protocol: "HTTP", Number: 80},
-			{Name: "81", Number: 81, TargetPort: 8081},
-			{Name: "target-821", Number: 82},
-			{Name: "extra1", Number: 91},
-		})
-		AssertWELabels(c1, c2Svc1Name, lbls)
+		AssertWELabels(c1, c2Svc1Name, weLbls)
 		AssertWEPorts(c1, c2Svc1Name, map[string]uint32{"port-80": 80, "port-81": 81, "port-92": 92, "target-821": 82})
 
-		// Switch the label
+		// // Switch to GlobalOnly
 		c1.CreateServiceLabel("svc1", peering.ServiceScopeGlobalOnly, "", ports1)
-		lbls[peering.ServiceScopeLabel] = peering.ServiceScopeGlobalOnly
-		AssertWELabels(c1, c2Svc1Name, lbls)
+		AssertSELabels(c1, defaultSvc1Name, seLbls)
+		weLbls[peering.ServiceScopeLabel] = peering.ServiceScopeGlobalOnly
+		AssertWELabels(c1, c2Svc1Name, weLbls)
+
+		// Switch to Local
+		c1.CreateServiceLabel("svc1", "", "", ports1)
+		seLbls[peering.ServiceScopeLabel] = peering.ServiceScopeCluster
+		AssertSELabels(c1, defaultSvc1Name, seLbls)
+		delete(weLbls, "app")
+		weLbls[peering.ServiceScopeLabel] = peering.ServiceScopeGlobal
+		AssertWELabels(c1, c2Svc1Name, weLbls)
 	})
 	t.Run("merge service ports", func(t *testing.T) {
 		ports3 := []corev1.ServicePort{
@@ -1999,10 +2014,19 @@ func AssertSE(c *Cluster, se ...DesiredSE) {
 func AssertSEPorts(c *Cluster, name string, ports []*networking.ServicePort) {
 	c.t.Helper()
 	fetch := func() []*networking.ServicePort {
-		we := c.ServiceEntries.Get(name, peering.PeeringNamespace)
-		return we.Spec.GetPorts()
+		se := c.ServiceEntries.Get(name, peering.PeeringNamespace)
+		return se.Spec.GetPorts()
 	}
 	assert.EventuallyEqual(c.t, fetch, ports)
+}
+
+func AssertSELabels(c *Cluster, name string, labels map[string]string) {
+	c.t.Helper()
+	fetch := func() map[string]string {
+		se := c.ServiceEntries.Get(name, peering.PeeringNamespace)
+		return se.GetLabels()
+	}
+	assert.EventuallyEqual(c.t, fetch, labels)
 }
 
 type DesiredService struct {

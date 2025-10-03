@@ -532,12 +532,12 @@ func (c *NetworkWatcher) reconcileGatewayWorkloadEntry(tn types.NamespacedName) 
 	weScope := ConvertScopeFromWorkloadAPI(fs.Service.Scope)
 	var localPorts []corev1.ServicePort
 	if localService != nil {
-		scope := getSoloScope(c.namespaces, localService.GetNamespace(), localService.GetLabels())
-		if !IsGlobal(scope) {
+		localScope := getSoloScope(c.namespaces, localService.GetNamespace(), localService.GetLabels())
+		if !IsGlobal(localScope) {
 			// It's not global, so ignore it
 			localService = nil
 		} else {
-			weScope = scope
+			weScope = localScope
 			// If the local service exists, the SE is going to set the label selectors to the service's so we can select the Pod
 			// We need to include those
 			labels = maps.Clone(localService.Spec.Selector)

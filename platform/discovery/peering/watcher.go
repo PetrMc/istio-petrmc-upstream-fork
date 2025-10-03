@@ -217,7 +217,6 @@ func New(
 		commonServiceHandler(name)
 	}, func(o controllers.Object) bool {
 		ns := ptr.OrEmpty(c.namespaces.Get(o.GetNamespace(), ""))
-		// TODO: is this broken when removing global label?
 		return IsGlobal(CalculateScope(o.GetLabels(), ns.GetLabels()))
 	}))
 	c.workloadEntries.AddEventHandler(controllers.FilteredObjectHandler(func(o controllers.Object) {
