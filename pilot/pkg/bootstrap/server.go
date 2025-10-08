@@ -396,7 +396,7 @@ func NewServer(args *PilotArgs, initFuncs ...func(*Server)) (*Server, error) {
 	// The k8s JWT authenticator requires the multicluster registry to be initialized,
 	// so we build it later.
 	if s.kubeClient != nil {
-		if ecs.EcsCluster != "" {
+		if len(ecs.EcsClusters) > 0 {
 			authenticators = append(authenticators, ecs.NewEcsAuthenticator(s.environment.Watcher, s.kubeClient))
 			ecs.AddPrometheusServiceDiscovery(s.kubeClient, s.httpsMux)
 		}

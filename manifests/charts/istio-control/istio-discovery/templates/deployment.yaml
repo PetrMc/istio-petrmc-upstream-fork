@@ -225,8 +225,8 @@ spec:
                 divisor: "1"
           - name: PLATFORM
             value: "{{ coalesce .Values.global.platform .Values.platform }}"
-{{- with .Values.platforms.ecs.cluster }}
-          - name: ECS_CLUSTER
+{{- with .Values.platforms.ecs.clusters }}
+          - name: ECS_CLUSTERS
             value: "{{.}}"
 {{- end }}
 {{- if .Values.platforms.peering.enabled }}

@@ -580,8 +580,8 @@ _internal_defaults_do_not_set:
   # SOLO
   platforms:
     ecs:
-      # If set, to the name of an ECS cluster, ECS service discovery will be enabled.
-      cluster: ""
+      # If set to a comma-separated list of ECS cluster names, ECS service discovery will be enabled for those clusters.
+      clusters: ""
     peering:
       # If set, Istiod will automatically peer with discovered Gateways for service discovery.
       enabled: false

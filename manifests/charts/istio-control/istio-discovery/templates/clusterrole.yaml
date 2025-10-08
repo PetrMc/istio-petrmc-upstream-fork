@@ -49,7 +49,7 @@ rules:
   - apiGroups: ["networking.istio.io"]
     verbs: [ "get", "watch", "list", "update", "patch", "create", "delete" ]
     resources: [ "workloadentries" ]
-{{- if or .Values.platforms.ecs.cluster .Values.platforms.peering.enabled }}
+{{- if or .Values.platforms.ecs.clusters .Values.platforms.peering.enabled }}
   - apiGroups: ["networking.istio.io"]
     verbs: [ "get", "watch", "list", "update", "patch", "create", "delete" ]
     resources: [ "serviceentries" ]

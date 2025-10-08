@@ -73,9 +73,10 @@ func (c *PrometheusBridge) Serve(w http.ResponseWriter, req *http.Request) {
 		labels := map[string]string{
 			"__meta_ecs_service": w.GetLabels()[ServiceLabel],
 		}
-		_, namespace, arn, err := ParseResourceName(w.Annotations[ResourceAnnotation])
+		_, cluster, namespace, arn, err := ParseResourceName(w.Annotations[ResourceAnnotation])
 		if err == nil {
 			labels["__meta_ecs_arn"] = arn
+			labels["__meta_ecs_cluster"] = cluster
 			labels["__meta_ecs_namespace"] = namespace
 			sp := strings.Split(arn, "/")
 			labels["__meta_ecs_task"] = sp[len(sp)-1]

@@ -304,7 +304,8 @@ func localK8sGatewayToNetworkGateways(clusterID cluster.ID, gw *v1beta1.Gateway)
 		return nil
 	}
 
-	if gw.Spec.GatewayClassName != constants.RemoteGatewayClassName {
+	// SOLO don't skip if eastwest - this enables external workloads like VMs/ECS
+	if gw.Spec.GatewayClassName != constants.RemoteGatewayClassName && gw.Spec.GatewayClassName != constants.EastWestGatewayClassName {
 		return nil
 	}
 

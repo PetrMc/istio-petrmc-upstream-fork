@@ -174,6 +174,7 @@ func (a *AwsIAMAuthenticator) authenticate(request string) (*security.Caller, er
 	if err != nil {
 		return nil, fmt.Errorf("failed to send request: %v", err)
 	}
+	defer resp.Body.Close()
 
 	cresp := GetCallerIdentityResponse{}
 	if err := json.NewDecoder(resp.Body).Decode(&cresp); err != nil {

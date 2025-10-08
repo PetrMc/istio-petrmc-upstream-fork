@@ -74,14 +74,18 @@ func ListRolesCmd(ctx cli.Context) *cobra.Command {
 }
 
 func AddServiceCmd(ctx cli.Context, cluster string) *cobra.Command {
-	var serviceAccount string
-	var external bool
-	var platform string
+	var (
+		external       bool
+		serviceAccount string
+		platform       string
+		hostname       string
+		ports          string
+	)
 	cmd := &cobra.Command{
 		Use:   "add-service",
 		Short: "Enroll an ECS Service onto the mesh",
 		Example: `  # Enroll the 'demo' service in the 'my-ecs-cluster' cluster into the mesh. It will be associated with the 'hello-world' Kubernetes namespace.
-  # Once enrolled, it can be reached at 'demo.hello-world.ecs.local'.
+  # Once enrolled, it can be reached at 'demo.hello-world.local'.
   istioctl ecs add-service demo --cluster my-ecs-cluster --namespace hello-world
 `,
 		Args: func(cmd *cobra.Command, args []string) error {
@@ -96,7 +100,10 @@ func AddServiceCmd(ctx cli.Context, cluster string) *cobra.Command {
 		RunE: func(c *cobra.Command, args []string) error {
 			printer := bootstrap.NewPrinter(c.OutOrStderr())
 			service := args[0]
-			namespace := ctx.NamespaceOrDefault(ctx.Namespace())
+			namespace := ctx.Namespace()
+			if namespace == "" {
+				namespace = cluster
+			}
 
 			kc, err := ctx.CLIClient()
 			if err != nil {
@@ -125,7 +132,7 @@ func AddServiceCmd(ctx cli.Context, cluster string) *cobra.Command {
 
 			var newContainerDefinitions []ecstypes.ContainerDefinition
 			switch platform {
-			case "", bootstrap.PlatformECS:
+			case bootstrap.PlatformECS:
 				image, err := fetchZtunnelImage(kc, ctx)
 				if err != nil {
 					return fmt.Errorf("failed to find ztunnel image: %v", err)
@@ -133,7 +140,7 @@ func AddServiceCmd(ctx cli.Context, cluster string) *cobra.Command {
 
 				// Now we need to generate a bootstrap token for them.
 				// Since this uses platform=ecs, there is no auth credentials in it, so safe to just put directly into the task definition.
-				bootstrapToken, err := fetchBootstrapToken(kc, ctx, printer, serviceAccount, *exRole, external)
+				bootstrapToken, err := fetchBootstrapToken(kc, printer, namespace, serviceAccount, *exRole, external)
 				if err != nil {
 					return fmt.Errorf("failed to generate bootstrap token: %v", err)
 				}
@@ -158,7 +165,7 @@ func AddServiceCmd(ctx cli.Context, cluster string) *cobra.Command {
 			}
 			printer.Writef("Created task definition %v", *o.TaskDefinition.TaskDefinitionArn)
 
-			updatedService, err := updateService(ec, service, cluster, serviceAccount, namespace, o)
+			updatedService, err := updateService(ec, service, cluster, serviceAccount, namespace, hostname, ports, o)
 			if err != nil {
 				return err
 			}
@@ -167,8 +174,11 @@ func AddServiceCmd(ctx cli.Context, cluster string) *cobra.Command {
 		},
 	}
 	cmd.PersistentFlags().BoolVar(&external, "external", external, "The workload is external to the network")
-	cmd.PersistentFlags().StringVarP(&serviceAccount, "service-account", "s", serviceAccount, "The service account the workload will run as.")
-	cmd.PersistentFlags().StringVarP(&platform, "platform", "p", platform, "The runtime platform we want to use. Valid options: [ecs, ecs-ec2]")
+	cmd.PersistentFlags().StringVarP(&serviceAccount, "service-account", "s", "default", "The service account the workload will run as.")
+	cmd.PersistentFlags().StringVarP(&platform, "platform", "p", bootstrap.PlatformECS, "The runtime platform we want to use. Valid options: [ecs, ecs-ec2]")
+	cmd.PersistentFlags().StringVar(&hostname, "hostname", "", "The DNS name to expose the service as. Defaults to <service name>.<cluster name>.local")
+	cmd.PersistentFlags().StringVar(&ports, "ports", "",
+		"Port configuration for the service. Accepts a forward slash-separated list of protocol:port[:targetPort] pairs. Example: 'http:80:8080/tcp:9090'")
 	cmd.PersistentFlags().StringVar(&cluster, "cluster", "", "ECS cluster name to use")
 	return cmd
 }
@@ -249,28 +259,44 @@ func updateService(
 	cluster string,
 	serviceAccount string,
 	namespace string,
+	hostname string,
+	ports string,
 	o *ecs.RegisterTaskDefinitionOutput,
 ) (*ecs.UpdateServiceOutput, error) {
 	updatedService, err := ec.UpdateService(context.Background(), &ecs.UpdateServiceInput{
 		Service:        ptr.Of(service),
 		Cluster:        ptr.Of(cluster),
 		TaskDefinition: o.TaskDefinition.TaskDefinitionArn,
+		PropagateTags:  ecstypes.PropagateTagsService,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to update service: %v", err)
 	}
+	tags := []ecstypes.Tag{
+		{
+			Key:   ptr.Of(ecsplatform.ServiceAccountTag),
+			Value: ptr.Of(serviceAccount),
+		},
+		{
+			Key:   ptr.Of(ecsplatform.ServiceNamespaceTag),
+			Value: ptr.Of(namespace),
+		},
+	}
+	if hostname != "" {
+		tags = append(tags, ecstypes.Tag{
+			Key:   ptr.Of(ecsplatform.ServiceHostnameTag),
+			Value: ptr.Of(hostname),
+		})
+	}
+	if ports != "" {
+		tags = append(tags, ecstypes.Tag{
+			Key:   ptr.Of(ecsplatform.ServicePortsTag),
+			Value: ptr.Of(ports),
+		})
+	}
 	tagResponse, err := ec.TagResource(context.Background(), &ecs.TagResourceInput{
 		ResourceArn: updatedService.Service.ServiceArn,
-		Tags: []ecstypes.Tag{
-			{
-				Key:   ptr.Of(ecsplatform.ServiceAccountTag),
-				Value: ptr.Of(serviceAccount),
-			},
-			{
-				Key:   ptr.Of(ecsplatform.ServiceNamespaceTag),
-				Value: ptr.Of(namespace),
-			},
-		},
+		Tags:        tags,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to update service tags: %v", err)
@@ -352,9 +378,8 @@ func fetchService(ec *ecs.Client, service string, cluster string) (ecstypes.Serv
 	return current, nil
 }
 
-func fetchBootstrapToken(kc kube.CLIClient, ctx cli.Context, printer bootstrap.Printer, sa string, role string, external bool) (string, error) {
-	serviceAccount := model.GetOrDefault(sa, "default") // TODO
-	ns := ctx.NamespaceOrDefault(ctx.Namespace())
+func fetchBootstrapToken(kc kube.CLIClient, printer bootstrap.Printer, ns string, sa string, role string, external bool) (string, error) {
+	serviceAccount := model.GetOrDefault(sa, "default") // TODO: is it okay to default this way or should we force a service account?
 	sac := kc.Kube().CoreV1().ServiceAccounts(ns)
 	curSa, err := sac.Get(context.Background(), serviceAccount, metav1.GetOptions{})
 	if err != nil {

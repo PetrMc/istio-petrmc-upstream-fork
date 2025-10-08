@@ -21,11 +21,16 @@ import (
 )
 
 func (d *ECSDiscovery) reconcileWorkloadEntry(name string) error {
-	_, ns, resourceName, err := ParseResourceName(name)
+	_, clusterName, ns, resourceName, err := ParseResourceName(name)
 	if err != nil {
 		return err
 	}
 	log := log.WithLabels("workload", name)
+
+	cluster, ok := d.clusters[clusterName]
+	if !ok {
+		return fmt.Errorf("cluster %s not found for workload %s", clusterName, name)
+	}
 
 	segments := strings.Split(resourceName, "/")
 	uid := segments[len(segments)-1]
@@ -33,19 +38,21 @@ func (d *ECSDiscovery) reconcileWorkloadEntry(name string) error {
 	arn := strings.Join(segments[1:], "/")
 	workloadEntryName := fmt.Sprintf("ecs-%s-%s", groupName, uid)
 
-	ecswl, f := d.Snapshot()[name]
+	snap := cluster.Snapshot()
+
+	ecswl, f := snap[name]
 	if !f {
 		log.Infof("workload deleted")
-		return controllers.IgnoreNotFound(d.workloadEntries.Delete(workloadEntryName, ns))
+		return controllers.IgnoreNotFound(cluster.workloadEntries.Delete(workloadEntryName, ns))
 	}
 	wl := *ecswl.Workload
 
 	var svc *EcsService
 	if wl.HasService() {
-		ecsvc, f := d.Snapshot()[fmt.Sprintf("service/%s/%s", ns, groupName)]
+		ecsvc, f := snap[fmt.Sprintf("service/%s/%s/%s", clusterName, ns, groupName)]
 		if !f && wl.HasService() {
 			log.Infof("service %q for workload not found", groupName)
-			return controllers.IgnoreNotFound(d.workloadEntries.Delete(workloadEntryName, ns))
+			return controllers.IgnoreNotFound(cluster.workloadEntries.Delete(workloadEntryName, ns))
 		}
 		svc = ecsvc.Service
 	}
@@ -94,23 +101,29 @@ func (d *ECSDiscovery) reconcileWorkloadEntry(name string) error {
 		wle.Annotations[annotation.AmbientRedirection.Name] = constants.AmbientRedirectionEnabled
 	}
 
-	_, cerr := createOrUpdate(d.workloadEntries, wle)
+	_, cerr := createOrUpdate(cluster.workloadEntries, wle)
 	return cerr
 }
 
 func (d *ECSDiscovery) reconcileServiceEntry(name string) error {
 	log := log.WithLabels("service", name)
-	_, ns, serviceName, err := ParseResourceName(name)
+	_, clusterName, ns, serviceName, err := ParseResourceName(name)
 	if err != nil {
 		return err
 	}
 
+	cluster, ok := d.clusters[clusterName]
+	if !ok {
+		return fmt.Errorf("cluster %s not found", clusterName)
+	}
+
+	snap := cluster.Snapshot()
 	serviceEntryName := fmt.Sprintf("ecs-%s", serviceName)
-	ecso, f := d.Snapshot()[name]
+	ecso, f := snap[name]
 	if !f {
 		log.Infof("service no longer present, deleting")
 		// TODO: namespace may differ!
-		return controllers.IgnoreNotFound(d.serviceEntries.Delete(serviceEntryName, ns))
+		return controllers.IgnoreNotFound(cluster.serviceEntries.Delete(serviceEntryName, ns))
 	}
 	log.Infof("service updated")
 	service := ecso.Service
@@ -144,7 +157,7 @@ func (d *ECSDiscovery) reconcileServiceEntry(name string) error {
 		},
 		Spec: networking.ServiceEntry{
 			Hosts: []string{
-				ptr.NonEmptyOrDefault(service.Tags.Hostname, service.Name+".ecs.local"),
+				ptr.NonEmptyOrDefault(service.Tags.Hostname, fmt.Sprintf("%s.%s.local", service.Name, clusterName)),
 			},
 			WorkloadSelector: &networking.WorkloadSelector{
 				Labels: map[string]string{
@@ -156,7 +169,7 @@ func (d *ECSDiscovery) reconcileServiceEntry(name string) error {
 		},
 	}
 
-	_, cerr := createOrUpdate(d.serviceEntries, se)
+	_, cerr := createOrUpdate(cluster.serviceEntries, se)
 	return cerr
 }
 

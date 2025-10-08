@@ -43,15 +43,15 @@ const (
 	AWSManagedServiceNameTag = "aws:ecs:serviceName"
 
 	// ServiceHostnameTag allows overriding the hostname the service can be reached at.
-	// Defaults to <name>.ecs.local.
+	// Defaults to <name>.<cluster>.local.
 	ServiceHostnameTag = "ecs.solo.io/hostname"
 	// ServiceNamespaceTag allows overriding the namespace the objects exist in.
 	// Currently, this MUST apply to both the Service and Task, which differs from other tags.
 	// Defaults to 'ecs'.
 	ServiceNamespaceTag = "ecs.solo.io/namespace"
 	// ServicePortsTag allows overriding the ports for the service.
-	// Accepts a comma-separated list of name:port[:targetPort] pairs.
-	// Example: 'http:80:8080,tcp:9090'. This will expose 80 (forwarding to port 8080 locally) and 9090 (directly)
+	// Accepts a forward slash-separated list of name:port[:targetPort] pairs.
+	// Example: 'http:80:8080/tcp:9090'. This will expose 80 (forwarding to port 8080 locally) and 9090 (directly)
 	// Default is 'http:80'.
 	ServicePortsTag = "ecs.solo.io/ports"
 	// ServiceAccountTag allows overriding the service account for the service.
@@ -107,6 +107,7 @@ type EcsTags struct {
 }
 
 type EcsDiscovered struct {
+	Cluster string
 	// One or other
 	Workload *EcsWorkload
 	Service  *EcsService
@@ -114,17 +115,17 @@ type EcsDiscovered struct {
 
 func (d EcsDiscovered) ResourceName() string {
 	if d.Workload != nil {
-		return fmt.Sprintf("workload/%s/%s/%s", d.Namespace(), d.Workload.GroupName(), d.Workload.ARN)
+		return fmt.Sprintf("workload/%s/%s/%s/%s", d.Cluster, d.Namespace(), d.Workload.GroupName(), d.Workload.ARN)
 	}
-	return fmt.Sprintf("service/%s/%s", d.Namespace(), d.Service.Name)
+	return fmt.Sprintf("service/%s/%s/%s", d.Cluster, d.Namespace(), d.Service.Name)
 }
 
-func ParseResourceName(name string) (types string, namespace string, identifier string, err error) {
-	segs := strings.SplitN(name, "/", 3)
-	if len(segs) != 3 {
-		return "", "", "", fmt.Errorf("invalid resource name: %v", name)
+func ParseResourceName(name string) (types string, cluster string, namespace string, identifier string, err error) {
+	segs := strings.SplitN(name, "/", 4)
+	if len(segs) != 4 {
+		return "", "", "", "", fmt.Errorf("invalid resource name: %v", name)
 	}
-	return segs[0], segs[1], segs[2], nil
+	return segs[0], segs[1], segs[2], segs[3], nil
 }
 
 func (d EcsDiscovered) Type() string {
@@ -134,11 +135,12 @@ func (d EcsDiscovered) Type() string {
 	return "service"
 }
 
+// Namespace defaults to cluster name if not set in tags
 func (d EcsDiscovered) Namespace() string {
 	if d.Workload != nil {
-		return ptr.NonEmptyOrDefault(d.Workload.Tags.Namespace, ecsNamespace)
+		return ptr.NonEmptyOrDefault(d.Workload.Tags.Namespace, d.Cluster)
 	}
-	return ptr.NonEmptyOrDefault(d.Service.Tags.Namespace, ecsNamespace)
+	return ptr.NonEmptyOrDefault(d.Service.Tags.Namespace, d.Cluster)
 }
 
 func ParseTags(tag []ecstypes.Tag) EcsTags {
@@ -160,7 +162,7 @@ func ParseTags(tag []ecstypes.Tag) EcsTags {
 		case AWSManagedServiceNameTag:
 			ret.ServiceName = v
 		case ServicePortsTag:
-			for _, ports := range strings.Split(v, ",") {
+			for _, ports := range strings.Split(v, "/") {
 				parts := strings.Split(ports, ":")
 				var protocol, sp, tp string
 				if len(parts) != 2 && len(parts) != 3 {
@@ -186,8 +188,8 @@ func ParseTags(tag []ecstypes.Tag) EcsTags {
 						continue
 					}
 					port.TargetPort = tpt
-					ret.Ports = append(ret.Ports, port)
 				}
+				ret.Ports = append(ret.Ports, port)
 			}
 		}
 		if len(validation.IsQualifiedName(k)) == 0 && len(validation.IsValidLabelValue(v)) == 0 {

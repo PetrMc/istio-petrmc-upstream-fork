@@ -40,17 +40,17 @@ var (
 	ServiceAEntry = &clientnetworking.ServiceEntry{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "ecs-a",
-			Namespace: "ecs",
+			Namespace: "cluster1",
 			Labels: map[string]string{
 				ServiceLabel:      "a",
 				ServiceAccountTag: "sa-a",
 			},
 			Annotations: map[string]string{
-				ResourceAnnotation: "service/ecs/a",
+				ResourceAnnotation: "service/cluster1/cluster1/a",
 			},
 		},
 		Spec: networking.ServiceEntry{
-			Hosts:            []string{"a.ecs.local"},
+			Hosts:            []string{"a.cluster1.local"},
 			Ports:            defaultPorts,
 			Resolution:       networking.ServiceEntry_STATIC,
 			WorkloadSelector: &networking.WorkloadSelector{Labels: map[string]string{ServiceLabel: "a"}},
@@ -67,14 +67,14 @@ var (
 	ServiceBEntry = &clientnetworking.ServiceEntry{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "ecs-b",
-			Namespace: "ecs",
+			Namespace: "cluster1",
 			Labels:    map[string]string{ServiceLabel: "b"},
 			Annotations: map[string]string{
-				ResourceAnnotation: "service/ecs/b",
+				ResourceAnnotation: "service/cluster1/cluster1/b",
 			},
 		},
 		Spec: networking.ServiceEntry{
-			Hosts: []string{"b.ecs.local"},
+			Hosts: []string{"b.cluster1.local"},
 			Ports: []*networking.ServicePort{{
 				Number:     80,
 				Protocol:   "HTTP",
@@ -102,11 +102,11 @@ var (
 				ServiceNamespaceTag: "other-ns",
 			},
 			Annotations: map[string]string{
-				ResourceAnnotation: "service/other-ns/cross-ns",
+				ResourceAnnotation: "service/cluster1/other-ns/cross-ns",
 			},
 		},
 		Spec: networking.ServiceEntry{
-			Hosts:            []string{"cross-ns.ecs.local"},
+			Hosts:            []string{"cross-ns.cluster1.local"},
 			Ports:            defaultPorts,
 			Resolution:       networking.ServiceEntry_STATIC,
 			WorkloadSelector: &networking.WorkloadSelector{Labels: map[string]string{ServiceLabel: "cross-ns"}},
@@ -130,7 +130,7 @@ var (
 	TaskA1WorkloadEntry = &clientnetworking.WorkloadEntry{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "ecs-a-a1",
-			Namespace: "ecs",
+			Namespace: "cluster1",
 			Labels: map[string]string{
 				ServiceLabel:                     "a",
 				"service.istio.io/workload-name": "a",
@@ -138,7 +138,7 @@ var (
 			Annotations: map[string]string{
 				annotation.AmbientRedirection.Name: constants.AmbientRedirectionEnabled,
 				ARNAnnotation:                      testArn("task", "a1"),
-				ResourceAnnotation:                 "workload/ecs/a/" + testArn("task", "a1"),
+				ResourceAnnotation:                 "workload/cluster1/cluster1/a/" + testArn("task", "a1"),
 			},
 		},
 		Spec: networking.WorkloadEntry{
@@ -178,7 +178,7 @@ var (
 			Annotations: map[string]string{
 				annotation.AmbientRedirection.Name: constants.AmbientRedirectionEnabled,
 				ARNAnnotation:                      testArn("task", "cross1"),
-				ResourceAnnotation:                 "workload/other-ns/cross-ns/" + testArn("task", "cross1"),
+				ResourceAnnotation:                 "workload/cluster1/other-ns/cross-ns/" + testArn("task", "cross1"),
 			},
 		},
 		Spec: networking.WorkloadEntry{
@@ -228,7 +228,7 @@ func TestNonService(t *testing.T) {
 	assert.EventuallyEqual(t, workloadEntryFetcher(e), []*clientnetworking.WorkloadEntry{{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "ecs-taskgroup-task123",
-			Namespace: "ecs",
+			Namespace: "cluster1",
 			Labels: map[string]string{
 				ServiceLabel:                     "",
 				"service.istio.io/workload-name": "taskgroup",
@@ -236,7 +236,7 @@ func TestNonService(t *testing.T) {
 			Annotations: map[string]string{
 				annotation.AmbientRedirection.Name: constants.AmbientRedirectionEnabled,
 				ARNAnnotation:                      testArn("task", "task123"),
-				ResourceAnnotation:                 "workload/ecs/taskgroup/" + testArn("task", "task123"),
+				ResourceAnnotation:                 "workload/cluster1/cluster1/taskgroup/" + testArn("task", "task123"),
 			},
 		},
 		Spec: networking.WorkloadEntry{
@@ -291,6 +291,7 @@ func testSetup(t *testing.T, tasks []types.Task, services []types.Service) *ECSD
 		Tasks:    tasks,
 		Services: services,
 	}
+	EcsClusters = []string{"cluster1"}
 	e := newECS(fk, fe, NewDynamicPoller(time.Second, time.Second), networkIDCallback)
 	stop := test.NewStop(t)
 	fk.RunAndWait(stop)
@@ -300,7 +301,10 @@ func testSetup(t *testing.T, tasks []types.Task, services []types.Service) *ECSD
 
 func workloadEntryFetcher(e *ECSDiscovery) func() []*clientnetworking.WorkloadEntry {
 	return func() []*clientnetworking.WorkloadEntry {
-		we := e.workloadEntries.List(metav1.NamespaceAll, klabels.Everything())
+		we := []*clientnetworking.WorkloadEntry{}
+		for _, c := range e.clusters {
+			we = append(we, c.workloadEntries.List(metav1.NamespaceAll, klabels.Everything())...)
+		}
 		slices.SortBy(we, (*clientnetworking.WorkloadEntry).GetName)
 		return we
 	}
@@ -308,7 +312,10 @@ func workloadEntryFetcher(e *ECSDiscovery) func() []*clientnetworking.WorkloadEn
 
 func serviceEntryFetcher(e *ECSDiscovery) func() []*clientnetworking.ServiceEntry {
 	return func() []*clientnetworking.ServiceEntry {
-		se := e.serviceEntries.List(metav1.NamespaceAll, klabels.Everything())
+		se := []*clientnetworking.ServiceEntry{}
+		for _, c := range e.clusters {
+			se = append(se, c.serviceEntries.List(metav1.NamespaceAll, klabels.Everything())...)
+		}
 		slices.SortBy(se, (*clientnetworking.ServiceEntry).GetName)
 		return se
 	}

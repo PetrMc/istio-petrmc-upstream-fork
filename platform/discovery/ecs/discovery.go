@@ -12,7 +12,7 @@ import (
 	ecstypes "github.com/aws/aws-sdk-go-v2/service/ecs/types"
 )
 
-func (d *ECSDiscovery) Discovery(ctx context.Context) ([]EcsDiscovered, error) {
+func (d *ECSClusterDiscovery) Discovery(ctx context.Context) ([]EcsDiscovered, error) {
 	log.Debugf("calling discovery")
 	ecsTasks, err := d.getTasks(ctx)
 	if err != nil {
@@ -24,10 +24,13 @@ func (d *ECSDiscovery) Discovery(ctx context.Context) ([]EcsDiscovered, error) {
 	}
 	res := []EcsDiscovered{}
 	for _, ecsSvc := range ecsServices {
-		res = append(res, EcsDiscovered{Service: &EcsService{
-			Name: *ecsSvc.ServiceName,
-			Tags: ParseTags(ecsSvc.Tags),
-		}})
+		res = append(res, EcsDiscovered{
+			Cluster: d.ecsClusterName,
+			Service: &EcsService{
+				Name: *ecsSvc.ServiceName,
+				Tags: ParseTags(ecsSvc.Tags),
+			},
+		})
 	}
 	for _, task := range ecsTasks {
 		var ip netip.Addr
@@ -56,21 +59,24 @@ func (d *ECSDiscovery) Discovery(ctx context.Context) ([]EcsDiscovered, error) {
 			}
 		}
 
-		res = append(res, EcsDiscovered{Workload: &EcsWorkload{
-			ARN:     *task.TaskArn,
-			Group:   *task.Group,
-			Zone:    *task.AvailabilityZone,
-			Address: ip,
-			Mesh:    mesh,
-			Tags:    ParseTags(task.Tags),
-		}})
+		res = append(res, EcsDiscovered{
+			Cluster: d.ecsClusterName,
+			Workload: &EcsWorkload{
+				ARN:     *task.TaskArn,
+				Group:   *task.Group,
+				Zone:    *task.AvailabilityZone,
+				Address: ip,
+				Mesh:    mesh,
+				Tags:    ParseTags(task.Tags),
+			},
+		})
 
 	}
 	return res, nil
 }
 
-func (d *ECSDiscovery) getTasks(ctx context.Context) ([]ecstypes.Task, error) {
-	req := &ecs.ListTasksInput{Cluster: &d.ecsCluster}
+func (d *ECSClusterDiscovery) getTasks(ctx context.Context) ([]ecstypes.Task, error) {
+	req := &ecs.ListTasksInput{Cluster: &d.ecsClusterName}
 	res := []ecstypes.Task{}
 	pg := ecs.NewListTasksPaginator(d.client, req)
 	for pg.HasMorePages() {
@@ -85,7 +91,7 @@ func (d *ECSDiscovery) getTasks(ctx context.Context) ([]ecstypes.Task, error) {
 			seq := arns[i : i+end]
 			desc := &ecs.DescribeTasksInput{
 				Tasks:   seq,
-				Cluster: &d.ecsCluster,
+				Cluster: &d.ecsClusterName,
 				// Mark we want to include tags
 				Include: []ecstypes.TaskField{ecstypes.TaskFieldTags},
 			}
@@ -99,8 +105,8 @@ func (d *ECSDiscovery) getTasks(ctx context.Context) ([]ecstypes.Task, error) {
 	return res, nil
 }
 
-func (d *ECSDiscovery) getServices(ctx context.Context) ([]ecstypes.Service, error) {
-	req := &ecs.ListServicesInput{Cluster: &d.ecsCluster}
+func (d *ECSClusterDiscovery) getServices(ctx context.Context) ([]ecstypes.Service, error) {
+	req := &ecs.ListServicesInput{Cluster: &d.ecsClusterName}
 	res := []ecstypes.Service{}
 	pg := ecs.NewListServicesPaginator(d.client, req)
 	for pg.HasMorePages() {
@@ -115,7 +121,7 @@ func (d *ECSDiscovery) getServices(ctx context.Context) ([]ecstypes.Service, err
 			seq := arns[i : i+end]
 			desc := &ecs.DescribeServicesInput{
 				Services: seq,
-				Cluster:  &d.ecsCluster,
+				Cluster:  &d.ecsClusterName,
 				// Mark we want to include tags
 				Include: []ecstypes.ServiceField{ecstypes.ServiceFieldTags},
 			}

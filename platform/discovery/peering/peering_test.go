@@ -835,8 +835,9 @@ func TestPeering(t *testing.T) {
 		AssertWELabels(c1, c2Svc1Name, weLbls)
 		AssertWEPorts(c1, c2Svc1Name, map[string]uint32{"port-80": 80, "port-81": 81, "port-92": 92, "target-821": 82})
 
-		// // Switch to GlobalOnly
+		// Switch to GlobalOnly
 		c1.CreateServiceLabel("svc1", peering.ServiceScopeGlobalOnly, "", ports1)
+		seLbls[peering.ServiceScopeLabel] = peering.ServiceScopeGlobalOnly
 		AssertSELabels(c1, defaultSvc1Name, seLbls)
 		weLbls[peering.ServiceScopeLabel] = peering.ServiceScopeGlobalOnly
 		AssertWELabels(c1, c2Svc1Name, weLbls)

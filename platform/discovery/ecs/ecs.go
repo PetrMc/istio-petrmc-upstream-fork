@@ -6,7 +6,10 @@ package ecs
 
 import (
 	"context"
+	"fmt"
 	"reflect"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -33,17 +36,27 @@ import (
 var log = istiolog.RegisterScope("ecs", "Ambient ECS")
 
 var (
-	EcsCluster     = env.Register("ECS_CLUSTER", "", "Name of the ecs cluster").Get()
+	EcsClusters = func() []string {
+		v := env.Register("ECS_CLUSTERS", "", "Names of ECS clusters to monitor for discovery (comma-separated list)").Get()
+		if len(v) > 0 {
+			return strings.Split(v, ",")
+		}
+		return []string{}
+	}()
 	EcsRole        = env.Register("ECS_ROLE", "", "AWS IAM role to assume when making requests via the client").Get()
 	EcsMaxInterval = env.Register("ECS_DISCOVERY_MAX_INTERVAL", time.Minute*2, "Max interval between ECS polls").Get()
 	EcsMinInterval = env.Register("ECS_DISCOVERY_MIN_INTERVAL", time.Second*5, "Min interval between ECS polls").Get()
 )
 
 type ECSDiscovery struct {
-	client     ECSClient
-	ecsCluster string
+	clusters map[string]ECSClusterDiscovery
 
 	lookupNetwork LookupNetwork
+}
+
+type ECSClusterDiscovery struct {
+	client         ECSClient
+	ecsClusterName string
 
 	poller *DynamicPoller
 
@@ -51,6 +64,7 @@ type ECSDiscovery struct {
 	serviceEntries  kclient.Client[*clientnetworking.ServiceEntry]
 	queue           controllers.Queue
 
+	// map of resource name to workload/service
 	snapshot *atomic.Pointer[map[string]EcsDiscovered]
 }
 
@@ -82,23 +96,28 @@ func NewECS(client kube.Client, lookupNetwork LookupNetwork) *ECSDiscovery {
 
 func newECS(kubeClient kube.Client, ecsClient ECSClient, poller *DynamicPoller, lookupNetwork LookupNetwork) *ECSDiscovery {
 	c := &ECSDiscovery{
-		client:        ecsClient,
-		ecsCluster:    EcsCluster,
-		queue:         controllers.Queue{},
-		snapshot:      atomic.NewPointer(ptr.Of(map[string]EcsDiscovered{})),
-		poller:        poller,
+		clusters:      map[string]ECSClusterDiscovery{},
 		lookupNetwork: lookupNetwork,
 	}
-	c.serviceEntries = kclient.New[*clientnetworking.ServiceEntry](kubeClient)
-	c.workloadEntries = kclient.New[*clientnetworking.WorkloadEntry](kubeClient)
-	c.queue = controllers.NewQueue("ecs",
-		controllers.WithReconciler(c.Reconcile),
-		controllers.WithMaxAttempts(25))
+	log.Infof("registering ecs clusters: %v", EcsClusters)
+	for _, clusterName := range EcsClusters {
+		c.clusters[clusterName] = ECSClusterDiscovery{
+			client:         ecsClient,
+			ecsClusterName: clusterName,
+			queue: controllers.NewQueue(fmt.Sprintf("ecs-%s", clusterName),
+				controllers.WithReconciler(c.Reconcile),
+				controllers.WithMaxAttempts(25)),
+			snapshot:        atomic.NewPointer(ptr.Of(map[string]EcsDiscovered{})),
+			poller:          poller,
+			serviceEntries:  kclient.New[*clientnetworking.ServiceEntry](kubeClient),
+			workloadEntries: kclient.New[*clientnetworking.WorkloadEntry](kubeClient),
+		}
+	}
 
 	return c
 }
 
-func (d *ECSDiscovery) Snapshot() map[string]EcsDiscovered {
+func (d *ECSClusterDiscovery) Snapshot() map[string]EcsDiscovered {
 	return *d.snapshot.Load()
 }
 
@@ -112,22 +131,27 @@ func (d *ECSDiscovery) Reconcile(raw types.NamespacedName) error {
 	return nil
 }
 
-const ecsNamespace = "ecs"
-
 func (d *ECSDiscovery) Run(stop <-chan struct{}) {
-	kube.WaitForCacheSync("ecs", stop, d.serviceEntries.HasSynced, d.workloadEntries.HasSynced)
-	log.Infof("running")
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go d.PollDiscovery(ctx)
-	d.queue.Run(stop)
-	controllers.ShutdownAll(d.serviceEntries, d.workloadEntries)
+	var wg sync.WaitGroup
+	for _, c := range d.clusters {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			kube.WaitForCacheSync(c.ecsClusterName, stop, c.serviceEntries.HasSynced, c.workloadEntries.HasSynced)
+			log.Infof("starting discovery for cluster %s", c.ecsClusterName)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			go c.PollDiscovery(ctx)
+			c.queue.Run(stop)
+			controllers.ShutdownAll(c.serviceEntries, c.workloadEntries)
+		}()
+	}
+	wg.Wait()
 }
 
 // PollDiscovery runs a loop collecting and reconciling service discovery information from ECS.
-func (d *ECSDiscovery) PollDiscovery(ctx context.Context) {
+func (d *ECSClusterDiscovery) PollDiscovery(ctx context.Context) {
 	for {
-		log.Debugf("running discovery...")
 		changesFound := false
 		state, err := d.Discovery(ctx)
 		if err != nil {
@@ -144,7 +168,7 @@ func (d *ECSDiscovery) PollDiscovery(ctx context.Context) {
 }
 
 // HandleDiff reconciles the current state based on a new snapshot. It returns if there were any changes
-func (d *ECSDiscovery) HandleDiff(state []EcsDiscovered) bool {
+func (d *ECSClusterDiscovery) HandleDiff(state []EcsDiscovered) bool {
 	changes := false
 	nextState := map[string]EcsDiscovered{}
 	lastSnapshot := d.Snapshot()
@@ -168,6 +192,10 @@ func (d *ECSDiscovery) HandleDiff(state []EcsDiscovered) bool {
 		d.queue.Add(r)
 	}
 	for _, o := range d.serviceEntries.List(metav1.NamespaceAll, ServiceSelector) {
+		// skip objects from different ecs cluster
+		if _, cluster, _, _, _ := ParseResourceName(o.Annotations[ResourceAnnotation]); cluster != d.ecsClusterName {
+			continue
+		}
 		if _, f := nextState[o.Annotations[ResourceAnnotation]]; !f {
 			// Object exists in cluster but not in ECS anymore... trigger a deletion
 			d.queue.Add(types.NamespacedName{
@@ -178,6 +206,10 @@ func (d *ECSDiscovery) HandleDiff(state []EcsDiscovered) bool {
 		}
 	}
 	for _, o := range d.workloadEntries.List(metav1.NamespaceAll, ServiceSelector) {
+		// skip objects from different ecs cluster
+		if _, cluster, _, _, _ := ParseResourceName(o.Annotations[ResourceAnnotation]); cluster != d.ecsClusterName {
+			continue
+		}
 		if _, f := nextState[o.Annotations[ResourceAnnotation]]; !f {
 			// Object exists in cluster but not in ECS anymore... trigger a deletion
 			d.queue.Add(types.NamespacedName{
@@ -195,19 +227,20 @@ var serviceLabelSelector = func() klabels.Selector {
 	return sel
 }()
 
-func (d *ECSDiscovery) HasSynced() bool {
+func (d *ECSClusterDiscovery) HasSynced() bool {
 	return d.queue.HasSynced()
 }
 
 // MarkIncomingXDS marks that we established an XDS connection from the specified task ARN.
 // This is used to trigger an on-demand sync when we don't yet know about the task, to speed up reconciliation.
 // TODO: this has a fundamental flaw: it only works if the thing running the ECS syncer is the same as the instance connected over XDS.
-func (d *ECSDiscovery) MarkIncomingXDS(cluster string, arn string) {
-	if d.ecsCluster != cluster {
-		log.Warnf("got connection from ECS cluster %v, watching %v (task %v)",
-			cluster, d.ecsCluster, arn)
+func (d *ECSDiscovery) MarkIncomingXDS(clusterName string, arn string) {
+	cluster, known := d.clusters[clusterName]
+	if !known {
+		log.Warnf("got connection from ECS cluster %v, watching %v (task %v)", cluster, EcsClusters, arn)
+		return
 	}
-	allEcsWorkloadEntries := d.workloadEntries.List(metav1.NamespaceAll, serviceLabelSelector)
+	allEcsWorkloadEntries := cluster.workloadEntries.List(metav1.NamespaceAll, serviceLabelSelector)
 	for _, we := range allEcsWorkloadEntries {
 		if we.Annotations[ARNAnnotation] == arn {
 			// Found it: no action needed
@@ -215,13 +248,13 @@ func (d *ECSDiscovery) MarkIncomingXDS(cluster string, arn string) {
 		}
 	}
 	log.Infof("ECS Task %q connected, triggering a sync", arn)
-	d.poller.TriggerNow()
+	cluster.poller.TriggerNow()
 }
 
 var ServiceSelector = func() klabels.Selector {
 	lbl, err := klabels.Parse(ServiceLabel)
 	if err != nil {
-		panic("failed to parse label")
+		log.Errorf("failed to parse label %s", ServiceLabel)
 	}
 	return lbl
 }()
