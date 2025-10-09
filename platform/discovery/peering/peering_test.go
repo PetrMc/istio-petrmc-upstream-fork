@@ -957,11 +957,11 @@ func TestPeering(t *testing.T) {
 
 		AssertWE(c1,
 			// aggregated ew gw with gateway locality
-			DesiredWE{Name: "autogen.c2.default.svc1", Locality: "region-c2/zone-c2"},
+			DesiredWE{Name: "autogen.c2.default.svc1", Locality: "region-c2/zone-c2/subzone-c2"},
 			// aggregated ew gw with gateway locality
-			DesiredWE{Name: "autogen.c3.default.svc1", Locality: "region-c3/zone-c3"},
+			DesiredWE{Name: "autogen.c3.default.svc1", Locality: "region-c3/zone-c3/subzone-c3"},
 			// direct to pod with gateway locality
-			DesiredWE{Name: "autogenflat.c2.default.pod1.f2396f15c5c2", Address: "1.2.3.4", Locality: "region-c2/zone-c2"},
+			DesiredWE{Name: "autogenflat.c2.default.pod1.f2396f15c5c2", Address: "1.2.3.4", Locality: "region-c2/zone-c2/subzone-c2"},
 			// direct to pod with custom locality
 			DesiredWE{
 				Name:     "autogenflat.c2.default.pod-locality.f2396f15c5c2",
@@ -978,8 +978,8 @@ func TestPeering(t *testing.T) {
 		c2.DeletePod("pod1")
 		c1.Outage.setOutage(false)
 		AssertWE(c1,
-			DesiredWE{Name: "autogen.c2.default.svc1", Locality: "region-c2/zone-c2"},
-			DesiredWE{Name: "autogen.c3.default.svc1", Locality: "region-c3/zone-c3"},
+			DesiredWE{Name: "autogen.c2.default.svc1", Locality: "region-c2/zone-c2/subzone-c2"},
+			DesiredWE{Name: "autogen.c3.default.svc1", Locality: "region-c3/zone-c3/subzone-c3"},
 			// pod remains with gateway locality
 			DesiredWE{
 				Name:     "autogenflat.c2.default.pod-locality.f2396f15c5c2",
@@ -992,7 +992,7 @@ func TestPeering(t *testing.T) {
 		// Delete services
 		c2.DeleteService("svc1")
 		AssertWE(c1,
-			DesiredWE{Name: "autogen.c3.default.svc1", Locality: "region-c3/zone-c3"},
+			DesiredWE{Name: "autogen.c3.default.svc1", Locality: "region-c3/zone-c3/subzone-c3"},
 		)
 		AssertSE(c1, DesiredSE{Name: "autogen.default.svc1"})
 
@@ -1015,14 +1015,14 @@ func TestPeering(t *testing.T) {
 		c2.CreateSidecarPod("svc1", "pod2", "4.3.2.1")
 
 		AssertWE(c1,
-			DesiredWE{Name: c2Svc1Name, Locality: "region-c2/zone-c2"},
-			DesiredWE{Name: "autogenflat.c2.default.pod2.f2396f15c5c2", Address: "4.3.2.1", Locality: "region-c2/zone-c2", NonHBONE: true},
+			DesiredWE{Name: c2Svc1Name, Locality: "region-c2/zone-c2/subzone-c2"},
+			DesiredWE{Name: "autogenflat.c2.default.pod2.f2396f15c5c2", Address: "4.3.2.1", Locality: "region-c2/zone-c2/subzone-c2", NonHBONE: true},
 		)
 		AssertSE(c1, DesiredSE{Name: "autogen.default.svc1"})
 
 		AssertWE(c2,
-			DesiredWE{Name: "autogen.c1.default.svc1", Locality: "region-c1/zone-c1"},
-			DesiredWE{Name: "autogenflat.c1.default.pod1.f2396f15c5c2", Address: "1.2.3.4", Locality: "region-c1/zone-c1"},
+			DesiredWE{Name: "autogen.c1.default.svc1", Locality: "region-c1/zone-c1/subzone-c1"},
+			DesiredWE{Name: "autogenflat.c1.default.pod1.f2396f15c5c2", Address: "1.2.3.4", Locality: "region-c1/zone-c1/subzone-c1"},
 		)
 		AssertSE(c2, DesiredSE{Name: "autogen.default.svc1"})
 	})
@@ -1044,10 +1044,11 @@ func TestPeering(t *testing.T) {
 		// istio-remote locality labels changed
 		c2.RegionOverride = "updated-region"
 		c2.ZoneOverride = "updated-zone"
+		c2.SubzoneOverride = "updated-subzone"
 		c1.ConnectTo(c2)
 
 		// workload entry gets updated locality
-		AssertWE(c1, DesiredWE{Name: "autogen.c2.default.svc2", Locality: "updated-region/updated-zone"})
+		AssertWE(c1, DesiredWE{Name: "autogen.c2.default.svc2", Locality: "updated-region/updated-zone/updated-subzone"})
 	})
 
 	t.Run("Re-generate resources", func(t *testing.T) {
@@ -1075,7 +1076,7 @@ func TestPeering(t *testing.T) {
 		flatc2pod := "autogenflat.c2.default.pod1.59f156dddd24"
 		AssertWE(c1, DesiredWE{Name: c2Svc1Name, Locality: c2.Locality()},
 			DesiredWE{Name: c2Svc2Name, Locality: c2.Locality()},
-			DesiredWE{Name: flatc2pod, Address: "1.2.3.4", Locality: "region-c2/zone-c2"},
+			DesiredWE{Name: flatc2pod, Address: "1.2.3.4", Locality: "region-c2/zone-c2/subzone-c2"},
 			DesiredWE{Name: "autogenflat.c2.default.pod-locality.59f156dddd24", Address: "1.2.3.5", Locality: "custom-region/custom-zone"},
 		)
 		AssertSE(c1, DesiredSE{Name: defaultSvc1Name}, DesiredSE{Name: defaultSvc2Name}, DesiredSE{Name: "se1"})
@@ -1113,7 +1114,7 @@ func TestPeering(t *testing.T) {
 		c1.WorkloadEntries.Delete(c2Svc1Name, peering.PeeringNamespace)
 		AssertWE(c1, DesiredWE{Name: c2Svc1Name, Locality: c2.Locality()},
 			DesiredWE{Name: c2Svc2Name, Locality: c2.Locality()},
-			DesiredWE{Name: "autogenflat.c2.default.pod1.59f156dddd24", Address: "1.2.3.4", Locality: "region-c2/zone-c2"},
+			DesiredWE{Name: "autogenflat.c2.default.pod1.59f156dddd24", Address: "1.2.3.4", Locality: "region-c2/zone-c2/subzone-c2"},
 			DesiredWE{Name: "autogenflat.c2.default.pod-locality.59f156dddd24", Address: "1.2.3.5", Locality: "custom-region/custom-zone"},
 		)
 
@@ -1132,7 +1133,7 @@ func TestPeering(t *testing.T) {
 		c1.WorkloadEntries.Delete(flatc2pod, peering.PeeringNamespace)
 		AssertWE(c1, DesiredWE{Name: c2Svc1Name, Locality: c2.Locality()},
 			DesiredWE{Name: c2Svc2Name, Locality: c2.Locality()},
-			DesiredWE{Name: "autogenflat.c2.default.pod1.59f156dddd24", Address: "1.2.3.4", Locality: "region-c2/zone-c2"},
+			DesiredWE{Name: "autogenflat.c2.default.pod1.59f156dddd24", Address: "1.2.3.4", Locality: "region-c2/zone-c2/subzone-c2"},
 			DesiredWE{Name: "autogenflat.c2.default.pod-locality.59f156dddd24", Address: "1.2.3.5", Locality: "custom-region/custom-zone"},
 		)
 
@@ -1472,31 +1473,35 @@ func init() {
 }
 
 type Cluster struct {
-	Peering                      *peering.NetworkWatcher
-	Kube                         kube.Client
-	Discovery                    *xds.FakeDiscoveryServer
-	ClusterName                  string
-	NetworkName                  string
-	t                            test.Failer
-	ServiceEntries               clienttest.TestClient[*networkingclient.ServiceEntry]
-	WorkloadEntries              clienttest.TestClient[*networkingclient.WorkloadEntry]
-	Gateways                     clienttest.TestClient[*k8sbeta.Gateway]
-	Services                     clienttest.TestClient[*corev1.Service]
-	Namespaces                   clienttest.TestClient[*corev1.Namespace]
-	Outage                       *OutageInjector
-	ZoneOverride, RegionOverride string
-}
-
-func (c *Cluster) Zone() string {
-	return ptr.NonEmptyOrDefault(c.ZoneOverride, "zone-"+c.ClusterName)
+	Peering                                       *peering.NetworkWatcher
+	Kube                                          kube.Client
+	Discovery                                     *xds.FakeDiscoveryServer
+	ClusterName                                   string
+	NetworkName                                   string
+	t                                             test.Failer
+	ServiceEntries                                clienttest.TestClient[*networkingclient.ServiceEntry]
+	WorkloadEntries                               clienttest.TestClient[*networkingclient.WorkloadEntry]
+	Gateways                                      clienttest.TestClient[*k8sbeta.Gateway]
+	Services                                      clienttest.TestClient[*corev1.Service]
+	Namespaces                                    clienttest.TestClient[*corev1.Namespace]
+	Outage                                        *OutageInjector
+	RegionOverride, ZoneOverride, SubzoneOverride string
 }
 
 func (c *Cluster) Region() string {
 	return ptr.NonEmptyOrDefault(c.RegionOverride, "region-"+c.ClusterName)
 }
 
+func (c *Cluster) Zone() string {
+	return ptr.NonEmptyOrDefault(c.ZoneOverride, "zone-"+c.ClusterName)
+}
+
+func (c *Cluster) Subzone() string {
+	return ptr.NonEmptyOrDefault(c.SubzoneOverride, "subzone-"+c.ClusterName)
+}
+
 func (c *Cluster) Locality() string {
-	return c.Region() + "/" + c.Zone()
+	return c.Region() + "/" + c.Zone() + "/" + c.Subzone()
 }
 
 func (c *Cluster) CreateService(name string, global bool, ports []corev1.ServicePort) {
@@ -1830,6 +1835,7 @@ func (c *Cluster) ConnectTo(other *Cluster) {
 				label.TopologyCluster.Name:      other.ClusterName,
 				"topology.kubernetes.io/region": other.Region(),
 				"topology.kubernetes.io/zone":   other.Zone(),
+				"topology.istio.io/subzone":     other.Subzone(),
 			},
 		},
 		Spec: k8s.GatewaySpec{

@@ -1,0 +1,14 @@
+apiVersion: release-notes/v2
+
+kind: bug-fix
+
+area: traffic-management
+
+issue:
+  - https://github.com/solo-io/istio/issues/3482
+
+releaseNotes:
+- |
+  **Fixed** locality information was not being propagated for peered
+  multi-cluster resources when the `istio-remote` Gateway's
+  `topology.istio.io/subzone` was specified.

@@ -700,13 +700,17 @@ func TranslatePeerGateway(gw *gateway.Gateway) (PeerGateway, error) {
 	}
 	peer.Address = net.JoinHostPort(host, port)
 
-	region, rf := gw.Labels[corev1.LabelTopologyRegion]
-	zone, zf := gw.Labels[corev1.LabelTopologyZone]
-	if rf && zf {
-		peer.Locality = region + "/" + zone
-	} else if rf {
-		peer.Locality = region
+	if region := gw.Labels[corev1.LabelTopologyRegion]; region != "" {
+		locality := region
+		if zone := gw.Labels[corev1.LabelTopologyZone]; zone != "" {
+			locality = locality + "/" + zone
+			if subzone := gw.Labels[label.TopologySubzone.Name]; subzone != "" {
+				locality = locality + "/" + subzone
+			}
+		}
+		peer.Locality = locality
 	}
+
 	return peer, nil
 }
 
