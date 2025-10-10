@@ -1,3 +1,4 @@
+{{- if or (eq .Values.resourceScope "all") (eq .Values.resourceScope "namespace") }}
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
@@ -258,3 +259,4 @@ spec:
       {{- with .Values.volumes }}
         {{- toYaml . | nindent 6}}
       {{- end }}
+{{- end }}
