@@ -255,7 +255,7 @@ func (x OutboundTrafficPolicyConfig_Mode) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use OutboundTrafficPolicyConfig_Mode.Descriptor instead.
 func (OutboundTrafficPolicyConfig_Mode) EnumDescriptor() ([]byte, []int) {
-	return file_pkg_apis_values_types_proto_rawDescGZIP(), []int{19, 0}
+	return file_pkg_apis_values_types_proto_rawDescGZIP(), []int{20, 0}
 }
 
 // ArchConfig specifies the pod scheduling target architecture(amd64, ppc64le, s390x, arm64)
@@ -1266,6 +1266,51 @@ func (x *DefaultResourcesConfig) GetRequests() *ResourcesRequestsConfig {
 	return nil
 }
 
+type SpireConfig struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Controls whether SPIRE is used for workload identity
+	Workloads     *wrapperspb.BoolValue `protobuf:"bytes,1,opt,name=workloads,proto3" json:"workloads,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SpireConfig) Reset() {
+	*x = SpireConfig{}
+	mi := &file_pkg_apis_values_types_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SpireConfig) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SpireConfig) ProtoMessage() {}
+
+func (x *SpireConfig) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_apis_values_types_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SpireConfig.ProtoReflect.Descriptor instead.
+func (*SpireConfig) Descriptor() ([]byte, []int) {
+	return file_pkg_apis_values_types_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *SpireConfig) GetWorkloads() *wrapperspb.BoolValue {
+	if x != nil {
+		return x.Workloads
+	}
+	return nil
+}
+
 // Configuration for an egress gateway.
 type EgressGatewayConfig struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -1387,7 +1432,7 @@ type EgressGatewayConfig struct {
 
 func (x *EgressGatewayConfig) Reset() {
 	*x = EgressGatewayConfig{}
-	mi := &file_pkg_apis_values_types_proto_msgTypes[11]
+	mi := &file_pkg_apis_values_types_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1399,7 +1444,7 @@ func (x *EgressGatewayConfig) String() string {
 func (*EgressGatewayConfig) ProtoMessage() {}
 
 func (x *EgressGatewayConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_apis_values_types_proto_msgTypes[11]
+	mi := &file_pkg_apis_values_types_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1412,7 +1457,7 @@ func (x *EgressGatewayConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EgressGatewayConfig.ProtoReflect.Descriptor instead.
 func (*EgressGatewayConfig) Descriptor() ([]byte, []int) {
-	return file_pkg_apis_values_types_proto_rawDescGZIP(), []int{11}
+	return file_pkg_apis_values_types_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *EgressGatewayConfig) GetAutoscaleEnabled() *wrapperspb.BoolValue {
@@ -1639,13 +1684,15 @@ type GatewaysConfig struct {
 	IstioIngressgateway *IngressGatewayConfig `protobuf:"bytes,4,opt,name=istio_ingressgateway,json=istio-ingressgateway,proto3" json:"istio_ingressgateway,omitempty"`
 	SecurityContext     *structpb.Value       `protobuf:"bytes,10,opt,name=securityContext,proto3" json:"securityContext,omitempty"`
 	SeccompProfile      *structpb.Value       `protobuf:"bytes,12,opt,name=seccompProfile,proto3" json:"seccompProfile,omitempty"`
-	unknownFields       protoimpl.UnknownFields
-	sizeCache           protoimpl.SizeCache
+	// Configuration for how/where SPIRE should be used in gateways
+	Spire         *SpireConfig `protobuf:"bytes,14,opt,name=spire,proto3" json:"spire,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *GatewaysConfig) Reset() {
 	*x = GatewaysConfig{}
-	mi := &file_pkg_apis_values_types_proto_msgTypes[12]
+	mi := &file_pkg_apis_values_types_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1657,7 +1704,7 @@ func (x *GatewaysConfig) String() string {
 func (*GatewaysConfig) ProtoMessage() {}
 
 func (x *GatewaysConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_apis_values_types_proto_msgTypes[12]
+	mi := &file_pkg_apis_values_types_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1670,7 +1717,7 @@ func (x *GatewaysConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GatewaysConfig.ProtoReflect.Descriptor instead.
 func (*GatewaysConfig) Descriptor() ([]byte, []int) {
-	return file_pkg_apis_values_types_proto_rawDescGZIP(), []int{12}
+	return file_pkg_apis_values_types_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *GatewaysConfig) GetIstioEgressgateway() *EgressGatewayConfig {
@@ -1704,6 +1751,13 @@ func (x *GatewaysConfig) GetSecurityContext() *structpb.Value {
 func (x *GatewaysConfig) GetSeccompProfile() *structpb.Value {
 	if x != nil {
 		return x.SeccompProfile
+	}
+	return nil
+}
+
+func (x *GatewaysConfig) GetSpire() *SpireConfig {
+	if x != nil {
+		return x.Spire
 	}
 	return nil
 }
@@ -1913,7 +1967,7 @@ type GlobalConfig struct {
 
 func (x *GlobalConfig) Reset() {
 	*x = GlobalConfig{}
-	mi := &file_pkg_apis_values_types_proto_msgTypes[13]
+	mi := &file_pkg_apis_values_types_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1925,7 +1979,7 @@ func (x *GlobalConfig) String() string {
 func (*GlobalConfig) ProtoMessage() {}
 
 func (x *GlobalConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_apis_values_types_proto_msgTypes[13]
+	mi := &file_pkg_apis_values_types_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1938,7 +1992,7 @@ func (x *GlobalConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GlobalConfig.ProtoReflect.Descriptor instead.
 func (*GlobalConfig) Descriptor() ([]byte, []int) {
-	return file_pkg_apis_values_types_proto_rawDescGZIP(), []int{13}
+	return file_pkg_apis_values_types_proto_rawDescGZIP(), []int{14}
 }
 
 // Deprecated: Marked as deprecated in pkg/apis/values_types.proto.
@@ -2281,7 +2335,7 @@ type STSConfig struct {
 
 func (x *STSConfig) Reset() {
 	*x = STSConfig{}
-	mi := &file_pkg_apis_values_types_proto_msgTypes[14]
+	mi := &file_pkg_apis_values_types_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2293,7 +2347,7 @@ func (x *STSConfig) String() string {
 func (*STSConfig) ProtoMessage() {}
 
 func (x *STSConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_apis_values_types_proto_msgTypes[14]
+	mi := &file_pkg_apis_values_types_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2306,7 +2360,7 @@ func (x *STSConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use STSConfig.ProtoReflect.Descriptor instead.
 func (*STSConfig) Descriptor() ([]byte, []int) {
-	return file_pkg_apis_values_types_proto_rawDescGZIP(), []int{14}
+	return file_pkg_apis_values_types_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *STSConfig) GetServicePort() uint32 {
@@ -2326,7 +2380,7 @@ type IstiodConfig struct {
 
 func (x *IstiodConfig) Reset() {
 	*x = IstiodConfig{}
-	mi := &file_pkg_apis_values_types_proto_msgTypes[15]
+	mi := &file_pkg_apis_values_types_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2338,7 +2392,7 @@ func (x *IstiodConfig) String() string {
 func (*IstiodConfig) ProtoMessage() {}
 
 func (x *IstiodConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_apis_values_types_proto_msgTypes[15]
+	mi := &file_pkg_apis_values_types_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2351,7 +2405,7 @@ func (x *IstiodConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use IstiodConfig.ProtoReflect.Descriptor instead.
 func (*IstiodConfig) Descriptor() ([]byte, []int) {
-	return file_pkg_apis_values_types_proto_rawDescGZIP(), []int{15}
+	return file_pkg_apis_values_types_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *IstiodConfig) GetEnableAnalysis() *wrapperspb.BoolValue {
@@ -2374,7 +2428,7 @@ type GlobalLoggingConfig struct {
 
 func (x *GlobalLoggingConfig) Reset() {
 	*x = GlobalLoggingConfig{}
-	mi := &file_pkg_apis_values_types_proto_msgTypes[16]
+	mi := &file_pkg_apis_values_types_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2386,7 +2440,7 @@ func (x *GlobalLoggingConfig) String() string {
 func (*GlobalLoggingConfig) ProtoMessage() {}
 
 func (x *GlobalLoggingConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_apis_values_types_proto_msgTypes[16]
+	mi := &file_pkg_apis_values_types_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2399,7 +2453,7 @@ func (x *GlobalLoggingConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GlobalLoggingConfig.ProtoReflect.Descriptor instead.
 func (*GlobalLoggingConfig) Descriptor() ([]byte, []int) {
-	return file_pkg_apis_values_types_proto_rawDescGZIP(), []int{16}
+	return file_pkg_apis_values_types_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *GlobalLoggingConfig) GetLevel() string {
@@ -2515,7 +2569,7 @@ type IngressGatewayConfig struct {
 
 func (x *IngressGatewayConfig) Reset() {
 	*x = IngressGatewayConfig{}
-	mi := &file_pkg_apis_values_types_proto_msgTypes[17]
+	mi := &file_pkg_apis_values_types_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2527,7 +2581,7 @@ func (x *IngressGatewayConfig) String() string {
 func (*IngressGatewayConfig) ProtoMessage() {}
 
 func (x *IngressGatewayConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_apis_values_types_proto_msgTypes[17]
+	mi := &file_pkg_apis_values_types_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2540,7 +2594,7 @@ func (x *IngressGatewayConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use IngressGatewayConfig.ProtoReflect.Descriptor instead.
 func (*IngressGatewayConfig) Descriptor() ([]byte, []int) {
-	return file_pkg_apis_values_types_proto_rawDescGZIP(), []int{17}
+	return file_pkg_apis_values_types_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *IngressGatewayConfig) GetAutoscaleEnabled() *wrapperspb.BoolValue {
@@ -2811,7 +2865,7 @@ type MultiClusterConfig struct {
 
 func (x *MultiClusterConfig) Reset() {
 	*x = MultiClusterConfig{}
-	mi := &file_pkg_apis_values_types_proto_msgTypes[18]
+	mi := &file_pkg_apis_values_types_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2823,7 +2877,7 @@ func (x *MultiClusterConfig) String() string {
 func (*MultiClusterConfig) ProtoMessage() {}
 
 func (x *MultiClusterConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_apis_values_types_proto_msgTypes[18]
+	mi := &file_pkg_apis_values_types_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2836,7 +2890,7 @@ func (x *MultiClusterConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MultiClusterConfig.ProtoReflect.Descriptor instead.
 func (*MultiClusterConfig) Descriptor() ([]byte, []int) {
-	return file_pkg_apis_values_types_proto_rawDescGZIP(), []int{18}
+	return file_pkg_apis_values_types_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *MultiClusterConfig) GetEnabled() *wrapperspb.BoolValue {
@@ -2877,7 +2931,7 @@ type OutboundTrafficPolicyConfig struct {
 
 func (x *OutboundTrafficPolicyConfig) Reset() {
 	*x = OutboundTrafficPolicyConfig{}
-	mi := &file_pkg_apis_values_types_proto_msgTypes[19]
+	mi := &file_pkg_apis_values_types_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2889,7 +2943,7 @@ func (x *OutboundTrafficPolicyConfig) String() string {
 func (*OutboundTrafficPolicyConfig) ProtoMessage() {}
 
 func (x *OutboundTrafficPolicyConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_apis_values_types_proto_msgTypes[19]
+	mi := &file_pkg_apis_values_types_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2902,7 +2956,7 @@ func (x *OutboundTrafficPolicyConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OutboundTrafficPolicyConfig.ProtoReflect.Descriptor instead.
 func (*OutboundTrafficPolicyConfig) Descriptor() ([]byte, []int) {
-	return file_pkg_apis_values_types_proto_rawDescGZIP(), []int{19}
+	return file_pkg_apis_values_types_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *OutboundTrafficPolicyConfig) GetMode() OutboundTrafficPolicyConfig_Mode {
@@ -3069,7 +3123,7 @@ type PilotConfig struct {
 
 func (x *PilotConfig) Reset() {
 	*x = PilotConfig{}
-	mi := &file_pkg_apis_values_types_proto_msgTypes[20]
+	mi := &file_pkg_apis_values_types_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3081,7 +3135,7 @@ func (x *PilotConfig) String() string {
 func (*PilotConfig) ProtoMessage() {}
 
 func (x *PilotConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_apis_values_types_proto_msgTypes[20]
+	mi := &file_pkg_apis_values_types_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3094,7 +3148,7 @@ func (x *PilotConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PilotConfig.ProtoReflect.Descriptor instead.
 func (*PilotConfig) Descriptor() ([]byte, []int) {
-	return file_pkg_apis_values_types_proto_rawDescGZIP(), []int{20}
+	return file_pkg_apis_values_types_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *PilotConfig) GetEnabled() *wrapperspb.BoolValue {
@@ -3400,7 +3454,7 @@ type PilotTaintControllerConfig struct {
 
 func (x *PilotTaintControllerConfig) Reset() {
 	*x = PilotTaintControllerConfig{}
-	mi := &file_pkg_apis_values_types_proto_msgTypes[21]
+	mi := &file_pkg_apis_values_types_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3412,7 +3466,7 @@ func (x *PilotTaintControllerConfig) String() string {
 func (*PilotTaintControllerConfig) ProtoMessage() {}
 
 func (x *PilotTaintControllerConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_apis_values_types_proto_msgTypes[21]
+	mi := &file_pkg_apis_values_types_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3425,7 +3479,7 @@ func (x *PilotTaintControllerConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PilotTaintControllerConfig.ProtoReflect.Descriptor instead.
 func (*PilotTaintControllerConfig) Descriptor() ([]byte, []int) {
-	return file_pkg_apis_values_types_proto_rawDescGZIP(), []int{21}
+	return file_pkg_apis_values_types_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *PilotTaintControllerConfig) GetEnabled() bool {
@@ -3460,7 +3514,7 @@ type PilotIngressConfig struct {
 
 func (x *PilotIngressConfig) Reset() {
 	*x = PilotIngressConfig{}
-	mi := &file_pkg_apis_values_types_proto_msgTypes[22]
+	mi := &file_pkg_apis_values_types_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3472,7 +3526,7 @@ func (x *PilotIngressConfig) String() string {
 func (*PilotIngressConfig) ProtoMessage() {}
 
 func (x *PilotIngressConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_apis_values_types_proto_msgTypes[22]
+	mi := &file_pkg_apis_values_types_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3485,7 +3539,7 @@ func (x *PilotIngressConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PilotIngressConfig.ProtoReflect.Descriptor instead.
 func (*PilotIngressConfig) Descriptor() ([]byte, []int) {
-	return file_pkg_apis_values_types_proto_rawDescGZIP(), []int{22}
+	return file_pkg_apis_values_types_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *PilotIngressConfig) GetIngressService() string {
@@ -3520,7 +3574,7 @@ type PilotPolicyConfig struct {
 
 func (x *PilotPolicyConfig) Reset() {
 	*x = PilotPolicyConfig{}
-	mi := &file_pkg_apis_values_types_proto_msgTypes[23]
+	mi := &file_pkg_apis_values_types_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3532,7 +3586,7 @@ func (x *PilotPolicyConfig) String() string {
 func (*PilotPolicyConfig) ProtoMessage() {}
 
 func (x *PilotPolicyConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_apis_values_types_proto_msgTypes[23]
+	mi := &file_pkg_apis_values_types_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3545,7 +3599,7 @@ func (x *PilotPolicyConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PilotPolicyConfig.ProtoReflect.Descriptor instead.
 func (*PilotPolicyConfig) Descriptor() ([]byte, []int) {
-	return file_pkg_apis_values_types_proto_rawDescGZIP(), []int{23}
+	return file_pkg_apis_values_types_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *PilotPolicyConfig) GetEnabled() *wrapperspb.BoolValue {
@@ -3568,7 +3622,7 @@ type TelemetryConfig struct {
 
 func (x *TelemetryConfig) Reset() {
 	*x = TelemetryConfig{}
-	mi := &file_pkg_apis_values_types_proto_msgTypes[24]
+	mi := &file_pkg_apis_values_types_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3580,7 +3634,7 @@ func (x *TelemetryConfig) String() string {
 func (*TelemetryConfig) ProtoMessage() {}
 
 func (x *TelemetryConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_apis_values_types_proto_msgTypes[24]
+	mi := &file_pkg_apis_values_types_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3593,7 +3647,7 @@ func (x *TelemetryConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TelemetryConfig.ProtoReflect.Descriptor instead.
 func (*TelemetryConfig) Descriptor() ([]byte, []int) {
-	return file_pkg_apis_values_types_proto_rawDescGZIP(), []int{24}
+	return file_pkg_apis_values_types_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *TelemetryConfig) GetEnabled() *wrapperspb.BoolValue {
@@ -3625,7 +3679,7 @@ type TelemetryV2Config struct {
 
 func (x *TelemetryV2Config) Reset() {
 	*x = TelemetryV2Config{}
-	mi := &file_pkg_apis_values_types_proto_msgTypes[25]
+	mi := &file_pkg_apis_values_types_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3637,7 +3691,7 @@ func (x *TelemetryV2Config) String() string {
 func (*TelemetryV2Config) ProtoMessage() {}
 
 func (x *TelemetryV2Config) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_apis_values_types_proto_msgTypes[25]
+	mi := &file_pkg_apis_values_types_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3650,7 +3704,7 @@ func (x *TelemetryV2Config) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TelemetryV2Config.ProtoReflect.Descriptor instead.
 func (*TelemetryV2Config) Descriptor() ([]byte, []int) {
-	return file_pkg_apis_values_types_proto_rawDescGZIP(), []int{25}
+	return file_pkg_apis_values_types_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *TelemetryV2Config) GetEnabled() *wrapperspb.BoolValue {
@@ -3685,7 +3739,7 @@ type TelemetryV2PrometheusConfig struct {
 
 func (x *TelemetryV2PrometheusConfig) Reset() {
 	*x = TelemetryV2PrometheusConfig{}
-	mi := &file_pkg_apis_values_types_proto_msgTypes[26]
+	mi := &file_pkg_apis_values_types_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3697,7 +3751,7 @@ func (x *TelemetryV2PrometheusConfig) String() string {
 func (*TelemetryV2PrometheusConfig) ProtoMessage() {}
 
 func (x *TelemetryV2PrometheusConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_apis_values_types_proto_msgTypes[26]
+	mi := &file_pkg_apis_values_types_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3710,7 +3764,7 @@ func (x *TelemetryV2PrometheusConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TelemetryV2PrometheusConfig.ProtoReflect.Descriptor instead.
 func (*TelemetryV2PrometheusConfig) Descriptor() ([]byte, []int) {
-	return file_pkg_apis_values_types_proto_rawDescGZIP(), []int{26}
+	return file_pkg_apis_values_types_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *TelemetryV2PrometheusConfig) GetEnabled() *wrapperspb.BoolValue {
@@ -3730,7 +3784,7 @@ type TelemetryV2StackDriverConfig struct {
 
 func (x *TelemetryV2StackDriverConfig) Reset() {
 	*x = TelemetryV2StackDriverConfig{}
-	mi := &file_pkg_apis_values_types_proto_msgTypes[27]
+	mi := &file_pkg_apis_values_types_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3742,7 +3796,7 @@ func (x *TelemetryV2StackDriverConfig) String() string {
 func (*TelemetryV2StackDriverConfig) ProtoMessage() {}
 
 func (x *TelemetryV2StackDriverConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_apis_values_types_proto_msgTypes[27]
+	mi := &file_pkg_apis_values_types_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3755,7 +3809,7 @@ func (x *TelemetryV2StackDriverConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TelemetryV2StackDriverConfig.ProtoReflect.Descriptor instead.
 func (*TelemetryV2StackDriverConfig) Descriptor() ([]byte, []int) {
-	return file_pkg_apis_values_types_proto_rawDescGZIP(), []int{27}
+	return file_pkg_apis_values_types_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *TelemetryV2StackDriverConfig) GetEnabled() *wrapperspb.BoolValue {
@@ -3784,7 +3838,7 @@ type PortsConfig struct {
 
 func (x *PortsConfig) Reset() {
 	*x = PortsConfig{}
-	mi := &file_pkg_apis_values_types_proto_msgTypes[28]
+	mi := &file_pkg_apis_values_types_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3796,7 +3850,7 @@ func (x *PortsConfig) String() string {
 func (*PortsConfig) ProtoMessage() {}
 
 func (x *PortsConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_apis_values_types_proto_msgTypes[28]
+	mi := &file_pkg_apis_values_types_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3809,7 +3863,7 @@ func (x *PortsConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PortsConfig.ProtoReflect.Descriptor instead.
 func (*PortsConfig) Descriptor() ([]byte, []int) {
-	return file_pkg_apis_values_types_proto_rawDescGZIP(), []int{28}
+	return file_pkg_apis_values_types_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *PortsConfig) GetName() string {
@@ -3933,7 +3987,7 @@ type ProxyConfig struct {
 
 func (x *ProxyConfig) Reset() {
 	*x = ProxyConfig{}
-	mi := &file_pkg_apis_values_types_proto_msgTypes[29]
+	mi := &file_pkg_apis_values_types_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3945,7 +3999,7 @@ func (x *ProxyConfig) String() string {
 func (*ProxyConfig) ProtoMessage() {}
 
 func (x *ProxyConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_apis_values_types_proto_msgTypes[29]
+	mi := &file_pkg_apis_values_types_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3958,7 +4012,7 @@ func (x *ProxyConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProxyConfig.ProtoReflect.Descriptor instead.
 func (*ProxyConfig) Descriptor() ([]byte, []int) {
-	return file_pkg_apis_values_types_proto_rawDescGZIP(), []int{29}
+	return file_pkg_apis_values_types_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *ProxyConfig) GetAutoInject() string {
@@ -4145,7 +4199,7 @@ type StartupProbe struct {
 
 func (x *StartupProbe) Reset() {
 	*x = StartupProbe{}
-	mi := &file_pkg_apis_values_types_proto_msgTypes[30]
+	mi := &file_pkg_apis_values_types_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4157,7 +4211,7 @@ func (x *StartupProbe) String() string {
 func (*StartupProbe) ProtoMessage() {}
 
 func (x *StartupProbe) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_apis_values_types_proto_msgTypes[30]
+	mi := &file_pkg_apis_values_types_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4170,7 +4224,7 @@ func (x *StartupProbe) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StartupProbe.ProtoReflect.Descriptor instead.
 func (*StartupProbe) Descriptor() ([]byte, []int) {
-	return file_pkg_apis_values_types_proto_rawDescGZIP(), []int{30}
+	return file_pkg_apis_values_types_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *StartupProbe) GetEnabled() *wrapperspb.BoolValue {
@@ -4204,7 +4258,7 @@ type ProxyInitConfig struct {
 
 func (x *ProxyInitConfig) Reset() {
 	*x = ProxyInitConfig{}
-	mi := &file_pkg_apis_values_types_proto_msgTypes[31]
+	mi := &file_pkg_apis_values_types_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4216,7 +4270,7 @@ func (x *ProxyInitConfig) String() string {
 func (*ProxyInitConfig) ProtoMessage() {}
 
 func (x *ProxyInitConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_apis_values_types_proto_msgTypes[31]
+	mi := &file_pkg_apis_values_types_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4229,7 +4283,7 @@ func (x *ProxyInitConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProxyInitConfig.ProtoReflect.Descriptor instead.
 func (*ProxyInitConfig) Descriptor() ([]byte, []int) {
-	return file_pkg_apis_values_types_proto_rawDescGZIP(), []int{31}
+	return file_pkg_apis_values_types_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *ProxyInitConfig) GetImage() string {
@@ -4260,7 +4314,7 @@ type ResourcesRequestsConfig struct {
 
 func (x *ResourcesRequestsConfig) Reset() {
 	*x = ResourcesRequestsConfig{}
-	mi := &file_pkg_apis_values_types_proto_msgTypes[32]
+	mi := &file_pkg_apis_values_types_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4272,7 +4326,7 @@ func (x *ResourcesRequestsConfig) String() string {
 func (*ResourcesRequestsConfig) ProtoMessage() {}
 
 func (x *ResourcesRequestsConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_apis_values_types_proto_msgTypes[32]
+	mi := &file_pkg_apis_values_types_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4285,7 +4339,7 @@ func (x *ResourcesRequestsConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResourcesRequestsConfig.ProtoReflect.Descriptor instead.
 func (*ResourcesRequestsConfig) Descriptor() ([]byte, []int) {
-	return file_pkg_apis_values_types_proto_rawDescGZIP(), []int{32}
+	return file_pkg_apis_values_types_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *ResourcesRequestsConfig) GetCpu() string {
@@ -4313,7 +4367,7 @@ type SDSConfig struct {
 
 func (x *SDSConfig) Reset() {
 	*x = SDSConfig{}
-	mi := &file_pkg_apis_values_types_proto_msgTypes[33]
+	mi := &file_pkg_apis_values_types_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4325,7 +4379,7 @@ func (x *SDSConfig) String() string {
 func (*SDSConfig) ProtoMessage() {}
 
 func (x *SDSConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_apis_values_types_proto_msgTypes[33]
+	mi := &file_pkg_apis_values_types_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4338,7 +4392,7 @@ func (x *SDSConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SDSConfig.ProtoReflect.Descriptor instead.
 func (*SDSConfig) Descriptor() ([]byte, []int) {
-	return file_pkg_apis_values_types_proto_rawDescGZIP(), []int{33}
+	return file_pkg_apis_values_types_proto_rawDescGZIP(), []int{34}
 }
 
 // Deprecated: Marked as deprecated in pkg/apis/values_types.proto.
@@ -4363,7 +4417,7 @@ type SecretVolume struct {
 
 func (x *SecretVolume) Reset() {
 	*x = SecretVolume{}
-	mi := &file_pkg_apis_values_types_proto_msgTypes[34]
+	mi := &file_pkg_apis_values_types_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4375,7 +4429,7 @@ func (x *SecretVolume) String() string {
 func (*SecretVolume) ProtoMessage() {}
 
 func (x *SecretVolume) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_apis_values_types_proto_msgTypes[34]
+	mi := &file_pkg_apis_values_types_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4388,7 +4442,7 @@ func (x *SecretVolume) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SecretVolume.ProtoReflect.Descriptor instead.
 func (*SecretVolume) Descriptor() ([]byte, []int) {
-	return file_pkg_apis_values_types_proto_rawDescGZIP(), []int{34}
+	return file_pkg_apis_values_types_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *SecretVolume) GetMountPath() string {
@@ -4455,7 +4509,7 @@ type SidecarInjectorConfig struct {
 
 func (x *SidecarInjectorConfig) Reset() {
 	*x = SidecarInjectorConfig{}
-	mi := &file_pkg_apis_values_types_proto_msgTypes[35]
+	mi := &file_pkg_apis_values_types_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4467,7 +4521,7 @@ func (x *SidecarInjectorConfig) String() string {
 func (*SidecarInjectorConfig) ProtoMessage() {}
 
 func (x *SidecarInjectorConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_apis_values_types_proto_msgTypes[35]
+	mi := &file_pkg_apis_values_types_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4480,7 +4534,7 @@ func (x *SidecarInjectorConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SidecarInjectorConfig.ProtoReflect.Descriptor instead.
 func (*SidecarInjectorConfig) Descriptor() ([]byte, []int) {
-	return file_pkg_apis_values_types_proto_rawDescGZIP(), []int{35}
+	return file_pkg_apis_values_types_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *SidecarInjectorConfig) GetEnableNamespacesByDefault() *wrapperspb.BoolValue {
@@ -4563,7 +4617,7 @@ type TracerConfig struct {
 
 func (x *TracerConfig) Reset() {
 	*x = TracerConfig{}
-	mi := &file_pkg_apis_values_types_proto_msgTypes[36]
+	mi := &file_pkg_apis_values_types_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4575,7 +4629,7 @@ func (x *TracerConfig) String() string {
 func (*TracerConfig) ProtoMessage() {}
 
 func (x *TracerConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_apis_values_types_proto_msgTypes[36]
+	mi := &file_pkg_apis_values_types_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4588,7 +4642,7 @@ func (x *TracerConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TracerConfig.ProtoReflect.Descriptor instead.
 func (*TracerConfig) Descriptor() ([]byte, []int) {
-	return file_pkg_apis_values_types_proto_rawDescGZIP(), []int{36}
+	return file_pkg_apis_values_types_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *TracerConfig) GetDatadog() *TracerDatadogConfig {
@@ -4630,7 +4684,7 @@ type TracerDatadogConfig struct {
 
 func (x *TracerDatadogConfig) Reset() {
 	*x = TracerDatadogConfig{}
-	mi := &file_pkg_apis_values_types_proto_msgTypes[37]
+	mi := &file_pkg_apis_values_types_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4642,7 +4696,7 @@ func (x *TracerDatadogConfig) String() string {
 func (*TracerDatadogConfig) ProtoMessage() {}
 
 func (x *TracerDatadogConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_apis_values_types_proto_msgTypes[37]
+	mi := &file_pkg_apis_values_types_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4655,7 +4709,7 @@ func (x *TracerDatadogConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TracerDatadogConfig.ProtoReflect.Descriptor instead.
 func (*TracerDatadogConfig) Descriptor() ([]byte, []int) {
-	return file_pkg_apis_values_types_proto_rawDescGZIP(), []int{37}
+	return file_pkg_apis_values_types_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *TracerDatadogConfig) GetAddress() string {
@@ -4678,7 +4732,7 @@ type TracerLightStepConfig struct {
 
 func (x *TracerLightStepConfig) Reset() {
 	*x = TracerLightStepConfig{}
-	mi := &file_pkg_apis_values_types_proto_msgTypes[38]
+	mi := &file_pkg_apis_values_types_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4690,7 +4744,7 @@ func (x *TracerLightStepConfig) String() string {
 func (*TracerLightStepConfig) ProtoMessage() {}
 
 func (x *TracerLightStepConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_apis_values_types_proto_msgTypes[38]
+	mi := &file_pkg_apis_values_types_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4703,7 +4757,7 @@ func (x *TracerLightStepConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TracerLightStepConfig.ProtoReflect.Descriptor instead.
 func (*TracerLightStepConfig) Descriptor() ([]byte, []int) {
-	return file_pkg_apis_values_types_proto_rawDescGZIP(), []int{38}
+	return file_pkg_apis_values_types_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *TracerLightStepConfig) GetAddress() string {
@@ -4733,7 +4787,7 @@ type TracerZipkinConfig struct {
 
 func (x *TracerZipkinConfig) Reset() {
 	*x = TracerZipkinConfig{}
-	mi := &file_pkg_apis_values_types_proto_msgTypes[39]
+	mi := &file_pkg_apis_values_types_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4745,7 +4799,7 @@ func (x *TracerZipkinConfig) String() string {
 func (*TracerZipkinConfig) ProtoMessage() {}
 
 func (x *TracerZipkinConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_apis_values_types_proto_msgTypes[39]
+	mi := &file_pkg_apis_values_types_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4758,7 +4812,7 @@ func (x *TracerZipkinConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TracerZipkinConfig.ProtoReflect.Descriptor instead.
 func (*TracerZipkinConfig) Descriptor() ([]byte, []int) {
-	return file_pkg_apis_values_types_proto_rawDescGZIP(), []int{39}
+	return file_pkg_apis_values_types_proto_rawDescGZIP(), []int{40}
 }
 
 func (x *TracerZipkinConfig) GetAddress() string {
@@ -4785,7 +4839,7 @@ type TracerStackdriverConfig struct {
 
 func (x *TracerStackdriverConfig) Reset() {
 	*x = TracerStackdriverConfig{}
-	mi := &file_pkg_apis_values_types_proto_msgTypes[40]
+	mi := &file_pkg_apis_values_types_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4797,7 +4851,7 @@ func (x *TracerStackdriverConfig) String() string {
 func (*TracerStackdriverConfig) ProtoMessage() {}
 
 func (x *TracerStackdriverConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_apis_values_types_proto_msgTypes[40]
+	mi := &file_pkg_apis_values_types_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4810,7 +4864,7 @@ func (x *TracerStackdriverConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TracerStackdriverConfig.ProtoReflect.Descriptor instead.
 func (*TracerStackdriverConfig) Descriptor() ([]byte, []int) {
-	return file_pkg_apis_values_types_proto_rawDescGZIP(), []int{40}
+	return file_pkg_apis_values_types_proto_rawDescGZIP(), []int{41}
 }
 
 func (x *TracerStackdriverConfig) GetDebug() *wrapperspb.BoolValue {
@@ -4860,7 +4914,7 @@ type BaseConfig struct {
 
 func (x *BaseConfig) Reset() {
 	*x = BaseConfig{}
-	mi := &file_pkg_apis_values_types_proto_msgTypes[41]
+	mi := &file_pkg_apis_values_types_proto_msgTypes[42]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4872,7 +4926,7 @@ func (x *BaseConfig) String() string {
 func (*BaseConfig) ProtoMessage() {}
 
 func (x *BaseConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_apis_values_types_proto_msgTypes[41]
+	mi := &file_pkg_apis_values_types_proto_msgTypes[42]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4885,7 +4939,7 @@ func (x *BaseConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BaseConfig.ProtoReflect.Descriptor instead.
 func (*BaseConfig) Descriptor() ([]byte, []int) {
-	return file_pkg_apis_values_types_proto_rawDescGZIP(), []int{41}
+	return file_pkg_apis_values_types_proto_rawDescGZIP(), []int{42}
 }
 
 func (x *BaseConfig) GetEnableCRDTemplates() *wrapperspb.BoolValue {
@@ -4949,7 +5003,7 @@ type IstiodRemoteConfig struct {
 
 func (x *IstiodRemoteConfig) Reset() {
 	*x = IstiodRemoteConfig{}
-	mi := &file_pkg_apis_values_types_proto_msgTypes[42]
+	mi := &file_pkg_apis_values_types_proto_msgTypes[43]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4961,7 +5015,7 @@ func (x *IstiodRemoteConfig) String() string {
 func (*IstiodRemoteConfig) ProtoMessage() {}
 
 func (x *IstiodRemoteConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_apis_values_types_proto_msgTypes[42]
+	mi := &file_pkg_apis_values_types_proto_msgTypes[43]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4974,7 +5028,7 @@ func (x *IstiodRemoteConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use IstiodRemoteConfig.ProtoReflect.Descriptor instead.
 func (*IstiodRemoteConfig) Descriptor() ([]byte, []int) {
-	return file_pkg_apis_values_types_proto_rawDescGZIP(), []int{42}
+	return file_pkg_apis_values_types_proto_rawDescGZIP(), []int{43}
 }
 
 func (x *IstiodRemoteConfig) GetInjectionURL() string {
@@ -5062,13 +5116,17 @@ type Values struct {
 	Experimental *ExperimentalConfig `protobuf:"bytes,44,opt,name=experimental,proto3" json:"experimental,omitempty"`
 	// Configuration for Gateway Classes
 	GatewayClasses *structpb.Value `protobuf:"bytes,45,opt,name=gatewayClasses,proto3" json:"gatewayClasses,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// SOLO: platform configuration
+	Platforms *structpb.Value `protobuf:"bytes,85,opt,name=platforms,proto3" json:"platforms,omitempty"`
+	// SOLO: licensing configuration
+	License       *structpb.Value `protobuf:"bytes,86,opt,name=license,proto3" json:"license,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Values) Reset() {
 	*x = Values{}
-	mi := &file_pkg_apis_values_types_proto_msgTypes[43]
+	mi := &file_pkg_apis_values_types_proto_msgTypes[44]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5080,7 +5138,7 @@ func (x *Values) String() string {
 func (*Values) ProtoMessage() {}
 
 func (x *Values) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_apis_values_types_proto_msgTypes[43]
+	mi := &file_pkg_apis_values_types_proto_msgTypes[44]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5093,7 +5151,7 @@ func (x *Values) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Values.ProtoReflect.Descriptor instead.
 func (*Values) Descriptor() ([]byte, []int) {
-	return file_pkg_apis_values_types_proto_rawDescGZIP(), []int{43}
+	return file_pkg_apis_values_types_proto_rawDescGZIP(), []int{44}
 }
 
 func (x *Values) GetCni() *CNIConfig {
@@ -5231,6 +5289,20 @@ func (x *Values) GetGatewayClasses() *structpb.Value {
 	return nil
 }
 
+func (x *Values) GetPlatforms() *structpb.Value {
+	if x != nil {
+		return x.Platforms
+	}
+	return nil
+}
+
+func (x *Values) GetLicense() *structpb.Value {
+	if x != nil {
+		return x.License
+	}
+	return nil
+}
+
 // ExperimentalConfig is a placeholder for experimental installation features.
 type ExperimentalConfig struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -5242,7 +5314,7 @@ type ExperimentalConfig struct {
 
 func (x *ExperimentalConfig) Reset() {
 	*x = ExperimentalConfig{}
-	mi := &file_pkg_apis_values_types_proto_msgTypes[44]
+	mi := &file_pkg_apis_values_types_proto_msgTypes[45]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5254,7 +5326,7 @@ func (x *ExperimentalConfig) String() string {
 func (*ExperimentalConfig) ProtoMessage() {}
 
 func (x *ExperimentalConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_apis_values_types_proto_msgTypes[44]
+	mi := &file_pkg_apis_values_types_proto_msgTypes[45]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5267,7 +5339,7 @@ func (x *ExperimentalConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExperimentalConfig.ProtoReflect.Descriptor instead.
 func (*ExperimentalConfig) Descriptor() ([]byte, []int) {
-	return file_pkg_apis_values_types_proto_rawDescGZIP(), []int{44}
+	return file_pkg_apis_values_types_proto_rawDescGZIP(), []int{45}
 }
 
 func (x *ExperimentalConfig) GetStableValidationPolicy() *wrapperspb.BoolValue {
@@ -5297,7 +5369,7 @@ type IntOrString struct {
 
 func (x *IntOrString) Reset() {
 	*x = IntOrString{}
-	mi := &file_pkg_apis_values_types_proto_msgTypes[45]
+	mi := &file_pkg_apis_values_types_proto_msgTypes[46]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5309,7 +5381,7 @@ func (x *IntOrString) String() string {
 func (*IntOrString) ProtoMessage() {}
 
 func (x *IntOrString) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_apis_values_types_proto_msgTypes[45]
+	mi := &file_pkg_apis_values_types_proto_msgTypes[46]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5322,7 +5394,7 @@ func (x *IntOrString) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use IntOrString.ProtoReflect.Descriptor instead.
 func (*IntOrString) Descriptor() ([]byte, []int) {
-	return file_pkg_apis_values_types_proto_rawDescGZIP(), []int{45}
+	return file_pkg_apis_values_types_proto_rawDescGZIP(), []int{46}
 }
 
 func (x *IntOrString) GetType() int64 {
@@ -5375,7 +5447,7 @@ type WaypointConfig struct {
 
 func (x *WaypointConfig) Reset() {
 	*x = WaypointConfig{}
-	mi := &file_pkg_apis_values_types_proto_msgTypes[46]
+	mi := &file_pkg_apis_values_types_proto_msgTypes[47]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5387,7 +5459,7 @@ func (x *WaypointConfig) String() string {
 func (*WaypointConfig) ProtoMessage() {}
 
 func (x *WaypointConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_apis_values_types_proto_msgTypes[46]
+	mi := &file_pkg_apis_values_types_proto_msgTypes[47]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5400,7 +5472,7 @@ func (x *WaypointConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WaypointConfig.ProtoReflect.Descriptor instead.
 func (*WaypointConfig) Descriptor() ([]byte, []int) {
-	return file_pkg_apis_values_types_proto_rawDescGZIP(), []int{46}
+	return file_pkg_apis_values_types_proto_rawDescGZIP(), []int{47}
 }
 
 func (x *WaypointConfig) GetResources() *Resources {
@@ -5449,7 +5521,7 @@ type NetworkPolicyConfig struct {
 
 func (x *NetworkPolicyConfig) Reset() {
 	*x = NetworkPolicyConfig{}
-	mi := &file_pkg_apis_values_types_proto_msgTypes[47]
+	mi := &file_pkg_apis_values_types_proto_msgTypes[48]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5461,7 +5533,7 @@ func (x *NetworkPolicyConfig) String() string {
 func (*NetworkPolicyConfig) ProtoMessage() {}
 
 func (x *NetworkPolicyConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_apis_values_types_proto_msgTypes[47]
+	mi := &file_pkg_apis_values_types_proto_msgTypes[48]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5474,7 +5546,7 @@ func (x *NetworkPolicyConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NetworkPolicyConfig.ProtoReflect.Descriptor instead.
 func (*NetworkPolicyConfig) Descriptor() ([]byte, []int) {
-	return file_pkg_apis_values_types_proto_rawDescGZIP(), []int{47}
+	return file_pkg_apis_values_types_proto_rawDescGZIP(), []int{48}
 }
 
 func (x *NetworkPolicyConfig) GetEnabled() *wrapperspb.BoolValue {
@@ -5581,7 +5653,9 @@ const file_pkg_apis_values_types_proto_rawDesc = "" +
 	" DefaultPodDisruptionBudgetConfig\x124\n" +
 	"\aenabled\x18\x01 \x01(\v2\x1a.google.protobuf.BoolValueR\aenabled\"f\n" +
 	"\x16DefaultResourcesConfig\x12L\n" +
-	"\brequests\x18\x01 \x01(\v20.istio.operator.v1alpha1.ResourcesRequestsConfigR\brequests\"\xbb\x0f\n" +
+	"\brequests\x18\x01 \x01(\v20.istio.operator.v1alpha1.ResourcesRequestsConfigR\brequests\"G\n" +
+	"\vSpireConfig\x128\n" +
+	"\tworkloads\x18\x01 \x01(\v2\x1a.google.protobuf.BoolValueR\tworkloads\"\xbb\x0f\n" +
 	"\x13EgressGatewayConfig\x12F\n" +
 	"\x10autoscaleEnabled\x18\x01 \x01(\v2\x1a.google.protobuf.BoolValueR\x10autoscaleEnabled\x12\"\n" +
 	"\fautoscaleMax\x18\x02 \x01(\rR\fautoscaleMax\x12\"\n" +
@@ -5617,14 +5691,15 @@ const file_pkg_apis_values_types_proto_rawDesc = "" +
 	"\x0eipFamilyPolicy\x18\x1e \x01(\tR\x0eipFamilyPolicy\x1a9\n" +
 	"\vLabelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x8b\x03\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xc7\x03\n" +
 	"\x0eGatewaysConfig\x12^\n" +
 	"\x13istio_egressgateway\x18\x01 \x01(\v2,.istio.operator.v1alpha1.EgressGatewayConfigR\x13istio-egressgateway\x124\n" +
 	"\aenabled\x18\x02 \x01(\v2\x1a.google.protobuf.BoolValueR\aenabled\x12a\n" +
 	"\x14istio_ingressgateway\x18\x04 \x01(\v2-.istio.operator.v1alpha1.IngressGatewayConfigR\x14istio-ingressgateway\x12@\n" +
 	"\x0fsecurityContext\x18\n" +
 	" \x01(\v2\x16.google.protobuf.ValueR\x0fsecurityContext\x12>\n" +
-	"\x0eseccompProfile\x18\f \x01(\v2\x16.google.protobuf.ValueR\x0eseccompProfile\"\xad\x14\n" +
+	"\x0eseccompProfile\x18\f \x01(\v2\x16.google.protobuf.ValueR\x0eseccompProfile\x12:\n" +
+	"\x05spire\x18\x0e \x01(\v2$.istio.operator.v1alpha1.SpireConfigR\x05spire\"\xad\x14\n" +
 	"\fGlobalConfig\x12;\n" +
 	"\x04arch\x18\x01 \x01(\v2#.istio.operator.v1alpha1.ArchConfigB\x02\x18\x01R\x04arch\x12 \n" +
 	"\vcertSigners\x18D \x03(\tR\vcertSigners\x12F\n" +
@@ -5895,7 +5970,7 @@ const file_pkg_apis_values_types_proto_rawDesc = "" +
 	"\rinjectionPath\x18\x02 \x01(\tR\rinjectionPath\x12,\n" +
 	"\x11injectionCABundle\x18\x03 \x01(\tR\x11injectionCABundle\x124\n" +
 	"\aenabled\x18\x05 \x01(\v2\x1a.google.protobuf.BoolValueR\aenabled\x12Z\n" +
-	"\x1aenabledLocalInjectorIstiod\x18\x06 \x01(\v2\x1a.google.protobuf.BoolValueR\x1aenabledLocalInjectorIstiod\"\xd7\b\n" +
+	"\x1aenabledLocalInjectorIstiod\x18\x06 \x01(\v2\x1a.google.protobuf.BoolValueR\x1aenabledLocalInjectorIstiod\"\xbf\t\n" +
 	"\x06Values\x124\n" +
 	"\x03cni\x18\x02 \x01(\v2\".istio.operator.v1alpha1.CNIConfigR\x03cni\x12C\n" +
 	"\bgateways\x18\x05 \x01(\v2'.istio.operator.v1alpha1.GatewaysConfigR\bgateways\x12=\n" +
@@ -5918,7 +5993,9 @@ const file_pkg_apis_values_types_proto_rawDesc = "" +
 	"\aprofile\x18* \x01(\tR\aprofile\x122\n" +
 	"\x14compatibilityVersion\x18+ \x01(\tR\x14compatibilityVersion\x12O\n" +
 	"\fexperimental\x18, \x01(\v2+.istio.operator.v1alpha1.ExperimentalConfigR\fexperimental\x12>\n" +
-	"\x0egatewayClasses\x18- \x01(\v2\x16.google.protobuf.ValueR\x0egatewayClasses\"h\n" +
+	"\x0egatewayClasses\x18- \x01(\v2\x16.google.protobuf.ValueR\x0egatewayClasses\x124\n" +
+	"\tplatforms\x18U \x01(\v2\x16.google.protobuf.ValueR\tplatforms\x120\n" +
+	"\alicense\x18V \x01(\v2\x16.google.protobuf.ValueR\alicense\"h\n" +
 	"\x12ExperimentalConfig\x12R\n" +
 	"\x16stableValidationPolicy\x18\x01 \x01(\v2\x1a.google.protobuf.BoolValueR\x16stableValidationPolicy\"\x8c\x01\n" +
 	"\vIntOrString\x12\x12\n" +
@@ -5968,7 +6045,7 @@ func file_pkg_apis_values_types_proto_rawDescGZIP() []byte {
 }
 
 var file_pkg_apis_values_types_proto_enumTypes = make([]protoimpl.EnumInfo, 4)
-var file_pkg_apis_values_types_proto_msgTypes = make([]protoimpl.MessageInfo, 52)
+var file_pkg_apis_values_types_proto_msgTypes = make([]protoimpl.MessageInfo, 53)
 var file_pkg_apis_values_types_proto_goTypes = []any{
 	(ResourceScope)(0),                       // 0: istio.operator.v1alpha1.ResourceScope
 	(IngressControllerMode)(0),               // 1: istio.operator.v1alpha1.ingressControllerMode
@@ -5985,266 +6062,271 @@ var file_pkg_apis_values_types_proto_goTypes = []any{
 	(*ServiceAccount)(nil),                   // 12: istio.operator.v1alpha1.ServiceAccount
 	(*DefaultPodDisruptionBudgetConfig)(nil), // 13: istio.operator.v1alpha1.DefaultPodDisruptionBudgetConfig
 	(*DefaultResourcesConfig)(nil),           // 14: istio.operator.v1alpha1.DefaultResourcesConfig
-	(*EgressGatewayConfig)(nil),              // 15: istio.operator.v1alpha1.EgressGatewayConfig
-	(*GatewaysConfig)(nil),                   // 16: istio.operator.v1alpha1.GatewaysConfig
-	(*GlobalConfig)(nil),                     // 17: istio.operator.v1alpha1.GlobalConfig
-	(*STSConfig)(nil),                        // 18: istio.operator.v1alpha1.STSConfig
-	(*IstiodConfig)(nil),                     // 19: istio.operator.v1alpha1.IstiodConfig
-	(*GlobalLoggingConfig)(nil),              // 20: istio.operator.v1alpha1.GlobalLoggingConfig
-	(*IngressGatewayConfig)(nil),             // 21: istio.operator.v1alpha1.IngressGatewayConfig
-	(*MultiClusterConfig)(nil),               // 22: istio.operator.v1alpha1.MultiClusterConfig
-	(*OutboundTrafficPolicyConfig)(nil),      // 23: istio.operator.v1alpha1.OutboundTrafficPolicyConfig
-	(*PilotConfig)(nil),                      // 24: istio.operator.v1alpha1.PilotConfig
-	(*PilotTaintControllerConfig)(nil),       // 25: istio.operator.v1alpha1.PilotTaintControllerConfig
-	(*PilotIngressConfig)(nil),               // 26: istio.operator.v1alpha1.PilotIngressConfig
-	(*PilotPolicyConfig)(nil),                // 27: istio.operator.v1alpha1.PilotPolicyConfig
-	(*TelemetryConfig)(nil),                  // 28: istio.operator.v1alpha1.TelemetryConfig
-	(*TelemetryV2Config)(nil),                // 29: istio.operator.v1alpha1.TelemetryV2Config
-	(*TelemetryV2PrometheusConfig)(nil),      // 30: istio.operator.v1alpha1.TelemetryV2PrometheusConfig
-	(*TelemetryV2StackDriverConfig)(nil),     // 31: istio.operator.v1alpha1.TelemetryV2StackDriverConfig
-	(*PortsConfig)(nil),                      // 32: istio.operator.v1alpha1.PortsConfig
-	(*ProxyConfig)(nil),                      // 33: istio.operator.v1alpha1.ProxyConfig
-	(*StartupProbe)(nil),                     // 34: istio.operator.v1alpha1.StartupProbe
-	(*ProxyInitConfig)(nil),                  // 35: istio.operator.v1alpha1.ProxyInitConfig
-	(*ResourcesRequestsConfig)(nil),          // 36: istio.operator.v1alpha1.ResourcesRequestsConfig
-	(*SDSConfig)(nil),                        // 37: istio.operator.v1alpha1.SDSConfig
-	(*SecretVolume)(nil),                     // 38: istio.operator.v1alpha1.SecretVolume
-	(*SidecarInjectorConfig)(nil),            // 39: istio.operator.v1alpha1.SidecarInjectorConfig
-	(*TracerConfig)(nil),                     // 40: istio.operator.v1alpha1.TracerConfig
-	(*TracerDatadogConfig)(nil),              // 41: istio.operator.v1alpha1.TracerDatadogConfig
-	(*TracerLightStepConfig)(nil),            // 42: istio.operator.v1alpha1.TracerLightStepConfig
-	(*TracerZipkinConfig)(nil),               // 43: istio.operator.v1alpha1.TracerZipkinConfig
-	(*TracerStackdriverConfig)(nil),          // 44: istio.operator.v1alpha1.TracerStackdriverConfig
-	(*BaseConfig)(nil),                       // 45: istio.operator.v1alpha1.BaseConfig
-	(*IstiodRemoteConfig)(nil),               // 46: istio.operator.v1alpha1.IstiodRemoteConfig
-	(*Values)(nil),                           // 47: istio.operator.v1alpha1.Values
-	(*ExperimentalConfig)(nil),               // 48: istio.operator.v1alpha1.ExperimentalConfig
-	(*IntOrString)(nil),                      // 49: istio.operator.v1alpha1.IntOrString
-	(*WaypointConfig)(nil),                   // 50: istio.operator.v1alpha1.WaypointConfig
-	(*NetworkPolicyConfig)(nil),              // 51: istio.operator.v1alpha1.NetworkPolicyConfig
-	nil,                                      // 52: istio.operator.v1alpha1.Resources.LimitsEntry
-	nil,                                      // 53: istio.operator.v1alpha1.Resources.RequestsEntry
-	nil,                                      // 54: istio.operator.v1alpha1.EgressGatewayConfig.LabelsEntry
-	nil,                                      // 55: istio.operator.v1alpha1.IngressGatewayConfig.LabelsEntry
-	(*wrapperspb.BoolValue)(nil),             // 56: google.protobuf.BoolValue
-	(*structpb.Value)(nil),                   // 57: google.protobuf.Value
-	(*v1.Affinity)(nil),                      // 58: k8s.io.api.core.v1.Affinity
-	(*structpb.Struct)(nil),                  // 59: google.protobuf.Struct
-	(*v1.SeccompProfile)(nil),                // 60: k8s.io.api.core.v1.SeccompProfile
-	(*v11.LabelSelector)(nil),                // 61: k8s.io.apimachinery.pkg.apis.meta.v1.LabelSelector
-	(*v1.Toleration)(nil),                    // 62: k8s.io.api.core.v1.Toleration
-	(*durationpb.Duration)(nil),              // 63: google.protobuf.Duration
-	(*v1.TopologySpreadConstraint)(nil),      // 64: k8s.io.api.core.v1.TopologySpreadConstraint
-	(*v1.VolumeMount)(nil),                   // 65: k8s.io.api.core.v1.VolumeMount
-	(*v1.Volume)(nil),                        // 66: k8s.io.api.core.v1.Volume
-	(*v1.Lifecycle)(nil),                     // 67: k8s.io.api.core.v1.Lifecycle
-	(*wrapperspb.Int32Value)(nil),            // 68: google.protobuf.Int32Value
-	(*wrapperspb.StringValue)(nil),           // 69: google.protobuf.StringValue
-	(*v1.NodeSelector)(nil),                  // 70: k8s.io.api.core.v1.NodeSelector
+	(*SpireConfig)(nil),                      // 15: istio.operator.v1alpha1.SpireConfig
+	(*EgressGatewayConfig)(nil),              // 16: istio.operator.v1alpha1.EgressGatewayConfig
+	(*GatewaysConfig)(nil),                   // 17: istio.operator.v1alpha1.GatewaysConfig
+	(*GlobalConfig)(nil),                     // 18: istio.operator.v1alpha1.GlobalConfig
+	(*STSConfig)(nil),                        // 19: istio.operator.v1alpha1.STSConfig
+	(*IstiodConfig)(nil),                     // 20: istio.operator.v1alpha1.IstiodConfig
+	(*GlobalLoggingConfig)(nil),              // 21: istio.operator.v1alpha1.GlobalLoggingConfig
+	(*IngressGatewayConfig)(nil),             // 22: istio.operator.v1alpha1.IngressGatewayConfig
+	(*MultiClusterConfig)(nil),               // 23: istio.operator.v1alpha1.MultiClusterConfig
+	(*OutboundTrafficPolicyConfig)(nil),      // 24: istio.operator.v1alpha1.OutboundTrafficPolicyConfig
+	(*PilotConfig)(nil),                      // 25: istio.operator.v1alpha1.PilotConfig
+	(*PilotTaintControllerConfig)(nil),       // 26: istio.operator.v1alpha1.PilotTaintControllerConfig
+	(*PilotIngressConfig)(nil),               // 27: istio.operator.v1alpha1.PilotIngressConfig
+	(*PilotPolicyConfig)(nil),                // 28: istio.operator.v1alpha1.PilotPolicyConfig
+	(*TelemetryConfig)(nil),                  // 29: istio.operator.v1alpha1.TelemetryConfig
+	(*TelemetryV2Config)(nil),                // 30: istio.operator.v1alpha1.TelemetryV2Config
+	(*TelemetryV2PrometheusConfig)(nil),      // 31: istio.operator.v1alpha1.TelemetryV2PrometheusConfig
+	(*TelemetryV2StackDriverConfig)(nil),     // 32: istio.operator.v1alpha1.TelemetryV2StackDriverConfig
+	(*PortsConfig)(nil),                      // 33: istio.operator.v1alpha1.PortsConfig
+	(*ProxyConfig)(nil),                      // 34: istio.operator.v1alpha1.ProxyConfig
+	(*StartupProbe)(nil),                     // 35: istio.operator.v1alpha1.StartupProbe
+	(*ProxyInitConfig)(nil),                  // 36: istio.operator.v1alpha1.ProxyInitConfig
+	(*ResourcesRequestsConfig)(nil),          // 37: istio.operator.v1alpha1.ResourcesRequestsConfig
+	(*SDSConfig)(nil),                        // 38: istio.operator.v1alpha1.SDSConfig
+	(*SecretVolume)(nil),                     // 39: istio.operator.v1alpha1.SecretVolume
+	(*SidecarInjectorConfig)(nil),            // 40: istio.operator.v1alpha1.SidecarInjectorConfig
+	(*TracerConfig)(nil),                     // 41: istio.operator.v1alpha1.TracerConfig
+	(*TracerDatadogConfig)(nil),              // 42: istio.operator.v1alpha1.TracerDatadogConfig
+	(*TracerLightStepConfig)(nil),            // 43: istio.operator.v1alpha1.TracerLightStepConfig
+	(*TracerZipkinConfig)(nil),               // 44: istio.operator.v1alpha1.TracerZipkinConfig
+	(*TracerStackdriverConfig)(nil),          // 45: istio.operator.v1alpha1.TracerStackdriverConfig
+	(*BaseConfig)(nil),                       // 46: istio.operator.v1alpha1.BaseConfig
+	(*IstiodRemoteConfig)(nil),               // 47: istio.operator.v1alpha1.IstiodRemoteConfig
+	(*Values)(nil),                           // 48: istio.operator.v1alpha1.Values
+	(*ExperimentalConfig)(nil),               // 49: istio.operator.v1alpha1.ExperimentalConfig
+	(*IntOrString)(nil),                      // 50: istio.operator.v1alpha1.IntOrString
+	(*WaypointConfig)(nil),                   // 51: istio.operator.v1alpha1.WaypointConfig
+	(*NetworkPolicyConfig)(nil),              // 52: istio.operator.v1alpha1.NetworkPolicyConfig
+	nil,                                      // 53: istio.operator.v1alpha1.Resources.LimitsEntry
+	nil,                                      // 54: istio.operator.v1alpha1.Resources.RequestsEntry
+	nil,                                      // 55: istio.operator.v1alpha1.EgressGatewayConfig.LabelsEntry
+	nil,                                      // 56: istio.operator.v1alpha1.IngressGatewayConfig.LabelsEntry
+	(*wrapperspb.BoolValue)(nil),             // 57: google.protobuf.BoolValue
+	(*structpb.Value)(nil),                   // 58: google.protobuf.Value
+	(*v1.Affinity)(nil),                      // 59: k8s.io.api.core.v1.Affinity
+	(*structpb.Struct)(nil),                  // 60: google.protobuf.Struct
+	(*v1.SeccompProfile)(nil),                // 61: k8s.io.api.core.v1.SeccompProfile
+	(*v11.LabelSelector)(nil),                // 62: k8s.io.apimachinery.pkg.apis.meta.v1.LabelSelector
+	(*v1.Toleration)(nil),                    // 63: k8s.io.api.core.v1.Toleration
+	(*durationpb.Duration)(nil),              // 64: google.protobuf.Duration
+	(*v1.TopologySpreadConstraint)(nil),      // 65: k8s.io.api.core.v1.TopologySpreadConstraint
+	(*v1.VolumeMount)(nil),                   // 66: k8s.io.api.core.v1.VolumeMount
+	(*v1.Volume)(nil),                        // 67: k8s.io.api.core.v1.Volume
+	(*v1.Lifecycle)(nil),                     // 68: k8s.io.api.core.v1.Lifecycle
+	(*wrapperspb.Int32Value)(nil),            // 69: google.protobuf.Int32Value
+	(*wrapperspb.StringValue)(nil),           // 70: google.protobuf.StringValue
+	(*v1.NodeSelector)(nil),                  // 71: k8s.io.api.core.v1.NodeSelector
 }
 var file_pkg_apis_values_types_proto_depIdxs = []int32{
-	56,  // 0: istio.operator.v1alpha1.CNIConfig.enabled:type_name -> google.protobuf.BoolValue
-	57,  // 1: istio.operator.v1alpha1.CNIConfig.tag:type_name -> google.protobuf.Value
-	58,  // 2: istio.operator.v1alpha1.CNIConfig.affinity:type_name -> k8s.io.api.core.v1.Affinity
-	59,  // 3: istio.operator.v1alpha1.CNIConfig.env:type_name -> google.protobuf.Struct
-	59,  // 4: istio.operator.v1alpha1.CNIConfig.daemonSetLabels:type_name -> google.protobuf.Struct
-	59,  // 5: istio.operator.v1alpha1.CNIConfig.podAnnotations:type_name -> google.protobuf.Struct
-	59,  // 6: istio.operator.v1alpha1.CNIConfig.podLabels:type_name -> google.protobuf.Struct
-	20,  // 7: istio.operator.v1alpha1.CNIConfig.logging:type_name -> istio.operator.v1alpha1.GlobalLoggingConfig
+	57,  // 0: istio.operator.v1alpha1.CNIConfig.enabled:type_name -> google.protobuf.BoolValue
+	58,  // 1: istio.operator.v1alpha1.CNIConfig.tag:type_name -> google.protobuf.Value
+	59,  // 2: istio.operator.v1alpha1.CNIConfig.affinity:type_name -> k8s.io.api.core.v1.Affinity
+	60,  // 3: istio.operator.v1alpha1.CNIConfig.env:type_name -> google.protobuf.Struct
+	60,  // 4: istio.operator.v1alpha1.CNIConfig.daemonSetLabels:type_name -> google.protobuf.Struct
+	60,  // 5: istio.operator.v1alpha1.CNIConfig.podAnnotations:type_name -> google.protobuf.Struct
+	60,  // 6: istio.operator.v1alpha1.CNIConfig.podLabels:type_name -> google.protobuf.Struct
+	21,  // 7: istio.operator.v1alpha1.CNIConfig.logging:type_name -> istio.operator.v1alpha1.GlobalLoggingConfig
 	8,   // 8: istio.operator.v1alpha1.CNIConfig.repair:type_name -> istio.operator.v1alpha1.CNIRepairConfig
-	56,  // 9: istio.operator.v1alpha1.CNIConfig.chained:type_name -> google.protobuf.BoolValue
+	57,  // 9: istio.operator.v1alpha1.CNIConfig.chained:type_name -> google.protobuf.BoolValue
 	9,   // 10: istio.operator.v1alpha1.CNIConfig.resource_quotas:type_name -> istio.operator.v1alpha1.ResourceQuotas
 	11,  // 11: istio.operator.v1alpha1.CNIConfig.resources:type_name -> istio.operator.v1alpha1.Resources
-	56,  // 12: istio.operator.v1alpha1.CNIConfig.privileged:type_name -> google.protobuf.BoolValue
-	60,  // 13: istio.operator.v1alpha1.CNIConfig.seccompProfile:type_name -> k8s.io.api.core.v1.SeccompProfile
+	57,  // 12: istio.operator.v1alpha1.CNIConfig.privileged:type_name -> google.protobuf.BoolValue
+	61,  // 13: istio.operator.v1alpha1.CNIConfig.seccompProfile:type_name -> k8s.io.api.core.v1.SeccompProfile
 	7,   // 14: istio.operator.v1alpha1.CNIConfig.ambient:type_name -> istio.operator.v1alpha1.CNIAmbientConfig
-	49,  // 15: istio.operator.v1alpha1.CNIConfig.rollingMaxUnavailable:type_name -> istio.operator.v1alpha1.IntOrString
-	56,  // 16: istio.operator.v1alpha1.CNIConfig.istioOwnedCNIConfig:type_name -> google.protobuf.BoolValue
-	56,  // 17: istio.operator.v1alpha1.CNIUsageConfig.enabled:type_name -> google.protobuf.BoolValue
-	56,  // 18: istio.operator.v1alpha1.CNIUsageConfig.chained:type_name -> google.protobuf.BoolValue
-	56,  // 19: istio.operator.v1alpha1.CNIAmbientConfig.enabled:type_name -> google.protobuf.BoolValue
-	56,  // 20: istio.operator.v1alpha1.CNIAmbientConfig.dnsCapture:type_name -> google.protobuf.BoolValue
-	56,  // 21: istio.operator.v1alpha1.CNIAmbientConfig.ipv6:type_name -> google.protobuf.BoolValue
-	56,  // 22: istio.operator.v1alpha1.CNIAmbientConfig.reconcileIptablesOnStartup:type_name -> google.protobuf.BoolValue
-	56,  // 23: istio.operator.v1alpha1.CNIRepairConfig.enabled:type_name -> google.protobuf.BoolValue
-	57,  // 24: istio.operator.v1alpha1.CNIRepairConfig.tag:type_name -> google.protobuf.Value
-	56,  // 25: istio.operator.v1alpha1.ResourceQuotas.enabled:type_name -> google.protobuf.BoolValue
-	52,  // 26: istio.operator.v1alpha1.Resources.limits:type_name -> istio.operator.v1alpha1.Resources.LimitsEntry
-	53,  // 27: istio.operator.v1alpha1.Resources.requests:type_name -> istio.operator.v1alpha1.Resources.RequestsEntry
-	59,  // 28: istio.operator.v1alpha1.ServiceAccount.annotations:type_name -> google.protobuf.Struct
-	56,  // 29: istio.operator.v1alpha1.DefaultPodDisruptionBudgetConfig.enabled:type_name -> google.protobuf.BoolValue
-	36,  // 30: istio.operator.v1alpha1.DefaultResourcesConfig.requests:type_name -> istio.operator.v1alpha1.ResourcesRequestsConfig
-	56,  // 31: istio.operator.v1alpha1.EgressGatewayConfig.autoscaleEnabled:type_name -> google.protobuf.BoolValue
-	10,  // 32: istio.operator.v1alpha1.EgressGatewayConfig.memory:type_name -> istio.operator.v1alpha1.TargetUtilizationConfig
-	10,  // 33: istio.operator.v1alpha1.EgressGatewayConfig.cpu:type_name -> istio.operator.v1alpha1.TargetUtilizationConfig
-	56,  // 34: istio.operator.v1alpha1.EgressGatewayConfig.customService:type_name -> google.protobuf.BoolValue
-	56,  // 35: istio.operator.v1alpha1.EgressGatewayConfig.enabled:type_name -> google.protobuf.BoolValue
-	59,  // 36: istio.operator.v1alpha1.EgressGatewayConfig.env:type_name -> google.protobuf.Struct
-	54,  // 37: istio.operator.v1alpha1.EgressGatewayConfig.labels:type_name -> istio.operator.v1alpha1.EgressGatewayConfig.LabelsEntry
-	59,  // 38: istio.operator.v1alpha1.EgressGatewayConfig.nodeSelector:type_name -> google.protobuf.Struct
-	59,  // 39: istio.operator.v1alpha1.EgressGatewayConfig.podAnnotations:type_name -> google.protobuf.Struct
-	61,  // 40: istio.operator.v1alpha1.EgressGatewayConfig.podAntiAffinityLabelSelector:type_name -> k8s.io.apimachinery.pkg.apis.meta.v1.LabelSelector
-	61,  // 41: istio.operator.v1alpha1.EgressGatewayConfig.podAntiAffinityTermLabelSelector:type_name -> k8s.io.apimachinery.pkg.apis.meta.v1.LabelSelector
-	32,  // 42: istio.operator.v1alpha1.EgressGatewayConfig.ports:type_name -> istio.operator.v1alpha1.PortsConfig
-	11,  // 43: istio.operator.v1alpha1.EgressGatewayConfig.resources:type_name -> istio.operator.v1alpha1.Resources
-	38,  // 44: istio.operator.v1alpha1.EgressGatewayConfig.secretVolumes:type_name -> istio.operator.v1alpha1.SecretVolume
-	59,  // 45: istio.operator.v1alpha1.EgressGatewayConfig.serviceAnnotations:type_name -> google.protobuf.Struct
-	62,  // 46: istio.operator.v1alpha1.EgressGatewayConfig.tolerations:type_name -> k8s.io.api.core.v1.Toleration
-	49,  // 47: istio.operator.v1alpha1.EgressGatewayConfig.rollingMaxSurge:type_name -> istio.operator.v1alpha1.IntOrString
-	49,  // 48: istio.operator.v1alpha1.EgressGatewayConfig.rollingMaxUnavailable:type_name -> istio.operator.v1alpha1.IntOrString
-	59,  // 49: istio.operator.v1alpha1.EgressGatewayConfig.configVolumes:type_name -> google.protobuf.Struct
-	59,  // 50: istio.operator.v1alpha1.EgressGatewayConfig.additionalContainers:type_name -> google.protobuf.Struct
-	56,  // 51: istio.operator.v1alpha1.EgressGatewayConfig.runAsRoot:type_name -> google.protobuf.BoolValue
-	12,  // 52: istio.operator.v1alpha1.EgressGatewayConfig.serviceAccount:type_name -> istio.operator.v1alpha1.ServiceAccount
-	15,  // 53: istio.operator.v1alpha1.GatewaysConfig.istio_egressgateway:type_name -> istio.operator.v1alpha1.EgressGatewayConfig
-	56,  // 54: istio.operator.v1alpha1.GatewaysConfig.enabled:type_name -> google.protobuf.BoolValue
-	21,  // 55: istio.operator.v1alpha1.GatewaysConfig.istio_ingressgateway:type_name -> istio.operator.v1alpha1.IngressGatewayConfig
-	57,  // 56: istio.operator.v1alpha1.GatewaysConfig.securityContext:type_name -> google.protobuf.Value
-	57,  // 57: istio.operator.v1alpha1.GatewaysConfig.seccompProfile:type_name -> google.protobuf.Value
-	4,   // 58: istio.operator.v1alpha1.GlobalConfig.arch:type_name -> istio.operator.v1alpha1.ArchConfig
-	56,  // 59: istio.operator.v1alpha1.GlobalConfig.configValidation:type_name -> google.protobuf.BoolValue
-	59,  // 60: istio.operator.v1alpha1.GlobalConfig.defaultNodeSelector:type_name -> google.protobuf.Struct
-	13,  // 61: istio.operator.v1alpha1.GlobalConfig.defaultPodDisruptionBudget:type_name -> istio.operator.v1alpha1.DefaultPodDisruptionBudgetConfig
-	14,  // 62: istio.operator.v1alpha1.GlobalConfig.defaultResources:type_name -> istio.operator.v1alpha1.DefaultResourcesConfig
-	62,  // 63: istio.operator.v1alpha1.GlobalConfig.defaultTolerations:type_name -> k8s.io.api.core.v1.Toleration
-	56,  // 64: istio.operator.v1alpha1.GlobalConfig.logAsJson:type_name -> google.protobuf.BoolValue
-	20,  // 65: istio.operator.v1alpha1.GlobalConfig.logging:type_name -> istio.operator.v1alpha1.GlobalLoggingConfig
-	59,  // 66: istio.operator.v1alpha1.GlobalConfig.meshNetworks:type_name -> google.protobuf.Struct
-	22,  // 67: istio.operator.v1alpha1.GlobalConfig.multiCluster:type_name -> istio.operator.v1alpha1.MultiClusterConfig
-	56,  // 68: istio.operator.v1alpha1.GlobalConfig.omitSidecarInjectorConfigMap:type_name -> google.protobuf.BoolValue
-	56,  // 69: istio.operator.v1alpha1.GlobalConfig.operatorManageWebhooks:type_name -> google.protobuf.BoolValue
-	33,  // 70: istio.operator.v1alpha1.GlobalConfig.proxy:type_name -> istio.operator.v1alpha1.ProxyConfig
-	35,  // 71: istio.operator.v1alpha1.GlobalConfig.proxy_init:type_name -> istio.operator.v1alpha1.ProxyInitConfig
-	37,  // 72: istio.operator.v1alpha1.GlobalConfig.sds:type_name -> istio.operator.v1alpha1.SDSConfig
-	57,  // 73: istio.operator.v1alpha1.GlobalConfig.tag:type_name -> google.protobuf.Value
-	40,  // 74: istio.operator.v1alpha1.GlobalConfig.tracer:type_name -> istio.operator.v1alpha1.TracerConfig
-	19,  // 75: istio.operator.v1alpha1.GlobalConfig.istiod:type_name -> istio.operator.v1alpha1.IstiodConfig
-	18,  // 76: istio.operator.v1alpha1.GlobalConfig.sts:type_name -> istio.operator.v1alpha1.STSConfig
-	56,  // 77: istio.operator.v1alpha1.GlobalConfig.mountMtlsCerts:type_name -> google.protobuf.BoolValue
-	56,  // 78: istio.operator.v1alpha1.GlobalConfig.externalIstiod:type_name -> google.protobuf.BoolValue
-	56,  // 79: istio.operator.v1alpha1.GlobalConfig.configCluster:type_name -> google.protobuf.BoolValue
-	50,  // 80: istio.operator.v1alpha1.GlobalConfig.waypoint:type_name -> istio.operator.v1alpha1.WaypointConfig
-	56,  // 81: istio.operator.v1alpha1.GlobalConfig.nativeNftables:type_name -> google.protobuf.BoolValue
-	51,  // 82: istio.operator.v1alpha1.GlobalConfig.networkPolicy:type_name -> istio.operator.v1alpha1.NetworkPolicyConfig
-	0,   // 83: istio.operator.v1alpha1.GlobalConfig.resourceScope:type_name -> istio.operator.v1alpha1.ResourceScope
-	56,  // 84: istio.operator.v1alpha1.IstiodConfig.enableAnalysis:type_name -> google.protobuf.BoolValue
-	56,  // 85: istio.operator.v1alpha1.IngressGatewayConfig.autoscaleEnabled:type_name -> google.protobuf.BoolValue
-	10,  // 86: istio.operator.v1alpha1.IngressGatewayConfig.memory:type_name -> istio.operator.v1alpha1.TargetUtilizationConfig
-	10,  // 87: istio.operator.v1alpha1.IngressGatewayConfig.cpu:type_name -> istio.operator.v1alpha1.TargetUtilizationConfig
-	56,  // 88: istio.operator.v1alpha1.IngressGatewayConfig.customService:type_name -> google.protobuf.BoolValue
-	56,  // 89: istio.operator.v1alpha1.IngressGatewayConfig.enabled:type_name -> google.protobuf.BoolValue
-	59,  // 90: istio.operator.v1alpha1.IngressGatewayConfig.env:type_name -> google.protobuf.Struct
-	55,  // 91: istio.operator.v1alpha1.IngressGatewayConfig.labels:type_name -> istio.operator.v1alpha1.IngressGatewayConfig.LabelsEntry
-	59,  // 92: istio.operator.v1alpha1.IngressGatewayConfig.nodeSelector:type_name -> google.protobuf.Struct
-	59,  // 93: istio.operator.v1alpha1.IngressGatewayConfig.podAnnotations:type_name -> google.protobuf.Struct
-	61,  // 94: istio.operator.v1alpha1.IngressGatewayConfig.podAntiAffinityLabelSelector:type_name -> k8s.io.apimachinery.pkg.apis.meta.v1.LabelSelector
-	61,  // 95: istio.operator.v1alpha1.IngressGatewayConfig.podAntiAffinityTermLabelSelector:type_name -> k8s.io.apimachinery.pkg.apis.meta.v1.LabelSelector
-	32,  // 96: istio.operator.v1alpha1.IngressGatewayConfig.ports:type_name -> istio.operator.v1alpha1.PortsConfig
-	59,  // 97: istio.operator.v1alpha1.IngressGatewayConfig.resources:type_name -> google.protobuf.Struct
-	38,  // 98: istio.operator.v1alpha1.IngressGatewayConfig.secretVolumes:type_name -> istio.operator.v1alpha1.SecretVolume
-	59,  // 99: istio.operator.v1alpha1.IngressGatewayConfig.serviceAnnotations:type_name -> google.protobuf.Struct
-	49,  // 100: istio.operator.v1alpha1.IngressGatewayConfig.rollingMaxSurge:type_name -> istio.operator.v1alpha1.IntOrString
-	49,  // 101: istio.operator.v1alpha1.IngressGatewayConfig.rollingMaxUnavailable:type_name -> istio.operator.v1alpha1.IntOrString
-	62,  // 102: istio.operator.v1alpha1.IngressGatewayConfig.tolerations:type_name -> k8s.io.api.core.v1.Toleration
-	59,  // 103: istio.operator.v1alpha1.IngressGatewayConfig.ingressPorts:type_name -> google.protobuf.Struct
-	59,  // 104: istio.operator.v1alpha1.IngressGatewayConfig.additionalContainers:type_name -> google.protobuf.Struct
-	59,  // 105: istio.operator.v1alpha1.IngressGatewayConfig.configVolumes:type_name -> google.protobuf.Struct
-	56,  // 106: istio.operator.v1alpha1.IngressGatewayConfig.runAsRoot:type_name -> google.protobuf.BoolValue
-	12,  // 107: istio.operator.v1alpha1.IngressGatewayConfig.serviceAccount:type_name -> istio.operator.v1alpha1.ServiceAccount
-	56,  // 108: istio.operator.v1alpha1.MultiClusterConfig.enabled:type_name -> google.protobuf.BoolValue
-	56,  // 109: istio.operator.v1alpha1.MultiClusterConfig.includeEnvoyFilter:type_name -> google.protobuf.BoolValue
-	3,   // 110: istio.operator.v1alpha1.OutboundTrafficPolicyConfig.mode:type_name -> istio.operator.v1alpha1.OutboundTrafficPolicyConfig.Mode
-	56,  // 111: istio.operator.v1alpha1.PilotConfig.enabled:type_name -> google.protobuf.BoolValue
-	56,  // 112: istio.operator.v1alpha1.PilotConfig.autoscaleEnabled:type_name -> google.protobuf.BoolValue
-	59,  // 113: istio.operator.v1alpha1.PilotConfig.autoscaleBehavior:type_name -> google.protobuf.Struct
-	11,  // 114: istio.operator.v1alpha1.PilotConfig.resources:type_name -> istio.operator.v1alpha1.Resources
-	10,  // 115: istio.operator.v1alpha1.PilotConfig.cpu:type_name -> istio.operator.v1alpha1.TargetUtilizationConfig
-	59,  // 116: istio.operator.v1alpha1.PilotConfig.nodeSelector:type_name -> google.protobuf.Struct
-	63,  // 117: istio.operator.v1alpha1.PilotConfig.keepaliveMaxServerConnectionAge:type_name -> google.protobuf.Duration
-	59,  // 118: istio.operator.v1alpha1.PilotConfig.deploymentLabels:type_name -> google.protobuf.Struct
-	59,  // 119: istio.operator.v1alpha1.PilotConfig.podLabels:type_name -> google.protobuf.Struct
-	56,  // 120: istio.operator.v1alpha1.PilotConfig.configMap:type_name -> google.protobuf.BoolValue
-	59,  // 121: istio.operator.v1alpha1.PilotConfig.env:type_name -> google.protobuf.Struct
-	58,  // 122: istio.operator.v1alpha1.PilotConfig.affinity:type_name -> k8s.io.api.core.v1.Affinity
-	49,  // 123: istio.operator.v1alpha1.PilotConfig.rollingMaxSurge:type_name -> istio.operator.v1alpha1.IntOrString
-	49,  // 124: istio.operator.v1alpha1.PilotConfig.rollingMaxUnavailable:type_name -> istio.operator.v1alpha1.IntOrString
-	62,  // 125: istio.operator.v1alpha1.PilotConfig.tolerations:type_name -> k8s.io.api.core.v1.Toleration
-	59,  // 126: istio.operator.v1alpha1.PilotConfig.podAnnotations:type_name -> google.protobuf.Struct
-	59,  // 127: istio.operator.v1alpha1.PilotConfig.serviceAnnotations:type_name -> google.protobuf.Struct
-	59,  // 128: istio.operator.v1alpha1.PilotConfig.serviceAccountAnnotations:type_name -> google.protobuf.Struct
-	57,  // 129: istio.operator.v1alpha1.PilotConfig.tag:type_name -> google.protobuf.Value
-	60,  // 130: istio.operator.v1alpha1.PilotConfig.seccompProfile:type_name -> k8s.io.api.core.v1.SeccompProfile
-	64,  // 131: istio.operator.v1alpha1.PilotConfig.topologySpreadConstraints:type_name -> k8s.io.api.core.v1.TopologySpreadConstraint
-	59,  // 132: istio.operator.v1alpha1.PilotConfig.extraContainerArgs:type_name -> google.protobuf.Struct
-	65,  // 133: istio.operator.v1alpha1.PilotConfig.volumeMounts:type_name -> k8s.io.api.core.v1.VolumeMount
-	66,  // 134: istio.operator.v1alpha1.PilotConfig.volumes:type_name -> k8s.io.api.core.v1.Volume
-	10,  // 135: istio.operator.v1alpha1.PilotConfig.memory:type_name -> istio.operator.v1alpha1.TargetUtilizationConfig
-	6,   // 136: istio.operator.v1alpha1.PilotConfig.cni:type_name -> istio.operator.v1alpha1.CNIUsageConfig
-	25,  // 137: istio.operator.v1alpha1.PilotConfig.taint:type_name -> istio.operator.v1alpha1.PilotTaintControllerConfig
-	46,  // 138: istio.operator.v1alpha1.PilotConfig.istiodRemote:type_name -> istio.operator.v1alpha1.IstiodRemoteConfig
-	59,  // 139: istio.operator.v1alpha1.PilotConfig.envVarFrom:type_name -> google.protobuf.Struct
-	1,   // 140: istio.operator.v1alpha1.PilotIngressConfig.ingressControllerMode:type_name -> istio.operator.v1alpha1.ingressControllerMode
-	56,  // 141: istio.operator.v1alpha1.PilotPolicyConfig.enabled:type_name -> google.protobuf.BoolValue
-	56,  // 142: istio.operator.v1alpha1.TelemetryConfig.enabled:type_name -> google.protobuf.BoolValue
-	29,  // 143: istio.operator.v1alpha1.TelemetryConfig.v2:type_name -> istio.operator.v1alpha1.TelemetryV2Config
-	56,  // 144: istio.operator.v1alpha1.TelemetryV2Config.enabled:type_name -> google.protobuf.BoolValue
-	30,  // 145: istio.operator.v1alpha1.TelemetryV2Config.prometheus:type_name -> istio.operator.v1alpha1.TelemetryV2PrometheusConfig
-	31,  // 146: istio.operator.v1alpha1.TelemetryV2Config.stackdriver:type_name -> istio.operator.v1alpha1.TelemetryV2StackDriverConfig
-	56,  // 147: istio.operator.v1alpha1.TelemetryV2PrometheusConfig.enabled:type_name -> google.protobuf.BoolValue
-	56,  // 148: istio.operator.v1alpha1.TelemetryV2StackDriverConfig.enabled:type_name -> google.protobuf.BoolValue
-	56,  // 149: istio.operator.v1alpha1.ProxyConfig.enableCoreDump:type_name -> google.protobuf.BoolValue
-	56,  // 150: istio.operator.v1alpha1.ProxyConfig.privileged:type_name -> google.protobuf.BoolValue
-	34,  // 151: istio.operator.v1alpha1.ProxyConfig.startupProbe:type_name -> istio.operator.v1alpha1.StartupProbe
-	11,  // 152: istio.operator.v1alpha1.ProxyConfig.resources:type_name -> istio.operator.v1alpha1.Resources
-	2,   // 153: istio.operator.v1alpha1.ProxyConfig.tracer:type_name -> istio.operator.v1alpha1.tracer
-	67,  // 154: istio.operator.v1alpha1.ProxyConfig.lifecycle:type_name -> k8s.io.api.core.v1.Lifecycle
-	56,  // 155: istio.operator.v1alpha1.ProxyConfig.holdApplicationUntilProxyStarts:type_name -> google.protobuf.BoolValue
-	56,  // 156: istio.operator.v1alpha1.StartupProbe.enabled:type_name -> google.protobuf.BoolValue
-	11,  // 157: istio.operator.v1alpha1.ProxyInitConfig.resources:type_name -> istio.operator.v1alpha1.Resources
-	59,  // 158: istio.operator.v1alpha1.SDSConfig.token:type_name -> google.protobuf.Struct
-	56,  // 159: istio.operator.v1alpha1.SidecarInjectorConfig.enableNamespacesByDefault:type_name -> google.protobuf.BoolValue
-	61,  // 160: istio.operator.v1alpha1.SidecarInjectorConfig.neverInjectSelector:type_name -> k8s.io.apimachinery.pkg.apis.meta.v1.LabelSelector
-	61,  // 161: istio.operator.v1alpha1.SidecarInjectorConfig.alwaysInjectSelector:type_name -> k8s.io.apimachinery.pkg.apis.meta.v1.LabelSelector
-	56,  // 162: istio.operator.v1alpha1.SidecarInjectorConfig.rewriteAppHTTPProbe:type_name -> google.protobuf.BoolValue
-	59,  // 163: istio.operator.v1alpha1.SidecarInjectorConfig.injectedAnnotations:type_name -> google.protobuf.Struct
-	59,  // 164: istio.operator.v1alpha1.SidecarInjectorConfig.templates:type_name -> google.protobuf.Struct
-	41,  // 165: istio.operator.v1alpha1.TracerConfig.datadog:type_name -> istio.operator.v1alpha1.TracerDatadogConfig
-	42,  // 166: istio.operator.v1alpha1.TracerConfig.lightstep:type_name -> istio.operator.v1alpha1.TracerLightStepConfig
-	43,  // 167: istio.operator.v1alpha1.TracerConfig.zipkin:type_name -> istio.operator.v1alpha1.TracerZipkinConfig
-	44,  // 168: istio.operator.v1alpha1.TracerConfig.stackdriver:type_name -> istio.operator.v1alpha1.TracerStackdriverConfig
-	56,  // 169: istio.operator.v1alpha1.TracerStackdriverConfig.debug:type_name -> google.protobuf.BoolValue
-	56,  // 170: istio.operator.v1alpha1.BaseConfig.enableCRDTemplates:type_name -> google.protobuf.BoolValue
-	56,  // 171: istio.operator.v1alpha1.BaseConfig.enableIstioConfigCRDs:type_name -> google.protobuf.BoolValue
-	56,  // 172: istio.operator.v1alpha1.BaseConfig.validateGateway:type_name -> google.protobuf.BoolValue
-	56,  // 173: istio.operator.v1alpha1.IstiodRemoteConfig.enabled:type_name -> google.protobuf.BoolValue
-	56,  // 174: istio.operator.v1alpha1.IstiodRemoteConfig.enabledLocalInjectorIstiod:type_name -> google.protobuf.BoolValue
-	5,   // 175: istio.operator.v1alpha1.Values.cni:type_name -> istio.operator.v1alpha1.CNIConfig
-	16,  // 176: istio.operator.v1alpha1.Values.gateways:type_name -> istio.operator.v1alpha1.GatewaysConfig
-	17,  // 177: istio.operator.v1alpha1.Values.global:type_name -> istio.operator.v1alpha1.GlobalConfig
-	24,  // 178: istio.operator.v1alpha1.Values.pilot:type_name -> istio.operator.v1alpha1.PilotConfig
-	57,  // 179: istio.operator.v1alpha1.Values.ztunnel:type_name -> google.protobuf.Value
-	28,  // 180: istio.operator.v1alpha1.Values.telemetry:type_name -> istio.operator.v1alpha1.TelemetryConfig
-	39,  // 181: istio.operator.v1alpha1.Values.sidecarInjectorWebhook:type_name -> istio.operator.v1alpha1.SidecarInjectorConfig
-	6,   // 182: istio.operator.v1alpha1.Values.istio_cni:type_name -> istio.operator.v1alpha1.CNIUsageConfig
-	57,  // 183: istio.operator.v1alpha1.Values.meshConfig:type_name -> google.protobuf.Value
-	45,  // 184: istio.operator.v1alpha1.Values.base:type_name -> istio.operator.v1alpha1.BaseConfig
-	46,  // 185: istio.operator.v1alpha1.Values.istiodRemote:type_name -> istio.operator.v1alpha1.IstiodRemoteConfig
-	48,  // 186: istio.operator.v1alpha1.Values.experimental:type_name -> istio.operator.v1alpha1.ExperimentalConfig
-	57,  // 187: istio.operator.v1alpha1.Values.gatewayClasses:type_name -> google.protobuf.Value
-	56,  // 188: istio.operator.v1alpha1.ExperimentalConfig.stableValidationPolicy:type_name -> google.protobuf.BoolValue
-	68,  // 189: istio.operator.v1alpha1.IntOrString.intVal:type_name -> google.protobuf.Int32Value
-	69,  // 190: istio.operator.v1alpha1.IntOrString.strVal:type_name -> google.protobuf.StringValue
-	11,  // 191: istio.operator.v1alpha1.WaypointConfig.resources:type_name -> istio.operator.v1alpha1.Resources
-	58,  // 192: istio.operator.v1alpha1.WaypointConfig.affinity:type_name -> k8s.io.api.core.v1.Affinity
-	64,  // 193: istio.operator.v1alpha1.WaypointConfig.topologySpreadConstraints:type_name -> k8s.io.api.core.v1.TopologySpreadConstraint
-	70,  // 194: istio.operator.v1alpha1.WaypointConfig.nodeSelector:type_name -> k8s.io.api.core.v1.NodeSelector
-	62,  // 195: istio.operator.v1alpha1.WaypointConfig.toleration:type_name -> k8s.io.api.core.v1.Toleration
-	56,  // 196: istio.operator.v1alpha1.NetworkPolicyConfig.enabled:type_name -> google.protobuf.BoolValue
-	197, // [197:197] is the sub-list for method output_type
-	197, // [197:197] is the sub-list for method input_type
-	197, // [197:197] is the sub-list for extension type_name
-	197, // [197:197] is the sub-list for extension extendee
-	0,   // [0:197] is the sub-list for field type_name
+	50,  // 15: istio.operator.v1alpha1.CNIConfig.rollingMaxUnavailable:type_name -> istio.operator.v1alpha1.IntOrString
+	57,  // 16: istio.operator.v1alpha1.CNIConfig.istioOwnedCNIConfig:type_name -> google.protobuf.BoolValue
+	57,  // 17: istio.operator.v1alpha1.CNIUsageConfig.enabled:type_name -> google.protobuf.BoolValue
+	57,  // 18: istio.operator.v1alpha1.CNIUsageConfig.chained:type_name -> google.protobuf.BoolValue
+	57,  // 19: istio.operator.v1alpha1.CNIAmbientConfig.enabled:type_name -> google.protobuf.BoolValue
+	57,  // 20: istio.operator.v1alpha1.CNIAmbientConfig.dnsCapture:type_name -> google.protobuf.BoolValue
+	57,  // 21: istio.operator.v1alpha1.CNIAmbientConfig.ipv6:type_name -> google.protobuf.BoolValue
+	57,  // 22: istio.operator.v1alpha1.CNIAmbientConfig.reconcileIptablesOnStartup:type_name -> google.protobuf.BoolValue
+	57,  // 23: istio.operator.v1alpha1.CNIRepairConfig.enabled:type_name -> google.protobuf.BoolValue
+	58,  // 24: istio.operator.v1alpha1.CNIRepairConfig.tag:type_name -> google.protobuf.Value
+	57,  // 25: istio.operator.v1alpha1.ResourceQuotas.enabled:type_name -> google.protobuf.BoolValue
+	53,  // 26: istio.operator.v1alpha1.Resources.limits:type_name -> istio.operator.v1alpha1.Resources.LimitsEntry
+	54,  // 27: istio.operator.v1alpha1.Resources.requests:type_name -> istio.operator.v1alpha1.Resources.RequestsEntry
+	60,  // 28: istio.operator.v1alpha1.ServiceAccount.annotations:type_name -> google.protobuf.Struct
+	57,  // 29: istio.operator.v1alpha1.DefaultPodDisruptionBudgetConfig.enabled:type_name -> google.protobuf.BoolValue
+	37,  // 30: istio.operator.v1alpha1.DefaultResourcesConfig.requests:type_name -> istio.operator.v1alpha1.ResourcesRequestsConfig
+	57,  // 31: istio.operator.v1alpha1.SpireConfig.workloads:type_name -> google.protobuf.BoolValue
+	57,  // 32: istio.operator.v1alpha1.EgressGatewayConfig.autoscaleEnabled:type_name -> google.protobuf.BoolValue
+	10,  // 33: istio.operator.v1alpha1.EgressGatewayConfig.memory:type_name -> istio.operator.v1alpha1.TargetUtilizationConfig
+	10,  // 34: istio.operator.v1alpha1.EgressGatewayConfig.cpu:type_name -> istio.operator.v1alpha1.TargetUtilizationConfig
+	57,  // 35: istio.operator.v1alpha1.EgressGatewayConfig.customService:type_name -> google.protobuf.BoolValue
+	57,  // 36: istio.operator.v1alpha1.EgressGatewayConfig.enabled:type_name -> google.protobuf.BoolValue
+	60,  // 37: istio.operator.v1alpha1.EgressGatewayConfig.env:type_name -> google.protobuf.Struct
+	55,  // 38: istio.operator.v1alpha1.EgressGatewayConfig.labels:type_name -> istio.operator.v1alpha1.EgressGatewayConfig.LabelsEntry
+	60,  // 39: istio.operator.v1alpha1.EgressGatewayConfig.nodeSelector:type_name -> google.protobuf.Struct
+	60,  // 40: istio.operator.v1alpha1.EgressGatewayConfig.podAnnotations:type_name -> google.protobuf.Struct
+	62,  // 41: istio.operator.v1alpha1.EgressGatewayConfig.podAntiAffinityLabelSelector:type_name -> k8s.io.apimachinery.pkg.apis.meta.v1.LabelSelector
+	62,  // 42: istio.operator.v1alpha1.EgressGatewayConfig.podAntiAffinityTermLabelSelector:type_name -> k8s.io.apimachinery.pkg.apis.meta.v1.LabelSelector
+	33,  // 43: istio.operator.v1alpha1.EgressGatewayConfig.ports:type_name -> istio.operator.v1alpha1.PortsConfig
+	11,  // 44: istio.operator.v1alpha1.EgressGatewayConfig.resources:type_name -> istio.operator.v1alpha1.Resources
+	39,  // 45: istio.operator.v1alpha1.EgressGatewayConfig.secretVolumes:type_name -> istio.operator.v1alpha1.SecretVolume
+	60,  // 46: istio.operator.v1alpha1.EgressGatewayConfig.serviceAnnotations:type_name -> google.protobuf.Struct
+	63,  // 47: istio.operator.v1alpha1.EgressGatewayConfig.tolerations:type_name -> k8s.io.api.core.v1.Toleration
+	50,  // 48: istio.operator.v1alpha1.EgressGatewayConfig.rollingMaxSurge:type_name -> istio.operator.v1alpha1.IntOrString
+	50,  // 49: istio.operator.v1alpha1.EgressGatewayConfig.rollingMaxUnavailable:type_name -> istio.operator.v1alpha1.IntOrString
+	60,  // 50: istio.operator.v1alpha1.EgressGatewayConfig.configVolumes:type_name -> google.protobuf.Struct
+	60,  // 51: istio.operator.v1alpha1.EgressGatewayConfig.additionalContainers:type_name -> google.protobuf.Struct
+	57,  // 52: istio.operator.v1alpha1.EgressGatewayConfig.runAsRoot:type_name -> google.protobuf.BoolValue
+	12,  // 53: istio.operator.v1alpha1.EgressGatewayConfig.serviceAccount:type_name -> istio.operator.v1alpha1.ServiceAccount
+	16,  // 54: istio.operator.v1alpha1.GatewaysConfig.istio_egressgateway:type_name -> istio.operator.v1alpha1.EgressGatewayConfig
+	57,  // 55: istio.operator.v1alpha1.GatewaysConfig.enabled:type_name -> google.protobuf.BoolValue
+	22,  // 56: istio.operator.v1alpha1.GatewaysConfig.istio_ingressgateway:type_name -> istio.operator.v1alpha1.IngressGatewayConfig
+	58,  // 57: istio.operator.v1alpha1.GatewaysConfig.securityContext:type_name -> google.protobuf.Value
+	58,  // 58: istio.operator.v1alpha1.GatewaysConfig.seccompProfile:type_name -> google.protobuf.Value
+	15,  // 59: istio.operator.v1alpha1.GatewaysConfig.spire:type_name -> istio.operator.v1alpha1.SpireConfig
+	4,   // 60: istio.operator.v1alpha1.GlobalConfig.arch:type_name -> istio.operator.v1alpha1.ArchConfig
+	57,  // 61: istio.operator.v1alpha1.GlobalConfig.configValidation:type_name -> google.protobuf.BoolValue
+	60,  // 62: istio.operator.v1alpha1.GlobalConfig.defaultNodeSelector:type_name -> google.protobuf.Struct
+	13,  // 63: istio.operator.v1alpha1.GlobalConfig.defaultPodDisruptionBudget:type_name -> istio.operator.v1alpha1.DefaultPodDisruptionBudgetConfig
+	14,  // 64: istio.operator.v1alpha1.GlobalConfig.defaultResources:type_name -> istio.operator.v1alpha1.DefaultResourcesConfig
+	63,  // 65: istio.operator.v1alpha1.GlobalConfig.defaultTolerations:type_name -> k8s.io.api.core.v1.Toleration
+	57,  // 66: istio.operator.v1alpha1.GlobalConfig.logAsJson:type_name -> google.protobuf.BoolValue
+	21,  // 67: istio.operator.v1alpha1.GlobalConfig.logging:type_name -> istio.operator.v1alpha1.GlobalLoggingConfig
+	60,  // 68: istio.operator.v1alpha1.GlobalConfig.meshNetworks:type_name -> google.protobuf.Struct
+	23,  // 69: istio.operator.v1alpha1.GlobalConfig.multiCluster:type_name -> istio.operator.v1alpha1.MultiClusterConfig
+	57,  // 70: istio.operator.v1alpha1.GlobalConfig.omitSidecarInjectorConfigMap:type_name -> google.protobuf.BoolValue
+	57,  // 71: istio.operator.v1alpha1.GlobalConfig.operatorManageWebhooks:type_name -> google.protobuf.BoolValue
+	34,  // 72: istio.operator.v1alpha1.GlobalConfig.proxy:type_name -> istio.operator.v1alpha1.ProxyConfig
+	36,  // 73: istio.operator.v1alpha1.GlobalConfig.proxy_init:type_name -> istio.operator.v1alpha1.ProxyInitConfig
+	38,  // 74: istio.operator.v1alpha1.GlobalConfig.sds:type_name -> istio.operator.v1alpha1.SDSConfig
+	58,  // 75: istio.operator.v1alpha1.GlobalConfig.tag:type_name -> google.protobuf.Value
+	41,  // 76: istio.operator.v1alpha1.GlobalConfig.tracer:type_name -> istio.operator.v1alpha1.TracerConfig
+	20,  // 77: istio.operator.v1alpha1.GlobalConfig.istiod:type_name -> istio.operator.v1alpha1.IstiodConfig
+	19,  // 78: istio.operator.v1alpha1.GlobalConfig.sts:type_name -> istio.operator.v1alpha1.STSConfig
+	57,  // 79: istio.operator.v1alpha1.GlobalConfig.mountMtlsCerts:type_name -> google.protobuf.BoolValue
+	57,  // 80: istio.operator.v1alpha1.GlobalConfig.externalIstiod:type_name -> google.protobuf.BoolValue
+	57,  // 81: istio.operator.v1alpha1.GlobalConfig.configCluster:type_name -> google.protobuf.BoolValue
+	51,  // 82: istio.operator.v1alpha1.GlobalConfig.waypoint:type_name -> istio.operator.v1alpha1.WaypointConfig
+	57,  // 83: istio.operator.v1alpha1.GlobalConfig.nativeNftables:type_name -> google.protobuf.BoolValue
+	52,  // 84: istio.operator.v1alpha1.GlobalConfig.networkPolicy:type_name -> istio.operator.v1alpha1.NetworkPolicyConfig
+	0,   // 85: istio.operator.v1alpha1.GlobalConfig.resourceScope:type_name -> istio.operator.v1alpha1.ResourceScope
+	57,  // 86: istio.operator.v1alpha1.IstiodConfig.enableAnalysis:type_name -> google.protobuf.BoolValue
+	57,  // 87: istio.operator.v1alpha1.IngressGatewayConfig.autoscaleEnabled:type_name -> google.protobuf.BoolValue
+	10,  // 88: istio.operator.v1alpha1.IngressGatewayConfig.memory:type_name -> istio.operator.v1alpha1.TargetUtilizationConfig
+	10,  // 89: istio.operator.v1alpha1.IngressGatewayConfig.cpu:type_name -> istio.operator.v1alpha1.TargetUtilizationConfig
+	57,  // 90: istio.operator.v1alpha1.IngressGatewayConfig.customService:type_name -> google.protobuf.BoolValue
+	57,  // 91: istio.operator.v1alpha1.IngressGatewayConfig.enabled:type_name -> google.protobuf.BoolValue
+	60,  // 92: istio.operator.v1alpha1.IngressGatewayConfig.env:type_name -> google.protobuf.Struct
+	56,  // 93: istio.operator.v1alpha1.IngressGatewayConfig.labels:type_name -> istio.operator.v1alpha1.IngressGatewayConfig.LabelsEntry
+	60,  // 94: istio.operator.v1alpha1.IngressGatewayConfig.nodeSelector:type_name -> google.protobuf.Struct
+	60,  // 95: istio.operator.v1alpha1.IngressGatewayConfig.podAnnotations:type_name -> google.protobuf.Struct
+	62,  // 96: istio.operator.v1alpha1.IngressGatewayConfig.podAntiAffinityLabelSelector:type_name -> k8s.io.apimachinery.pkg.apis.meta.v1.LabelSelector
+	62,  // 97: istio.operator.v1alpha1.IngressGatewayConfig.podAntiAffinityTermLabelSelector:type_name -> k8s.io.apimachinery.pkg.apis.meta.v1.LabelSelector
+	33,  // 98: istio.operator.v1alpha1.IngressGatewayConfig.ports:type_name -> istio.operator.v1alpha1.PortsConfig
+	60,  // 99: istio.operator.v1alpha1.IngressGatewayConfig.resources:type_name -> google.protobuf.Struct
+	39,  // 100: istio.operator.v1alpha1.IngressGatewayConfig.secretVolumes:type_name -> istio.operator.v1alpha1.SecretVolume
+	60,  // 101: istio.operator.v1alpha1.IngressGatewayConfig.serviceAnnotations:type_name -> google.protobuf.Struct
+	50,  // 102: istio.operator.v1alpha1.IngressGatewayConfig.rollingMaxSurge:type_name -> istio.operator.v1alpha1.IntOrString
+	50,  // 103: istio.operator.v1alpha1.IngressGatewayConfig.rollingMaxUnavailable:type_name -> istio.operator.v1alpha1.IntOrString
+	63,  // 104: istio.operator.v1alpha1.IngressGatewayConfig.tolerations:type_name -> k8s.io.api.core.v1.Toleration
+	60,  // 105: istio.operator.v1alpha1.IngressGatewayConfig.ingressPorts:type_name -> google.protobuf.Struct
+	60,  // 106: istio.operator.v1alpha1.IngressGatewayConfig.additionalContainers:type_name -> google.protobuf.Struct
+	60,  // 107: istio.operator.v1alpha1.IngressGatewayConfig.configVolumes:type_name -> google.protobuf.Struct
+	57,  // 108: istio.operator.v1alpha1.IngressGatewayConfig.runAsRoot:type_name -> google.protobuf.BoolValue
+	12,  // 109: istio.operator.v1alpha1.IngressGatewayConfig.serviceAccount:type_name -> istio.operator.v1alpha1.ServiceAccount
+	57,  // 110: istio.operator.v1alpha1.MultiClusterConfig.enabled:type_name -> google.protobuf.BoolValue
+	57,  // 111: istio.operator.v1alpha1.MultiClusterConfig.includeEnvoyFilter:type_name -> google.protobuf.BoolValue
+	3,   // 112: istio.operator.v1alpha1.OutboundTrafficPolicyConfig.mode:type_name -> istio.operator.v1alpha1.OutboundTrafficPolicyConfig.Mode
+	57,  // 113: istio.operator.v1alpha1.PilotConfig.enabled:type_name -> google.protobuf.BoolValue
+	57,  // 114: istio.operator.v1alpha1.PilotConfig.autoscaleEnabled:type_name -> google.protobuf.BoolValue
+	60,  // 115: istio.operator.v1alpha1.PilotConfig.autoscaleBehavior:type_name -> google.protobuf.Struct
+	11,  // 116: istio.operator.v1alpha1.PilotConfig.resources:type_name -> istio.operator.v1alpha1.Resources
+	10,  // 117: istio.operator.v1alpha1.PilotConfig.cpu:type_name -> istio.operator.v1alpha1.TargetUtilizationConfig
+	60,  // 118: istio.operator.v1alpha1.PilotConfig.nodeSelector:type_name -> google.protobuf.Struct
+	64,  // 119: istio.operator.v1alpha1.PilotConfig.keepaliveMaxServerConnectionAge:type_name -> google.protobuf.Duration
+	60,  // 120: istio.operator.v1alpha1.PilotConfig.deploymentLabels:type_name -> google.protobuf.Struct
+	60,  // 121: istio.operator.v1alpha1.PilotConfig.podLabels:type_name -> google.protobuf.Struct
+	57,  // 122: istio.operator.v1alpha1.PilotConfig.configMap:type_name -> google.protobuf.BoolValue
+	60,  // 123: istio.operator.v1alpha1.PilotConfig.env:type_name -> google.protobuf.Struct
+	59,  // 124: istio.operator.v1alpha1.PilotConfig.affinity:type_name -> k8s.io.api.core.v1.Affinity
+	50,  // 125: istio.operator.v1alpha1.PilotConfig.rollingMaxSurge:type_name -> istio.operator.v1alpha1.IntOrString
+	50,  // 126: istio.operator.v1alpha1.PilotConfig.rollingMaxUnavailable:type_name -> istio.operator.v1alpha1.IntOrString
+	63,  // 127: istio.operator.v1alpha1.PilotConfig.tolerations:type_name -> k8s.io.api.core.v1.Toleration
+	60,  // 128: istio.operator.v1alpha1.PilotConfig.podAnnotations:type_name -> google.protobuf.Struct
+	60,  // 129: istio.operator.v1alpha1.PilotConfig.serviceAnnotations:type_name -> google.protobuf.Struct
+	60,  // 130: istio.operator.v1alpha1.PilotConfig.serviceAccountAnnotations:type_name -> google.protobuf.Struct
+	58,  // 131: istio.operator.v1alpha1.PilotConfig.tag:type_name -> google.protobuf.Value
+	61,  // 132: istio.operator.v1alpha1.PilotConfig.seccompProfile:type_name -> k8s.io.api.core.v1.SeccompProfile
+	65,  // 133: istio.operator.v1alpha1.PilotConfig.topologySpreadConstraints:type_name -> k8s.io.api.core.v1.TopologySpreadConstraint
+	60,  // 134: istio.operator.v1alpha1.PilotConfig.extraContainerArgs:type_name -> google.protobuf.Struct
+	66,  // 135: istio.operator.v1alpha1.PilotConfig.volumeMounts:type_name -> k8s.io.api.core.v1.VolumeMount
+	67,  // 136: istio.operator.v1alpha1.PilotConfig.volumes:type_name -> k8s.io.api.core.v1.Volume
+	10,  // 137: istio.operator.v1alpha1.PilotConfig.memory:type_name -> istio.operator.v1alpha1.TargetUtilizationConfig
+	6,   // 138: istio.operator.v1alpha1.PilotConfig.cni:type_name -> istio.operator.v1alpha1.CNIUsageConfig
+	26,  // 139: istio.operator.v1alpha1.PilotConfig.taint:type_name -> istio.operator.v1alpha1.PilotTaintControllerConfig
+	47,  // 140: istio.operator.v1alpha1.PilotConfig.istiodRemote:type_name -> istio.operator.v1alpha1.IstiodRemoteConfig
+	60,  // 141: istio.operator.v1alpha1.PilotConfig.envVarFrom:type_name -> google.protobuf.Struct
+	1,   // 142: istio.operator.v1alpha1.PilotIngressConfig.ingressControllerMode:type_name -> istio.operator.v1alpha1.ingressControllerMode
+	57,  // 143: istio.operator.v1alpha1.PilotPolicyConfig.enabled:type_name -> google.protobuf.BoolValue
+	57,  // 144: istio.operator.v1alpha1.TelemetryConfig.enabled:type_name -> google.protobuf.BoolValue
+	30,  // 145: istio.operator.v1alpha1.TelemetryConfig.v2:type_name -> istio.operator.v1alpha1.TelemetryV2Config
+	57,  // 146: istio.operator.v1alpha1.TelemetryV2Config.enabled:type_name -> google.protobuf.BoolValue
+	31,  // 147: istio.operator.v1alpha1.TelemetryV2Config.prometheus:type_name -> istio.operator.v1alpha1.TelemetryV2PrometheusConfig
+	32,  // 148: istio.operator.v1alpha1.TelemetryV2Config.stackdriver:type_name -> istio.operator.v1alpha1.TelemetryV2StackDriverConfig
+	57,  // 149: istio.operator.v1alpha1.TelemetryV2PrometheusConfig.enabled:type_name -> google.protobuf.BoolValue
+	57,  // 150: istio.operator.v1alpha1.TelemetryV2StackDriverConfig.enabled:type_name -> google.protobuf.BoolValue
+	57,  // 151: istio.operator.v1alpha1.ProxyConfig.enableCoreDump:type_name -> google.protobuf.BoolValue
+	57,  // 152: istio.operator.v1alpha1.ProxyConfig.privileged:type_name -> google.protobuf.BoolValue
+	35,  // 153: istio.operator.v1alpha1.ProxyConfig.startupProbe:type_name -> istio.operator.v1alpha1.StartupProbe
+	11,  // 154: istio.operator.v1alpha1.ProxyConfig.resources:type_name -> istio.operator.v1alpha1.Resources
+	2,   // 155: istio.operator.v1alpha1.ProxyConfig.tracer:type_name -> istio.operator.v1alpha1.tracer
+	68,  // 156: istio.operator.v1alpha1.ProxyConfig.lifecycle:type_name -> k8s.io.api.core.v1.Lifecycle
+	57,  // 157: istio.operator.v1alpha1.ProxyConfig.holdApplicationUntilProxyStarts:type_name -> google.protobuf.BoolValue
+	57,  // 158: istio.operator.v1alpha1.StartupProbe.enabled:type_name -> google.protobuf.BoolValue
+	11,  // 159: istio.operator.v1alpha1.ProxyInitConfig.resources:type_name -> istio.operator.v1alpha1.Resources
+	60,  // 160: istio.operator.v1alpha1.SDSConfig.token:type_name -> google.protobuf.Struct
+	57,  // 161: istio.operator.v1alpha1.SidecarInjectorConfig.enableNamespacesByDefault:type_name -> google.protobuf.BoolValue
+	62,  // 162: istio.operator.v1alpha1.SidecarInjectorConfig.neverInjectSelector:type_name -> k8s.io.apimachinery.pkg.apis.meta.v1.LabelSelector
+	62,  // 163: istio.operator.v1alpha1.SidecarInjectorConfig.alwaysInjectSelector:type_name -> k8s.io.apimachinery.pkg.apis.meta.v1.LabelSelector
+	57,  // 164: istio.operator.v1alpha1.SidecarInjectorConfig.rewriteAppHTTPProbe:type_name -> google.protobuf.BoolValue
+	60,  // 165: istio.operator.v1alpha1.SidecarInjectorConfig.injectedAnnotations:type_name -> google.protobuf.Struct
+	60,  // 166: istio.operator.v1alpha1.SidecarInjectorConfig.templates:type_name -> google.protobuf.Struct
+	42,  // 167: istio.operator.v1alpha1.TracerConfig.datadog:type_name -> istio.operator.v1alpha1.TracerDatadogConfig
+	43,  // 168: istio.operator.v1alpha1.TracerConfig.lightstep:type_name -> istio.operator.v1alpha1.TracerLightStepConfig
+	44,  // 169: istio.operator.v1alpha1.TracerConfig.zipkin:type_name -> istio.operator.v1alpha1.TracerZipkinConfig
+	45,  // 170: istio.operator.v1alpha1.TracerConfig.stackdriver:type_name -> istio.operator.v1alpha1.TracerStackdriverConfig
+	57,  // 171: istio.operator.v1alpha1.TracerStackdriverConfig.debug:type_name -> google.protobuf.BoolValue
+	57,  // 172: istio.operator.v1alpha1.BaseConfig.enableCRDTemplates:type_name -> google.protobuf.BoolValue
+	57,  // 173: istio.operator.v1alpha1.BaseConfig.enableIstioConfigCRDs:type_name -> google.protobuf.BoolValue
+	57,  // 174: istio.operator.v1alpha1.BaseConfig.validateGateway:type_name -> google.protobuf.BoolValue
+	57,  // 175: istio.operator.v1alpha1.IstiodRemoteConfig.enabled:type_name -> google.protobuf.BoolValue
+	57,  // 176: istio.operator.v1alpha1.IstiodRemoteConfig.enabledLocalInjectorIstiod:type_name -> google.protobuf.BoolValue
+	5,   // 177: istio.operator.v1alpha1.Values.cni:type_name -> istio.operator.v1alpha1.CNIConfig
+	17,  // 178: istio.operator.v1alpha1.Values.gateways:type_name -> istio.operator.v1alpha1.GatewaysConfig
+	18,  // 179: istio.operator.v1alpha1.Values.global:type_name -> istio.operator.v1alpha1.GlobalConfig
+	25,  // 180: istio.operator.v1alpha1.Values.pilot:type_name -> istio.operator.v1alpha1.PilotConfig
+	58,  // 181: istio.operator.v1alpha1.Values.ztunnel:type_name -> google.protobuf.Value
+	29,  // 182: istio.operator.v1alpha1.Values.telemetry:type_name -> istio.operator.v1alpha1.TelemetryConfig
+	40,  // 183: istio.operator.v1alpha1.Values.sidecarInjectorWebhook:type_name -> istio.operator.v1alpha1.SidecarInjectorConfig
+	6,   // 184: istio.operator.v1alpha1.Values.istio_cni:type_name -> istio.operator.v1alpha1.CNIUsageConfig
+	58,  // 185: istio.operator.v1alpha1.Values.meshConfig:type_name -> google.protobuf.Value
+	46,  // 186: istio.operator.v1alpha1.Values.base:type_name -> istio.operator.v1alpha1.BaseConfig
+	47,  // 187: istio.operator.v1alpha1.Values.istiodRemote:type_name -> istio.operator.v1alpha1.IstiodRemoteConfig
+	49,  // 188: istio.operator.v1alpha1.Values.experimental:type_name -> istio.operator.v1alpha1.ExperimentalConfig
+	58,  // 189: istio.operator.v1alpha1.Values.gatewayClasses:type_name -> google.protobuf.Value
+	58,  // 190: istio.operator.v1alpha1.Values.platforms:type_name -> google.protobuf.Value
+	58,  // 191: istio.operator.v1alpha1.Values.license:type_name -> google.protobuf.Value
+	57,  // 192: istio.operator.v1alpha1.ExperimentalConfig.stableValidationPolicy:type_name -> google.protobuf.BoolValue
+	69,  // 193: istio.operator.v1alpha1.IntOrString.intVal:type_name -> google.protobuf.Int32Value
+	70,  // 194: istio.operator.v1alpha1.IntOrString.strVal:type_name -> google.protobuf.StringValue
+	11,  // 195: istio.operator.v1alpha1.WaypointConfig.resources:type_name -> istio.operator.v1alpha1.Resources
+	59,  // 196: istio.operator.v1alpha1.WaypointConfig.affinity:type_name -> k8s.io.api.core.v1.Affinity
+	65,  // 197: istio.operator.v1alpha1.WaypointConfig.topologySpreadConstraints:type_name -> k8s.io.api.core.v1.TopologySpreadConstraint
+	71,  // 198: istio.operator.v1alpha1.WaypointConfig.nodeSelector:type_name -> k8s.io.api.core.v1.NodeSelector
+	63,  // 199: istio.operator.v1alpha1.WaypointConfig.toleration:type_name -> k8s.io.api.core.v1.Toleration
+	57,  // 200: istio.operator.v1alpha1.NetworkPolicyConfig.enabled:type_name -> google.protobuf.BoolValue
+	201, // [201:201] is the sub-list for method output_type
+	201, // [201:201] is the sub-list for method input_type
+	201, // [201:201] is the sub-list for extension type_name
+	201, // [201:201] is the sub-list for extension extendee
+	0,   // [0:201] is the sub-list for field type_name
 }
 
 func init() { file_pkg_apis_values_types_proto_init() }
@@ -6258,7 +6340,7 @@ func file_pkg_apis_values_types_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_pkg_apis_values_types_proto_rawDesc), len(file_pkg_apis_values_types_proto_rawDesc)),
 			NumEnums:      4,
-			NumMessages:   52,
+			NumMessages:   53,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
