@@ -17,6 +17,7 @@ package ambient
 
 import (
 	"fmt"
+	"strings"
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -35,6 +36,7 @@ import (
 	"istio.io/istio/pkg/log"
 	"istio.io/istio/pkg/network"
 	"istio.io/istio/pkg/ptr"
+	"istio.io/istio/platform/discovery/peering"
 )
 
 type NetworkGateway struct {
@@ -327,6 +329,30 @@ func localK8sGatewayToNetworkGateways(clusterID cluster.ID, gw *v1beta1.Gateway)
 	}
 	gateways := []NetworkGateway{}
 	source := config.NamespacedName(gw)
+
+	// SOLO: for nodeport peering, create a NetworkGateway when the peering preferred dataplane annotation is set to "nodeport"
+	if strings.EqualFold(gw.Annotations[constants.SoloAnnotationPeeringPreferredDataPlaneServiceType], "nodeport") {
+		serviceAccount := gw.GetAnnotations()[constants.GatewayServiceAccountAnnotation]
+		network := gw.GetLabels()[label.TopologyNetwork.Name]
+
+		// we can't form a valid NetworkGateway for nodeport peering if we don't have a network or service account
+		if network != "" && serviceAccount != "" {
+			networkGateway := base
+			networkGateway.Addr = fmt.Sprintf("node.%s.%s%s", serviceAccount, network, peering.DomainSuffix)
+			networkGateway.Port = model.HBoneInboundListenPort
+			networkGateway.HBONEPort = model.HBoneInboundListenPort
+
+			gateways = append(gateways, NetworkGateway{
+				NetworkGateway: networkGateway,
+				Source:         source,
+			})
+			// return early so we are guaranteed to use nodeport over LB as default
+			return gateways
+		}
+		log.Errorf("failed to enable nodeport peering, gateway %s/%s missing network label and/or service account label", gw.Namespace, gw.Name)
+	}
+	// SOLO end
+
 	for _, addr := range gw.Status.Addresses {
 		if addr.Type == nil {
 			continue

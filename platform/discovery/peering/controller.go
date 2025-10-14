@@ -52,6 +52,8 @@ const (
 	WorkloadEntry
 	FlatWorkloadEntry
 	ServiceEntry
+	GatewayServiceEntry
+	NodeWorkloadEntry
 )
 
 func (k Kind) String() string {
@@ -66,6 +68,10 @@ func (k Kind) String() string {
 		return "FlatWorkloadEntry"
 	case ServiceEntry:
 		return "ServiceEntry"
+	case GatewayServiceEntry:
+		return "GatewayServiceEntry"
+	case NodeWorkloadEntry:
+		return "NodeWorkloadEntry"
 	}
 	return "Unknown"
 }
@@ -113,6 +119,14 @@ func (c *NetworkWatcher) Reconcile(raw any) error {
 		// Cluster: triggered when an entire cluster has changed.
 		// Intended to cleanup stale resources
 		return c.reconcileClusterSync(key.Name)
+	case NodeWorkloadEntry:
+		// NodeWorkloadEntry: triggered when we may need to change a generated WE
+		// The key is: Name=name of target node, Namespace=cluster
+		return c.reconcileNodeWorkloadEntry(key.NamespacedName)
+	case GatewayServiceEntry:
+		// GatewayServiceEntry: triggered when we may need to change a generated gateway-based SE
+		// The key is: Name=name and Namespace=namespace of gateway the SE is derived from
+		return c.reconcileGatewayServiceEntry(key.NamespacedName)
 	default:
 		log.Errorf("unknown resource kind: %v", key.kind)
 	}
@@ -204,10 +218,17 @@ func (c *NetworkWatcher) reconcileGateway(name types.NamespacedName) error {
 		log.Infof("peer gateway to %v is for local cluster network, ignoring", peer.Address)
 		return nil
 	}
+
+	// set server side filtering to only peer node workloads, unless in flat networking mode
+	peeringNodesOnly := true
+	if EnableFlatNetworks && peer.Network == c.localNetwork {
+		peeringNodesOnly = false
+	}
+
 	peerCluster := newPeerCluster(
 		c.localNetwork,
 		peer,
-		c.buildConfig(fmt.Sprintf("peering-%s", peer.Cluster)),
+		c.buildConfig(fmt.Sprintf("peering-%s", peer.Cluster), peeringNodesOnly),
 		c.debugger,
 		c.queue,
 		func(o krt.Event[RemoteFederatedService]) {
@@ -222,6 +243,16 @@ func (c *NetworkWatcher) reconcileGateway(name types.NamespacedName) error {
 		},
 		func(o krt.Event[RemoteWorkload]) {
 			obj := o.Latest()
+			if strings.Contains(obj.Workload.GetUid(), "Node/") {
+				c.queue.Add(typedNamespace{
+					NamespacedName: types.NamespacedName{
+						Namespace: obj.Cluster,
+						Name:      obj.ResourceName(),
+					},
+					kind: NodeWorkloadEntry,
+				})
+				return
+			}
 			c.queue.Add(typedNamespace{
 				NamespacedName: types.NamespacedName{
 					Namespace: obj.Cluster,
@@ -278,6 +309,42 @@ func (c *NetworkWatcher) reconcileClusterSync(clusterID string) error {
 	return nil
 }
 
+func (c *NetworkWatcher) genericReconcileWorkloadEntries(want []*clientnetworking.WorkloadEntry, groupLabel string) error {
+	var errs []error
+
+	req, err := klabels.NewRequirement(SourceWorkloadLabel, selection.Equals, []string{groupLabel})
+	if err != nil {
+		log.Errorf("failed to create label requirement: %v", err)
+		return err
+	}
+	entries := c.workloadEntries.List(PeeringNamespace, klabels.NewSelector().Add(*req))
+
+	// cleanup existing workload entries that match the group label but were not generated
+	for _, toDel := range entries {
+		// don't delete it
+		if nil != slices.FindFunc(want, func(want *clientnetworking.WorkloadEntry) bool {
+			return toDel.GetName() == want.GetName() && toDel.GetNamespace() == want.GetNamespace()
+		}) {
+			continue
+		}
+		if err := controllers.IgnoreNotFound(c.workloadEntries.Delete(toDel.GetName(), PeeringNamespace)); err != nil {
+			errs = append(errs, err)
+		}
+	}
+
+	// create or update the workload entries that we generated
+	for _, we := range want {
+		changed, err := CreateOrUpdateIfNeeded(c.workloadEntries, we, workloadEntryChanged)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		log.WithLabels("updated", changed).Infof("workload entry %q processed", we.Name)
+	}
+
+	return errors.Join(errs...)
+}
+
 func (c *NetworkWatcher) reconcileFlatWorkloadEntry(tn types.NamespacedName) error {
 	log := log.WithLabels("flatworkloadentry", tn)
 
@@ -306,43 +373,10 @@ func (c *NetworkWatcher) reconcileFlatWorkloadEntry(tn types.NamespacedName) err
 		weGroupLabel = "autogenflat." + hash
 	}
 
-	reconcile := func(want []*clientnetworking.WorkloadEntry) error {
-		req, err := klabels.NewRequirement(SourceWorkloadLabel, selection.Equals, []string{weGroupLabel})
-		if err != nil {
-			log.Errorf("failed to create label requirement: %v", err)
-			return err
-		}
-		entries := c.workloadEntries.List(PeeringNamespace, klabels.NewSelector().Add(*req))
-
-		var errs []error
-		for _, toDel := range entries {
-			// don't delete it
-			if nil != slices.FindFunc(want, func(want *clientnetworking.WorkloadEntry) bool {
-				return toDel.GetName() == want.GetName() && toDel.GetNamespace() == want.GetNamespace()
-			}) {
-				continue
-			}
-			if err := controllers.IgnoreNotFound(c.workloadEntries.Delete(toDel.GetName(), PeeringNamespace)); err != nil {
-				errs = append(errs, err)
-			}
-		}
-
-		for _, we := range want {
-			changed, err := CreateOrUpdateIfNeeded(c.workloadEntries, we, workloadEntryChanged)
-			if err != nil {
-				errs = append(errs, err)
-				continue
-			}
-			log.WithLabels("updated", changed).Infof("workload entry %q processed", we.Name)
-		}
-
-		return errors.Join(errs...)
-	}
-
 	cluster := c.getClusterByID(cluster.ID(clusterID))
 	if cluster == nil {
 		log.Infof("workload entry will be deleted (network not found for key %v)", tn.String())
-		return reconcile(nil)
+		return c.genericReconcileWorkloadEntries(nil, weGroupLabel)
 	}
 	if !cluster.HasSynced() {
 		log.Debugf("skipping, network not yet synced")
@@ -351,16 +385,16 @@ func (c *NetworkWatcher) reconcileFlatWorkloadEntry(tn types.NamespacedName) err
 	workload := cluster.workloads.GetKey(tn.Name)
 	if workload == nil {
 		log.Infof("workload entry will be deleted (key %v not found)", tn.String())
-		return reconcile(nil)
+		return c.genericReconcileWorkloadEntries(nil, weGroupLabel)
 	}
 	if len(workload.Addresses) == 0 {
 		// workload entry is not valid for cross-cluster
-		return reconcile(nil)
+		return c.genericReconcileWorkloadEntries(nil, weGroupLabel)
 	}
 	address, ok := netip.AddrFromSlice(workload.Addresses[0])
 	if !ok {
 		// workload entry is not valid for cross-cluster
-		return reconcile(nil)
+		return c.genericReconcileWorkloadEntries(nil, weGroupLabel)
 	}
 
 	mergedServices := c.mergedServicesForWorkload(workload)
@@ -429,7 +463,7 @@ func (c *NetworkWatcher) reconcileFlatWorkloadEntry(tn types.NamespacedName) err
 		}
 		return &we
 	})
-	return reconcile(wantEntries)
+	return c.genericReconcileWorkloadEntries(wantEntries, weGroupLabel)
 }
 
 // TODO this doesn't detect overlap at all
@@ -786,6 +820,254 @@ func (c *NetworkWatcher) reconcileServiceEntry(name types.NamespacedName) error 
 	}
 	log.WithLabels("updated", changed).Infof("service entry processed")
 	return nil
+}
+
+// reconcileGatewayServiceEntry creates a ServiceEntry from a gateway resource for nodeport peering
+func (c *NetworkWatcher) reconcileGatewayServiceEntry(name types.NamespacedName) error {
+	log := log.WithLabels("gateway serviceentry", name)
+
+	var (
+		gwName = name.Name
+		gwNs   = name.Namespace
+		seNs   = PeeringNamespace
+	)
+
+	gw := c.gateways.Get(gwName, gwNs)
+	if gw == nil {
+		// gw delete event, look up SE by parent gw label
+		gwNameReq, err := klabels.NewRequirement(ParentGatewayLabel, selection.Equals, []string{gwName})
+		if err != nil {
+			return err
+		}
+		gwNsReq, err := klabels.NewRequirement(ParentGatewayNamespaceLabel, selection.Equals, []string{gwNs})
+		if err != nil {
+			return err
+		}
+		seList := c.serviceEntries.List(seNs, klabels.NewSelector().Add(*gwNameReq, *gwNsReq))
+		if len(seList) == 0 {
+			// no SE found, ignore
+			return nil
+		}
+		// only one SE should be found
+		if len(seList) > 1 {
+			log.Warnf(
+				"multiple gateway service entries found for parent gateway %s/%s delete event, but should only be one. deleting the first.",
+				gwNs,
+				gwName,
+			)
+		}
+		return controllers.IgnoreNotFound(c.serviceEntries.Delete(seList[0].Name, seNs))
+	}
+
+	cluster := gw.GetLabels()[label.TopologyCluster.Name]
+	serviceAccount := gw.GetAnnotations()[constants.GatewayServiceAccountAnnotation]
+	network := gw.GetLabels()[label.TopologyNetwork.Name]
+
+	se := &clientnetworking.ServiceEntry{
+		ObjectMeta: metav1.ObjectMeta{
+			Labels: map[string]string{
+				ParentServiceLabel:          serviceAccount,
+				ParentServiceNamespaceLabel: gwNs,
+				// used to direct SE events to this reconciler
+				NodePeerClusterLabel: cluster,
+				// used to determine gw this SE is derived from when SE events are triggered
+				ParentGatewayNamespaceLabel: gwNs,
+				ParentGatewayLabel:          gwName,
+			},
+			Name:      fmt.Sprintf("autogen.peering.%v.%v", serviceAccount, network),
+			Namespace: seNs,
+		},
+		Spec: networking.ServiceEntry{
+			Hosts: []string{fmt.Sprintf("node.%s.%s%s", serviceAccount, network, DomainSuffix)},
+			Ports: []*networking.ServicePort{
+				{
+					// use the wellknown hbone port
+					Number:   model.HBoneInboundListenPort,
+					Protocol: "TCP",
+					Name:     fmt.Sprintf("%d", model.HBoneInboundListenPort),
+				},
+			},
+			Addresses:  nil,
+			Resolution: networking.ServiceEntry_STATIC,
+			WorkloadSelector: &networking.WorkloadSelector{Labels: map[string]string{
+				NodePeerClusterLabel: cluster,
+			}},
+		},
+	}
+
+	changed, err := CreateOrUpdateIfNeeded(c.serviceEntries, se, func(desired *clientnetworking.ServiceEntry, live *clientnetworking.ServiceEntry) bool {
+		if desired.Name != live.Name {
+			return false
+		}
+		if desired.Namespace != live.Namespace {
+			return false
+		}
+		if !maps.Equal(desired.Labels, live.Labels) {
+			return false
+		}
+		if !maps.Equal(desired.Annotations, live.Annotations) {
+			return false
+		}
+		return proto.Equal(&desired.Spec, &live.Spec)
+	})
+	if err != nil {
+		return err
+	}
+	log.WithLabels("updated", changed).Infof("gateway service entry processed")
+	return nil
+}
+
+// parseNodeUID parses the node uid into cluster and node name.
+// if the uid's Kind is not Node, it returns an error.
+// format of uid: <cluster id>//Node/<node name>
+func parseNodeUID(uid string) (string, string, error) {
+	parts := strings.Split(uid, "/")
+	if len(parts) < 4 {
+		return "", "", fmt.Errorf("received invalid resource name %v, expected <cluster>//Node/<node name>", uid)
+	}
+	clusterID := parts[0]
+	kind := parts[2]
+	nodeName := parts[3]
+	if kind != "Node" {
+		return "", "", fmt.Errorf("received invalid resource kind %s, expected Node", kind)
+	}
+	return clusterID, nodeName, nil
+}
+
+func (c *NetworkWatcher) reconcileNodeWorkloadEntry(tn types.NamespacedName) error {
+	log := log.WithLabels("node workloadentry", tn)
+
+	clusterID, uidName, err := parseNodeUID(tn.Name)
+	if err != nil {
+		// not a node workload entry, ignore instead of returning an error so we don't reconcile again
+		log.Warn(err.Error())
+		return nil
+	}
+
+	// a Node can have multiple addresses, so we create a separate WorkloadEntry for each address
+	// add a common label to all of the WorkloadEntries to reliably clean them up.
+	weGroupLabel := fmt.Sprintf("autogen.node.%v.%v", clusterID, uidName)
+	if len(weGroupLabel) > 63 {
+		// use a hash to ensure uniqueness when truncating
+		hash := fmt.Sprintf("%x", sha256.Sum256([]byte(weGroupLabel)))[:8]
+		weGroupLabel = "autogen.node." + hash
+	}
+
+	cluster := c.getClusterByID(cluster.ID(clusterID))
+	if cluster == nil {
+		log.Infof("node workload entry will be deleted (network not found for key %v)", tn.String())
+		return c.genericReconcileWorkloadEntries(nil, weGroupLabel)
+	}
+	if !cluster.HasSynced() {
+		log.Debugf("skipping, network not yet synced")
+		return nil
+	}
+	// get the Node RemoteWorkload object
+	workload := cluster.workloads.GetKey(tn.Name)
+	if workload == nil {
+		log.Infof("node workload entry will be deleted (key %v not found)", tn.String())
+		return c.genericReconcileWorkloadEntries(nil, weGroupLabel)
+	}
+	if len(workload.Addresses) == 0 {
+		// node workload entry is not valid for cross-cluster
+		return c.genericReconcileWorkloadEntries(nil, weGroupLabel)
+	}
+
+	// pull out the ports for the node, mapping target port to service port (i.e. hbone nodeport)
+	// target port is wellknown hbone port so SE port matches
+	ports := map[string]uint32{}
+	for _, portList := range workload.Services {
+		for _, port := range portList.Ports {
+			ports[fmt.Sprintf("%d", port.GetTargetPort())] = port.GetServicePort()
+		}
+	}
+
+	// write a separate WorkloadEntry for each address
+	wantEntries := make([]*clientnetworking.WorkloadEntry, 0, len(workload.Addresses))
+	for _, address := range workload.Addresses {
+		address, ok := netip.AddrFromSlice(address)
+		if !ok {
+			continue
+		}
+		// by default use the cluster locality based on istio-remote Gateway labels
+		locality := cluster.locality
+		if workload.Locality != nil {
+			region, zone, subzone := workload.Locality.GetRegion(), workload.Locality.GetZone(), workload.Locality.GetSubzone()
+			if region != "" {
+				locality = region
+				if zone != "" {
+					locality += "/" + zone
+					if subzone != "" {
+						locality += "/" + subzone
+					}
+				}
+			}
+		}
+		annos := map[string]string{}
+		labels := map[string]string{}
+
+		annos[PeeredWorkloadUIDAnnotation] = tn.Name
+		// label to let us list these for cleanup
+		labels[SourceWorkloadLabel] = weGroupLabel
+		// always write the source cluster
+		labels[SourceClusterLabel] = clusterID
+		// label to indicate this is a node of a specific cluster
+		labels[NodePeerClusterLabel] = clusterID
+
+		seParentServiceLabel := ""
+		seParentServiceNamespaceLabel := ""
+
+		// get SEs that are in the peering ns and have the node peer cluster label
+		labelRequirement, err := klabels.NewRequirement(NodePeerClusterLabel, selection.Equals, []string{clusterID})
+		if err != nil {
+			log.Errorf("failed to create label requirement: %v", err)
+			return err
+		}
+		// find the SE that selects this node WE by matching the node peer cluster label workload selector
+		// so that we can copy the parent service labels to the node WE
+		for _, serviceEntry := range c.serviceEntries.List(PeeringNamespace, klabels.NewSelector().Add(*labelRequirement)) {
+			if serviceEntry.Spec.WorkloadSelector.Labels[NodePeerClusterLabel] == clusterID {
+				// set a prefix on parent service label so this WE isn't included in lookups for generating SEs
+				// need parent svc info to form svc key hostname for svc lookup in wds (to associate NodePort SE with Node IP WE)
+				seParentServiceLabel = serviceEntry.Labels[ParentServiceLabel]
+				seParentServiceNamespaceLabel = serviceEntry.Labels[ParentServiceNamespaceLabel]
+				break
+			}
+		}
+		// we should always find the gw SE for node WE
+		// but if we don't, return an error so we requeue/reconcile again
+		if seParentServiceLabel == "" || seParentServiceNamespaceLabel == "" {
+			return fmt.Errorf("failed to apply parent svc labels on node WE %s; either no SE found or SE does not have parent service labels", tn.String())
+		}
+		labels[ParentServiceLabel] = "node." + seParentServiceLabel
+		labels[ParentServiceNamespaceLabel] = seParentServiceNamespaceLabel
+
+		// hash the address to ensure uniqueness and valid k8s name when truncating
+		addressHash := fmt.Sprintf("%x", sha256.Sum256([]byte(address.String())))[:8]
+		weName := fmt.Sprintf("autogen.node.%v.%v.%v", clusterID, uidName, addressHash)
+		if len(weName) > 253 {
+			weName = weName[:253]
+		}
+
+		wantEntries = append(wantEntries, &clientnetworking.WorkloadEntry{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:        weName,
+				Namespace:   PeeringNamespace,
+				Labels:      labels,
+				Annotations: annos,
+			},
+			Spec: networking.WorkloadEntry{
+				Address:        address.String(),
+				Network:        clusterID,
+				Weight:         1,
+				Locality:       locality,
+				Ports:          ports,
+				ServiceAccount: workload.GetServiceAccount(),
+			},
+		})
+	}
+
+	return c.genericReconcileWorkloadEntries(wantEntries, weGroupLabel)
 }
 
 // computeTrafficDistribution attempts to find the value for networking.istio.io/traffic-distribution

@@ -169,12 +169,8 @@ func newPeerCluster(
 	handlers := []adsc.Option{
 		federatedServiceAdscHandler,
 		adsc.Watch[*workloadapi.FederatedService]("*"),
-	}
-
-	if EnableFlatNetworks && gateway.Network == localNetwork {
-		handlers = append(handlers,
-			workloadsAdscHandler,
-			adsc.Watch[*workloadapi.Workload]("*"))
+		workloadsAdscHandler,
+		adsc.Watch[*workloadapi.Workload]("*"),
 	}
 
 	cfg.ConnectionEventHandler = func(event adsc.ConnectionEvent, reason string) {

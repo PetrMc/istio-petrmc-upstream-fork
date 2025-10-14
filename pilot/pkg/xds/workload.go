@@ -65,7 +65,15 @@ func (e WorkloadGenerator) GenerateDeltas(
 		reqAddresses = nil
 	}
 	addrs, removed := e.Server.Env.ServiceDiscovery.AddressInformation(reqAddresses)
-	addrs = maybeFilterAddresses(proxy, addrs)
+	addrs, filteredOut := e.maybeFilterAddresses(proxy, addrs)
+	if len(filteredOut) > 0 {
+		if removed == nil {
+			removed = sets.New[string]()
+		}
+		for _, addr := range filteredOut {
+			removed.Insert(addr.ResourceName())
+		}
+	}
 	// Note: while "removed" is a weird name for a resource that never existed, this is how the spec works:
 	// https://www.envoyproxy.io/docs/envoy/latest/api-docs/xds_protocol#id2
 	have := sets.New[string]()
@@ -90,17 +98,29 @@ func (e WorkloadGenerator) GenerateDeltas(
 	return resources, removed.UnsortedList(), model.XdsLogDetails{}, true, nil
 }
 
-func maybeFilterAddresses(proxy *model.Proxy, addrs []model.AddressInfo) []model.AddressInfo {
+func (e WorkloadGenerator) maybeFilterAddresses(proxy *model.Proxy, addrs []model.AddressInfo) ([]model.AddressInfo, []model.AddressInfo) {
 	if !proxy.Metadata.PeeringMode {
-		return addrs
+		return addrs, nil
 	}
-	return slices.FilterInPlace(addrs, func(info model.AddressInfo) bool {
+
+	var removed []model.AddressInfo
+	kept := slices.FilterInPlace(addrs, func(info model.AddressInfo) bool {
 		wl := info.GetWorkload()
 		if wl == nil {
 			return true
 		}
 		spl := strings.Split(wl.Uid, "/")
+		// if workload is node, keep it
+		if spl[2] == "Node" {
+			return true
+		}
+
+		if proxy.Metadata.PeeringNodesOnly {
+			// client requires only node workloads, exclude non-node workloads
+			return false
+		}
 		if len(spl) != 5 || spl[2] != "Pod" {
+			removed = append(removed, info)
 			return false
 		}
 		// Is this a part of any global services? If so, keep it
@@ -113,8 +133,10 @@ func maybeFilterAddresses(proxy *model.Proxy, addrs []model.AddressInfo) []model
 			}
 		}
 		// Else we can filter
+		removed = append(removed, info)
 		return false
 	})
+	return kept, removed
 }
 
 func appendAddress(addr model.AddressInfo, requestedType string, aliases []string, have sets.Set[string], resources model.Resources) model.Resources {
@@ -196,7 +218,16 @@ func (e WorkloadGenerator) generateDeltasOndemand(
 		return nil, nil, model.XdsLogDetails{}, false, nil
 	}
 	addrs, removed := e.Server.Env.ServiceDiscovery.AddressInformation(addresses)
-	addrs = maybeFilterAddresses(proxy, addrs)
+	addrs, filteredOut := e.maybeFilterAddresses(proxy, addrs)
+	// Add the filtered out items to the removed set
+	if len(filteredOut) > 0 {
+		if removed == nil {
+			removed = sets.New[string]()
+		}
+		for _, addr := range filteredOut {
+			removed.Insert(addr.ResourceName())
+		}
+	}
 	// Note: while "removed" is a weird name for a resource that never existed, this is how the spec works:
 	// https://www.envoyproxy.io/docs/envoy/latest/api-docs/xds_protocol#id2
 	have := sets.New[string]()

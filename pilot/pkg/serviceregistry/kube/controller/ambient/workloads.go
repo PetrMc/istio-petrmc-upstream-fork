@@ -62,6 +62,7 @@ import (
 // Workloads can come from a variety of sources; these are joined together to build one complete `Collection[WorkloadInfo]`.
 func (a *index) WorkloadsCollection(
 	pods krt.Collection[*v1.Pod],
+	k8sNodes krt.Collection[*v1.Node],
 	nodes krt.Collection[Node],
 	meshConfig krt.Singleton[MeshConfig],
 	authorizationPolicies krt.Collection[model.WorkloadAuthorization],
@@ -77,6 +78,12 @@ func (a *index) WorkloadsCollection(
 ) krt.Collection[model.WorkloadInfo] {
 	WorkloadServicesNamespaceIndex := krt.NewNamespaceIndex(workloadServices)
 	EndpointSlicesByIPIndex := endpointSliceAddressIndex(endpointSlices)
+	// Workloads coming from nodes. There should be one workload for each node.
+	NodeWorkloads := krt.NewCollection(
+		k8sNodes,
+		a.nodeWorkloadBuilder(workloadServices),
+		opts.WithName("NodeWorkloads")...,
+	)
 	// Workloads coming from pods. There should be one workload for each (running) Pod.
 	PodWorkloads := krt.NewCollection(
 		pods,
@@ -140,6 +147,7 @@ func (a *index) WorkloadsCollection(
 			ServiceEntryWorkloads,
 			EndpointSliceWorkloads,
 			NetworkGatewayWorkloads,
+			NodeWorkloads,
 		},
 		// Each collection has its own unique UID as the key. This guarantees an object can exist in only a single collection
 		// This enables us to use the JoinUnchecked optimization.
@@ -680,6 +688,7 @@ func workloadEntryWorkloadBuilder(
 		// SOLO override namespace before applying waypoint and policy
 		var wasPeerObject bool
 		wle, wasPeerObject = convertWENamespace(wle)
+		nodePortPeering := wle.GetLabels()[peering.NodePeerClusterLabel] != ""
 
 		meshCfg := krt.FetchOne(ctx, meshConfig.AsCollection())
 		policies := buildWorkloadPolicies(ctx, authorizationPolicies, peerAuths, meshCfg, wle.Labels, wle.Namespace)
@@ -691,6 +700,12 @@ func workloadEntryWorkloadBuilder(
 			// This is a peering object, so this WE is a pointer to a remote cluster. Attach to the global service
 			svc := wle.Labels[peering.ParentServiceLabel]
 			svcKey := fmt.Sprintf("%s/%s.%s%s", wle.Namespace, svc, wle.Namespace, peering.DomainSuffix)
+			if nodePortPeering {
+				// this is  a WE for nodeport peering,
+				// logical ns is the (parent) e/w gw service ns and
+				// hostname is the e/w gw service account and remote networ
+				svcKey = fmt.Sprintf("%s/%s.%s%s", wle.Labels[peering.ParentServiceNamespaceLabel], svc, wle.Spec.Network, peering.DomainSuffix)
+			}
 			services = krt.Fetch(ctx, workloadServices, krt.FilterKey(svcKey), krt.FilterGeneric(func(a any) bool {
 				return a.(model.ServiceInfo).Source.Kind == kind.ServiceEntry
 			}))
@@ -738,6 +753,10 @@ func workloadEntryWorkloadBuilder(
 		}
 		if wle.Annotations[peering.ServiceEndpointStatus] == peering.ServiceEndpointStatusUnhealthy {
 			w.Status = workloadapi.WorkloadStatus_UNHEALTHY
+		}
+		if wasPeerObject && nodePortPeering {
+			// override trust domain for nodeport gateway services since trust domain is for e/w gateway on remote network
+			w.TrustDomain = getNetworkGatewayTrustDomain(ctx, network, networkGateways, gatewaysByNetwork)
 		}
 		if wle.Spec.Weight > 0 {
 			w.Capacity = wrappers.UInt32(wle.Spec.Weight)
@@ -886,6 +905,67 @@ func convertSENamespace(se *networkingclient.ServiceEntry) (*networkingclient.Se
 		return cpy, true
 	}
 	return se, false
+}
+
+func getNodeAddresses(n *v1.Node) [][]byte {
+	addresses := make([][]byte, 0)
+	for _, a := range n.Status.Addresses {
+		if a.Type == v1.NodeInternalIP || a.Type == v1.NodeExternalIP {
+			n, err := netip.ParseAddr(a.Address)
+			if err != nil {
+				log.Errorf("failed to parse node address %s: %v", a.Address, err)
+				continue
+			}
+			addresses = append(addresses, n.AsSlice())
+		}
+	}
+	return addresses
+}
+
+func (a *index) nodeWorkloadBuilder(workloadServices krt.Collection[model.ServiceInfo]) krt.TransformationSingle[*v1.Node, model.WorkloadInfo] {
+	return func(ctx krt.HandlerContext, n *v1.Node) *model.WorkloadInfo {
+		// pull nodeport info
+		// TODO (conradhanson): fetchone panics if more than one item is found, handle differently?
+		nodeportServiceInfo := krt.FetchOne(ctx, workloadServices, krt.FilterGeneric(func(a any) bool {
+			return a.(model.ServiceInfo).HboneNodePort != 0
+		}))
+		if nodeportServiceInfo == nil {
+			return nil
+		}
+		ports := []*workloadapi.Port{
+			{
+				ServicePort: nodeportServiceInfo.HboneNodePort,
+				TargetPort:  model.HBoneInboundListenPort,
+			},
+		}
+		serviceAccount := nodeportServiceInfo.Service.Name
+		labels := n.GetLabels()
+
+		w := &model.WorkloadInfo{
+			Workload: &workloadapi.Workload{
+				Uid:       generateNodeUID(a.ClusterID, n),
+				Name:      n.Name,
+				Node:      n.Name,
+				Addresses: getNodeAddresses(n),
+				Locality: &workloadapi.Locality{
+					Region:  labels[v1.LabelTopologyRegion],
+					Zone:    labels[v1.LabelTopologyZone],
+					Subzone: labels[labelutil.LabelTopologySubzone],
+				},
+				// assumption here is that e/w gw's SA is identical to its name
+				// as long as the e/w gw is provisioned by our istiod, which AFAIK is the only supported way to deploy an e/w gw
+				ServiceAccount: serviceAccount,
+				Services: map[string]*workloadapi.PortList{
+					fmt.Sprintf("%s/%s", nodeportServiceInfo.Service.Namespace, nodeportServiceInfo.Service.Hostname): {
+						Ports: ports,
+					},
+				},
+			},
+			Source:       kind.Node,
+			CreationTime: n.CreationTimestamp.Time,
+		}
+		return precomputeWorkloadPtr(w)
+	}
 }
 
 func podWorkloadBuilder(
@@ -1682,6 +1762,23 @@ func convertGateway(ctx krt.HandlerContext, meshConfig krt.Singleton[MeshConfig]
 	}
 
 	return precomputeWorkload(model.WorkloadInfo{Workload: wl})
+}
+
+func getNetworkGatewayTrustDomain(
+	ctx krt.HandlerContext,
+	n string,
+	networkGateways krt.Collection[NetworkGateway],
+	gatewaysByNetwork krt.Index[network.ID, NetworkGateway],
+) string {
+	// Currently only support one, so find the first one that is valid
+	for _, net := range LookupNetworkGateway(ctx, network.ID(n), networkGateways, gatewaysByNetwork) {
+		if net.HBONEPort == 0 {
+			continue
+		}
+		return net.TrustDomain
+	}
+
+	return ""
 }
 
 func getNetworkGatewayAddress(

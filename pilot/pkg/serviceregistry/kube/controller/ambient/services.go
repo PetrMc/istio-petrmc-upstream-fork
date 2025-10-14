@@ -37,6 +37,7 @@ import (
 	"istio.io/istio/pilot/pkg/util/protoconv"
 	"istio.io/istio/pkg/cluster"
 	"istio.io/istio/pkg/config"
+	"istio.io/istio/pkg/config/constants"
 	"istio.io/istio/pkg/config/host"
 	configkube "istio.io/istio/pkg/config/kube"
 	"istio.io/istio/pkg/config/protocol"
@@ -244,6 +245,23 @@ func serviceServiceBuilder(
 		soloScope := getServiceScope(ctx, namespaces, s)
 		svc := constructService(ctx, s, waypoint, serviceEntries, domainSuffix, soloScope, networkGetter)
 
+		// SOLO: handle nodeport gateway services for peering
+		var hboneNodePort uint32
+		isNodePortGateway := strings.EqualFold(s.GetAnnotations()[constants.SoloAnnotationPeeringDataPlaneServiceType], "nodeport")
+		if isNodePortGateway {
+			// when svc is a nodeport gateway, we need to declare the hbone nodeport
+			for _, p := range s.Spec.Ports {
+				// we only want to use hbone ports for nodeport gateway services
+				// bc we have no way to determine the hbone port when sending as Workload over xds
+				if !strings.Contains(strings.ToLower(p.Name), "hbone") {
+					continue
+				}
+				hboneNodePort = uint32(p.NodePort)
+				break
+			}
+		}
+		// SOLO end
+
 		svcInfo := &model.ServiceInfo{
 			Service:             svc,
 			PortNames:           portNames,
@@ -254,6 +272,7 @@ func serviceServiceBuilder(
 			Scope:               serviceScope,
 			TrafficDistribution: model.MaybeGetTrafficDistribution(s.Spec.TrafficDistribution, s.GetAnnotations()),
 			SoloServiceScope:    soloScope,
+			HboneNodePort:       hboneNodePort,
 		}
 		if precompute {
 			return precomputeServicePtr(svcInfo)

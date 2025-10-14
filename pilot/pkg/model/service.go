@@ -1210,6 +1210,9 @@ type ServiceInfo struct {
 	// AsAddress contains a pre-created AddressInfo representation. This ensures we do not need repeated conversions on
 	// the hotpath
 	AsAddress AddressInfo
+	// HboneNodePort is the node port for the hbone port.
+	// only used for nodeport gateway services.
+	HboneNodePort uint32
 }
 
 func (i ServiceInfo) GlobalService() bool {

@@ -28,6 +28,10 @@ import (
 	"istio.io/istio/pkg/workloadapi"
 )
 
+func generateNodeUID(clusterID cluster.ID, n *v1.Node) string {
+	return clusterID.String() + "//" + "Node/" + n.Name
+}
+
 func generatePodUID(clusterID cluster.ID, p *v1.Pod) string {
 	return clusterID.String() + "//" + "Pod/" + p.Namespace + "/" + p.Name
 }

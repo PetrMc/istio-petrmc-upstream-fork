@@ -411,6 +411,7 @@ func New(options Options) Index {
 	NodeLocality := NodesCollection(Nodes, opts.WithName("NodeLocality")...)
 	Workloads := a.WorkloadsCollection(
 		Pods,
+		Nodes,
 		NodeLocality,
 		a.meshConfig,
 		AuthorizationPolicies,

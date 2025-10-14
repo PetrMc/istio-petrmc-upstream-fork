@@ -1,0 +1,16 @@
+apiVersion: release-notes/v2
+
+kind: feature
+
+area: traffic-management
+
+issue:
+  - https://github.com/solo-io/istio/issues/2681
+
+releaseNotes:
+- |
+  **Added** support for peering via NodePort.
+    - Two annotations enable this feature:
+      - `peering.solo.io/data-plane-service-type: NodePort` on the istio-eastwest gateway resource, propagated to the corresponding k8s service
+      - `peering.solo.io/preferred-data-plane-service-type: NodePort` on the istio-remote gateway resource
+  

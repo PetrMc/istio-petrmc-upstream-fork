@@ -360,6 +360,9 @@ type NodeMetadata struct {
 	// PeeringMode, if true, requests server-side filtering for the peering use case
 	PeeringMode StringBool `json:"PEERING_MODE,omitempty"`
 
+	// PeeringNodesOnly, if true, requests server to only send node workloads
+	PeeringNodesOnly StringBool `json:"PEERING_NODES_ONLY,omitempty"`
+
 	// Contains a copy of the raw metadata. This is needed to lookup arbitrary values.
 	// If a value is known ahead of time it should be added to the struct rather than reading from here,
 	Raw map[string]any `json:"-"`

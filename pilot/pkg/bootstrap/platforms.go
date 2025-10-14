@@ -37,7 +37,7 @@ func (s *Server) initPeeringDiscovery(args *PilotArgs) {
 	if !licensing.CheckLicense(licensing.FeatureMultiCluster, features.EnablePeeringExplicitly) {
 		return
 	}
-	buildConfig := func(clientName string) *adsc.DeltaADSConfig {
+	buildConfig := func(clientName string, peeringNodesOnly bool) *adsc.DeltaADSConfig {
 		return &adsc.DeltaADSConfig{
 			Config: adsc.Config{
 				ClientName: clientName,
@@ -50,8 +50,9 @@ func (s *Server) initPeeringDiscovery(args *PilotArgs) {
 					// To reduce transported data if upstream server supports. Especially for custom servers.
 					IstioRevision: args.Revision,
 					// Hack to make `istioctl ps` show us... otherwise it is filtered
-					ProxyConfig: &model.NodeMetaProxyConfig{},
-					PeeringMode: true,
+					ProxyConfig:      &model.NodeMetaProxyConfig{},
+					PeeringMode:      true,
+					PeeringNodesOnly: model.StringBool(peeringNodesOnly),
 				}.ToStruct(),
 				GrpcOpts: []grpc.DialOption{
 					args.KeepaliveOptions.ConvertToClientOption(),

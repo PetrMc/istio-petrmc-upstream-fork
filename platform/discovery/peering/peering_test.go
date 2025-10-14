@@ -1865,12 +1865,16 @@ func NewCluster(t test.Failer, clusterName, networkName string) *Cluster {
 func newCluster(t test.Failer, premadeKubeClient kube.Client, stop chan struct{}, startWithOutage bool, clusterName, networkName string) *Cluster {
 	outage := NewOutageInjector()
 	outage.setOutage(startWithOutage)
-	buildConfig := func(clientName string) *adsc.DeltaADSConfig {
+	buildConfig := func(clientName string, peeringNodesOnly bool) *adsc.DeltaADSConfig {
 		return &adsc.DeltaADSConfig{
 			Config: adsc.Config{
 				ClientName: clientName,
 				Namespace:  "istio-system",
 				Workload:   clusterName,
+				Meta: model.NodeMetadata{
+					PeeringMode:      true,
+					PeeringNodesOnly: model.StringBool(peeringNodesOnly),
+				}.ToStruct(),
 				GrpcOpts: []grpc.DialOption{
 					grpc.WithStreamInterceptor(outage.Interceptor),
 					grpc.WithTransportCredentials(insecure.NewCredentials()),
