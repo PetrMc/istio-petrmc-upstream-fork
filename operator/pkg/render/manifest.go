@@ -224,6 +224,11 @@ func applyComponentValuesToHelmValues(comp component.Component, spec apis.Gatewa
 				_, isMap := v.(map[string]any)
 				if !isMap {
 					nv[k] = v
+				} else if k == "platforms" {
+					// Flatten platforms object for charts with FlattenValues=true
+					// This allows top-level platforms.peering.enabled to be accessible
+					// to charts like ztunnel that expect flattened values
+					nv[k] = v
 				}
 			}
 			for k, v := range cv {
