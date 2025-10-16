@@ -43,10 +43,16 @@ import (
 	apiistioioapinetworkingv1beta1 "istio.io/client-go/pkg/apis/networking/v1beta1"
 	apiistioioapisecurityv1 "istio.io/client-go/pkg/apis/security/v1"
 	apiistioioapitelemetryv1 "istio.io/client-go/pkg/apis/telemetry/v1"
+	solov1alpha1 "istio.io/istio/soloapi/v1alpha1"
 )
 
 func create(c kube.Client, cfg config.Config, objMeta metav1.ObjectMeta) (metav1.Object, error) {
 	switch cfg.GroupVersionKind {
+	case gvk.Segment:
+		return c.Solo().AdminV1alpha1().Segments(cfg.Namespace).Create(context.TODO(), &solov1alpha1.Segment{
+			ObjectMeta: objMeta,
+			Spec:       *(cfg.Spec.(*solov1alpha1.SegmentSpec)),
+		}, metav1.CreateOptions{})
 	case gvk.AuthorizationPolicy:
 		return c.Istio().SecurityV1().AuthorizationPolicies(cfg.Namespace).Create(context.TODO(), &apiistioioapisecurityv1.AuthorizationPolicy{
 			ObjectMeta: objMeta,
@@ -184,6 +190,11 @@ func create(c kube.Client, cfg config.Config, objMeta metav1.ObjectMeta) (metav1
 
 func update(c kube.Client, cfg config.Config, objMeta metav1.ObjectMeta) (metav1.Object, error) {
 	switch cfg.GroupVersionKind {
+	case gvk.Segment:
+		return c.Solo().AdminV1alpha1().Segments(cfg.Namespace).Update(context.TODO(), &solov1alpha1.Segment{
+			ObjectMeta: objMeta,
+			Spec:       *(cfg.Spec.(*solov1alpha1.SegmentSpec)),
+		}, metav1.UpdateOptions{})
 	case gvk.AuthorizationPolicy:
 		return c.Istio().SecurityV1().AuthorizationPolicies(cfg.Namespace).Update(context.TODO(), &apiistioioapisecurityv1.AuthorizationPolicy{
 			ObjectMeta: objMeta,
@@ -321,6 +332,11 @@ func update(c kube.Client, cfg config.Config, objMeta metav1.ObjectMeta) (metav1
 
 func updateStatus(c kube.Client, cfg config.Config, objMeta metav1.ObjectMeta) (metav1.Object, error) {
 	switch cfg.GroupVersionKind {
+	case gvk.Segment:
+		return c.Solo().AdminV1alpha1().Segments(cfg.Namespace).UpdateStatus(context.TODO(), &solov1alpha1.Segment{
+			ObjectMeta: objMeta,
+			Status:     *(cfg.Status.(*solov1alpha1.SegmentStatus)),
+		}, metav1.UpdateOptions{})
 	case gvk.AuthorizationPolicy:
 		return c.Istio().SecurityV1().AuthorizationPolicies(cfg.Namespace).UpdateStatus(context.TODO(), &apiistioioapisecurityv1.AuthorizationPolicy{
 			ObjectMeta: objMeta,
@@ -461,6 +477,21 @@ func patch(c kube.Client, orig config.Config, origMeta metav1.ObjectMeta, mod co
 		return nil, fmt.Errorf("gvk mismatch: %v, modified: %v", orig.GroupVersionKind, mod.GroupVersionKind)
 	}
 	switch orig.GroupVersionKind {
+	case gvk.Segment:
+		oldRes := &solov1alpha1.Segment{
+			ObjectMeta: origMeta,
+			Spec:       *(orig.Spec.(*solov1alpha1.SegmentSpec)),
+		}
+		modRes := &solov1alpha1.Segment{
+			ObjectMeta: modMeta,
+			Spec:       *(mod.Spec.(*solov1alpha1.SegmentSpec)),
+		}
+		patchBytes, err := genPatchBytes(oldRes, modRes, typ)
+		if err != nil {
+			return nil, err
+		}
+		return c.Solo().AdminV1alpha1().Segments(orig.Namespace).
+			Patch(context.TODO(), orig.Name, typ, patchBytes, metav1.PatchOptions{FieldManager: "pilot-discovery"})
 	case gvk.AuthorizationPolicy:
 		oldRes := &apiistioioapisecurityv1.AuthorizationPolicy{
 			ObjectMeta: origMeta,
@@ -862,6 +893,8 @@ func delete(c kube.Client, typ config.GroupVersionKind, name, namespace string, 
 		deleteOptions.Preconditions = &metav1.Preconditions{ResourceVersion: resourceVersion}
 	}
 	switch typ {
+	case gvk.Segment:
+		return c.Solo().AdminV1alpha1().Segments(namespace).Delete(context.TODO(), name, deleteOptions)
 	case gvk.AuthorizationPolicy:
 		return c.Istio().SecurityV1().AuthorizationPolicies(namespace).Delete(context.TODO(), name, deleteOptions)
 	case gvk.BackendTLSPolicy:
@@ -920,6 +953,25 @@ func delete(c kube.Client, typ config.GroupVersionKind, name, namespace string, 
 }
 
 var translationMap = map[config.GroupVersionKind]func(r runtime.Object) config.Config{
+	gvk.Segment: func(r runtime.Object) config.Config {
+		obj := r.(*solov1alpha1.Segment)
+		return config.Config{
+			Meta: config.Meta{
+				GroupVersionKind:  gvk.Segment,
+				Name:              obj.Name,
+				Namespace:         obj.Namespace,
+				Labels:            obj.Labels,
+				Annotations:       obj.Annotations,
+				ResourceVersion:   obj.ResourceVersion,
+				CreationTimestamp: obj.CreationTimestamp.Time,
+				OwnerReferences:   obj.OwnerReferences,
+				UID:               string(obj.UID),
+				Generation:        obj.Generation,
+			},
+			Spec:   &obj.Spec,
+			Status: &obj.Status,
+		}
+	},
 	gvk.AuthorizationPolicy: func(r runtime.Object) config.Config {
 		obj := r.(*apiistioioapisecurityv1.AuthorizationPolicy)
 		return config.Config{

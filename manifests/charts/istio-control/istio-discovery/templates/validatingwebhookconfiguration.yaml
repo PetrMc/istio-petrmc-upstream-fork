@@ -39,6 +39,7 @@ webhooks:
           - networking.istio.io
           - telemetry.istio.io
           - extensions.istio.io
+          - admin.solo.io
         apiVersions:
           - "*"
         resources:

@@ -8,9 +8,16 @@
 package shared
 
 import (
+	"fmt"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
+
 	apiannotation "istio.io/api/annotation"
 	"istio.io/api/label"
+	"istio.io/istio/pkg/test/framework"
 	"istio.io/istio/pkg/test/framework/components/ambient"
+	"istio.io/istio/pkg/test/framework/components/cluster"
 	"istio.io/istio/pkg/test/framework/components/echo"
 	"istio.io/istio/pkg/test/framework/components/echo/common/ports"
 	"istio.io/istio/pkg/test/framework/components/echo/deployment"
@@ -167,7 +174,12 @@ func SetupApps(t resource.Context, apps *EchoDeployments, nsServiceScope bool) e
 
 			err := t.ConfigKube(c).Eval(
 				apps.Namespace.Name(),
-				map[string]string{"service": svc, "cluster": c.Name(), "namespace": apps.Namespace.Name()},
+				map[string]string{
+					"service":   svc,
+					"cluster":   c.Name(),
+					"namespace": apps.Namespace.Name(),
+					"segment":   "default", // TODO test segments
+				},
 				`apiVersion: gateway.networking.k8s.io/v1beta1
 kind: HTTPRoute
 metadata:
@@ -176,7 +188,7 @@ spec:
   parentRefs:
   - group: "networking.istio.io"
     kind: ServiceEntry
-    name: autogen.{{.namespace}}.{{.service}}
+    name: {{if eq .segment "default"}}autogen.{{.namespace}}.{{.service}}{{else}}autogen.{{.segment}}.{{.namespace}}.{{.service}}{{end}}
     sectionName: "80"
   rules:
   - filters:
@@ -199,6 +211,106 @@ spec:
 		}
 	}
 
+	return nil
+}
+
+func SetLabelForTest(
+	t framework.TestContext,
+	namespace string,
+	label string,
+	value string,
+	clusters ...cluster.Cluster,
+) {
+	targetClusters := clusters
+	if len(targetClusters) == 0 {
+		targetClusters = t.Clusters()
+	}
+
+	for _, c := range targetClusters {
+		// The segment label needs to be on the istio-system namespace
+		// Use kubectl patch to add the label without creating a new namespace resource
+		_, err := c.Kube().CoreV1().Namespaces().Patch(
+			t.Context(),
+			namespace,
+			types.MergePatchType,
+			[]byte(fmt.Sprintf(`{"metadata":{"labels":{"%s":"%s"}}}`, label, value)),
+			metav1.PatchOptions{})
+		if err != nil {
+			t.Fatalf("Failed to label istio-system namespace with segment %s on cluster %s: %v",
+				value, c.Name(), err)
+		}
+
+		// Add cleanup to remove the label
+		t.Cleanup(func() {
+			_, err := c.Kube().CoreV1().Namespaces().Patch(
+				t.Context(),
+				namespace,
+				types.MergePatchType,
+				[]byte(fmt.Sprintf(`{"metadata":{"labels":{"%s":null}}}`, label)),
+				metav1.PatchOptions{})
+			if err != nil {
+				t.Logf("Failed to remove segment label from istio-system namespace on cluster %s: %v",
+					c.Name(), err)
+			}
+		})
+	}
+}
+
+// SetupHTTPRoutesForSegment creates HTTPRoutes for waypoint services with the given segment and domain
+func SetupHTTPRoutesForSegment(t resource.Context, namespace namespace.Instance, segment, domain string, clusters ...cluster.Cluster) error {
+	if segment == "" {
+		segment = "default"
+	}
+	if domain == "" {
+		domain = peering.DomainSuffix[1:] // Remove leading dot
+	}
+
+	targetClusters := clusters
+	if len(targetClusters) == 0 {
+		targetClusters = t.Clusters()
+	}
+
+	for _, c := range targetClusters {
+		for _, svc := range []string{ServiceLocalWaypoint, ServiceRemoteWaypoint, ServiceCrossNetworkOnlyWaypoint, ServiceAllWaypoint} {
+			err := t.ConfigKube(c).Eval(
+				namespace.Name(),
+				map[string]string{
+					"service":   svc,
+					"cluster":   c.Name(),
+					"namespace": namespace.Name(),
+					"segment":   segment,
+					"domain":    domain,
+				},
+				`apiVersion: gateway.networking.k8s.io/v1beta1
+kind: HTTPRoute
+metadata:
+  name: mark-header-{{.service}}-{{.segment}}
+spec:
+  parentRefs:
+  - group: "networking.istio.io"
+    kind: ServiceEntry
+    name: {{if eq .segment "default"}}autogen.{{.namespace}}.{{.service}}{{else}}autogen.{{.segment}}.{{.namespace}}.{{.service}}{{end}}
+    sectionName: "80"
+  rules:
+  - filters:
+    - type: RequestHeaderModifier
+      requestHeaderModifier:
+        add:
+        - name: x-istio-clusters
+          value: {{.cluster}}
+        - name: x-istio-workload
+          value: "%ENVIRONMENT(HOSTNAME)%"
+    backendRefs:
+    - name: {{.service}}.{{.namespace}}.{{.domain}}
+      kind: Hostname
+      group: networking.istio.io
+      port: 80`,
+			).Apply(apply.CleanupConditionally)
+			if err != nil {
+				return err
+			}
+		}
+	}
 	return nil
 }
 

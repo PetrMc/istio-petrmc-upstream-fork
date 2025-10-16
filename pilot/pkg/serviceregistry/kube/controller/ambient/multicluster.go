@@ -305,6 +305,7 @@ func (a *index) buildGlobalCollections(
 		GlobalWorkloadServicesWithCluster,
 		GobalWorkloadServicesWithClusterByCluster,
 		GlobalNetworks,
+		options.SystemNamespace,
 		options.ClusterID,
 		options.Flags,
 		options.DomainSuffix,

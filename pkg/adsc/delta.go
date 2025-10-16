@@ -621,6 +621,24 @@ func (c *Client) drop(parent resourceKey) {
 	}
 
 	if _, f := c.tree[parent]; f {
+		// SOLO: If this is a Segment resource and the server doesn't support it,
+		// log a warning instead of fataling. This supports backward compatibility with
+		// older Istio versions that don't have Segment support.
+		if parent.TypeURL == "type.googleapis.com/istio.workload.Segment" {
+			c.log.Warnf("Server doesn't support Segment resources, will use default segment")
+			delete(c.tree, parent)
+			// Mark as received so sync can complete
+			c.markReceived(parent)
+			// Notify the handler that the resource is not supported (send EventDelete)
+			// Create a fake resource to trigger the handler
+			ctx := &handlerContext{}
+			fakeResource := &discovery.Resource{
+				Name:    parent.Name,
+				Version: "",
+			}
+			_ = c.trigger(ctx, parent.TypeURL, fakeResource, EventDelete) // nolint: errcheck
+			return
+		}
 		c.log.Fatalf("Failed to drop resource: unrelate should have handled this: %v", c.dumpTree())
 	}
 }

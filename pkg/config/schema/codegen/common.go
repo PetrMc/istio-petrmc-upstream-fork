@@ -36,6 +36,8 @@ func Run() error {
 		return err
 	}
 
+	addSolo(&inp)
+
 	// Include synthetic types used for XDS pushes
 	kindEntries := append([]colEntry{
 		{
@@ -141,4 +143,37 @@ func applyTemplate(tmpl string, i any) (string, error) {
 	}
 
 	return b.String(), nil
+}
+
+// TODO consider not generating and ussing kclient.Register
+func addSolo(inp *inputs) {
+	// add solo types
+	inp.Packages = append(inp.Packages,
+		packageImport{
+			PackageName: "istio.io/istio/soloapi/v1alpha1",
+			ImportName:  "solov1alpha1",
+		},
+	)
+	soloEntries := []colEntry{
+		{
+			Resource: &ast.Resource{
+				Identifier: "Segment",
+				Plural:     "segments",
+				Group:      "admin.solo.io",
+				Version:    "v1alpha1",
+				Kind:       "Segment",
+
+				Validate: "validation.ValidateSegment",
+			},
+			ClientImport:           "solov1alpha1",
+			StatusImport:           "solov1alpha1", // same as spec
+			IstioAwareClientImport: "solov1alpha1",
+			ClientGroupPath:        "AdminV1alpha1",
+			ClientGetter:           "Solo",
+			ClientTypePath:         "Segments",
+			SpecType:               "SegmentSpec",
+			StatusType:             "SegmentStatus",
+		},
+	}
+	inp.Entries = append(soloEntries, inp.Entries...)
 }

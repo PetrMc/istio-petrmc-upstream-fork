@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"go.uber.org/atomic"
+	"google.golang.org/protobuf/proto"
 	"k8s.io/apimachinery/pkg/types"
 
 	"istio.io/istio/pilot/pkg/status"
@@ -21,8 +22,14 @@ import (
 	"istio.io/istio/pkg/workloadapi"
 )
 
+const ClusterSegmentResourceName = "cluster-segment"
+
 type peerCluster struct {
 	queue controllers.Queue
+
+	// this peerCluster's view of the localNetwork at creation time
+	// if it would change, we must re-init this peerCluster
+	localNetwork networkid.ID
 
 	networkName networkid.ID
 	clusterID   cluster.ID
@@ -33,6 +40,8 @@ type peerCluster struct {
 
 	federatedServices krt.StaticCollection[RemoteFederatedService]
 	workloads         krt.StaticCollection[RemoteWorkload]
+	segmentInfo       *workloadapi.Segment
+	segmentResolved   chan struct{}
 
 	synced    *atomic.Bool
 	connected *atomic.Bool
@@ -65,12 +74,22 @@ func (s *peerCluster) resync() {
 	})
 }
 
+func (s *peerCluster) IsFlat() bool {
+	return EnableFlatNetworks && s.networkName == s.localNetwork
+}
+
 func (s *peerCluster) HasSynced() bool {
 	return s.synced.Load()
 }
 
 func (s *peerCluster) IsConnected() bool {
 	return s.connected.Load()
+}
+
+func (s *peerCluster) GetSegmentInfo() *workloadapi.Segment {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.segmentInfo
 }
 
 func newPeerCluster(
@@ -100,6 +119,8 @@ func newPeerCluster(
 	log.Infof("starting cluster watch to %v", gateway.Address)
 
 	c := &peerCluster{
+		localNetwork: localNetwork,
+
 		clusterID:         gateway.Cluster,
 		networkName:       gateway.Network,
 		stop:              stop,
@@ -109,6 +130,7 @@ func newPeerCluster(
 		synced:            atomic.NewBool(false),
 		connected:         atomic.NewBool(false),
 		locality:          gateway.Locality,
+		segmentResolved:   make(chan struct{}),
 	}
 
 	federatedServiceAdscHandler := adsc.Register(func(
@@ -165,13 +187,98 @@ func newPeerCluster(
 			c.workloads.DeleteObject(resourceName)
 		}
 	})
+	segmentHandler := adsc.Register(func(
+		ctx adsc.HandlerContext,
+		resourceName string,
+		resourceVersion string,
+		val *workloadapi.Segment,
+		event adsc.Event,
+	) {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		select {
+		case <-stop:
+			// We are stopped, do not process any events
+			return
+		default:
+		}
+
+		// Special case: If we get an EventDelete for the Segment watch itself (not a specific segment),
+		// it means the server doesn't support Segment resources at all (backwards compat with older Istio versions).
+		// This happens when we try to watch "cluster-segment" but the server doesn't support the Segment type.
+		if event == adsc.EventDelete && (resourceName == "" || resourceName == ClusterSegmentResourceName) && val == nil {
+			log.Warnf("cluster %s doesn't support Segment resources, using default segment", c.clusterID)
+			if c.segmentInfo == nil {
+				// Create default segment info
+				c.segmentInfo = &workloadapi.Segment{
+					Name:   "default",
+					Domain: strings.TrimPrefix(DomainSuffix, "."),
+				}
+				// Mark as resolved
+				select {
+				case <-c.segmentResolved:
+					// Already closed
+				default:
+					close(c.segmentResolved)
+				}
+				// Queue a Cluster event for reconciliation
+				c.queue.Add(typedNamespace{
+					NamespacedName: types.NamespacedName{Name: c.clusterID.String()},
+					kind:           Cluster,
+				})
+			}
+			return
+		}
+
+		if val == nil {
+			return
+		}
+		switch event {
+		case adsc.EventAdd:
+			changed := false
+			wasNil := c.segmentInfo == nil
+			if wasNil || !proto.Equal(c.segmentInfo, val) {
+				changed = true
+			}
+			c.segmentInfo = val
+
+			// Mark segment as resolved on first receipt
+			if wasNil {
+				select {
+				case <-c.segmentResolved:
+					// Already closed
+				default:
+					close(c.segmentResolved)
+					log.Infof("received segment info from cluster %s: segment=%s, domain=%s",
+						c.clusterID, val.GetName(), val.GetDomain())
+				}
+			}
+
+			// Queue a Cluster event for reconciliation
+			if changed {
+				c.queue.Add(typedNamespace{
+					NamespacedName: types.NamespacedName{Name: c.clusterID.String()},
+					kind:           Cluster,
+				})
+			}
+		case adsc.EventDelete:
+			// ignore deletes - if the remote segment changes we only care about the latest Add
+		}
+	})
 
 	handlers := []adsc.Option{
 		federatedServiceAdscHandler,
 		adsc.Watch[*workloadapi.FederatedService]("*"),
-		workloadsAdscHandler,
-		adsc.Watch[*workloadapi.Workload]("*"),
+		segmentHandler,
+		adsc.Watch[*workloadapi.Segment](ClusterSegmentResourceName),
 	}
+
+	// Always watch workloads, as we need NodePort based workloads
+	// even when using multi-network. Filtering is done server side,
+	// so we won't get Pod workloads unless we're flat network.
+	handlers = append(handlers,
+		workloadsAdscHandler,
+		adsc.Watch[*workloadapi.Workload]("*"))
 
 	cfg.ConnectionEventHandler = func(event adsc.ConnectionEvent, reason string) {
 		switch event {
@@ -190,12 +297,31 @@ func newPeerCluster(
 	c.xds = adsc.NewDelta(gateway.Address, cfg, handlers...)
 	go c.run()
 	go func() {
+		// First, wait for initial XDS sync
 		select {
 		case <-c.xds.Synced():
 		case <-stop:
 			return
 		}
-		log.Infof("sync complete")
+		log.Infof("XDS sync complete, waiting for segment info...")
+
+		// Wait for segment info to be resolved (either received or explicitly not supported)
+		select {
+		case <-c.segmentResolved:
+			// Segment info has been resolved - either we received it or server doesn't support it
+			c.mu.Lock()
+			segmentInfo := c.segmentInfo
+			c.mu.Unlock()
+			if segmentInfo != nil && segmentInfo.Name != "" {
+				log.Infof("segment info received for cluster %s: segment=%s", c.clusterID, segmentInfo.Name)
+			} else {
+				log.Infof("cluster %s using default segment", c.clusterID)
+			}
+		case <-stop:
+			return
+		}
+
+		log.Infof("cluster %s sync complete", c.clusterID)
 		c.synced.Store(true)
 		statusUpdateFunc()
 		c.federatedServices.Register(serviceHandler)

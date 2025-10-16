@@ -7,6 +7,7 @@ import "k8s.io/apimachinery/pkg/runtime/schema"
 var (
 	ServiceExport                  = schema.GroupVersionResource{Group: "multicluster.x-k8s.io", Version: "v1alpha1", Resource: "serviceexports"}
 	ServiceImport                  = schema.GroupVersionResource{Group: "multicluster.x-k8s.io", Version: "v1alpha1", Resource: "serviceimports"}
+	Segment                        = schema.GroupVersionResource{Group: "admin.solo.io", Version: "v1alpha1", Resource: "segments"}
 	AuthorizationPolicy            = schema.GroupVersionResource{Group: "security.istio.io", Version: "v1", Resource: "authorizationpolicies"}
 	AuthorizationPolicy_v1beta1    = schema.GroupVersionResource{Group: "security.istio.io", Version: "v1beta1", Resource: "authorizationpolicies"}
 	BackendTLSPolicy               = schema.GroupVersionResource{Group: "gateway.networking.k8s.io", Version: "v1", Resource: "backendtlspolicies"}
@@ -90,6 +91,8 @@ func IsClusterScoped(g schema.GroupVersionResource) bool {
 	case ServiceExport:
 		return false
 	case ServiceImport:
+		return false
+	case Segment:
 		return false
 	case AuthorizationPolicy:
 		return false

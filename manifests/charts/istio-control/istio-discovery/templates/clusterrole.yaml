@@ -175,6 +175,11 @@ rules:
     resources: ["inferencepools/status"]
     verbs: ["update", "patch"]
 
+  # SOLO - Access our Segment CRD
+  - apiGroups: ["admin.solo.io"]
+    resources: ["segments"]
+    verbs: ["get", "watch", "list"]
+
   # Needed for multicluster secret reading, possibly ingress certs in the future
   - apiGroups: [""]
     resources: ["secrets"]

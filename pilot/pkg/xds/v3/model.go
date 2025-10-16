@@ -36,6 +36,7 @@ const (
 	WorkloadAuthorizationType  = model.WorkloadAuthorizationType
 
 	FederatedServiceType = model.FederatedServiceType
+	SegmentType          = model.SegmentType
 
 	// nolint
 	HttpProtocolOptionsType = "envoy.extensions.upstreams.http.v3.HttpProtocolOptions"

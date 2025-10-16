@@ -1,0 +1,13 @@
+apiVersion: release-notes/v2
+
+kind: feature
+
+area: traffic-management
+
+issue:
+  - https://github.com/solo-io/istio/issues/3126
+
+releaseNotes:
+- |
+  **Added** a new CRD, `Segment` allowing clusters to declare a custom domain suffix
+  and allow addressing individual groups of clusters.

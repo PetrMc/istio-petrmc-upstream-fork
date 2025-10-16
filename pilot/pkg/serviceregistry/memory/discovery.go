@@ -64,6 +64,8 @@ type ServiceDiscovery struct {
 
 	// Single mutex for now - it's for debug only.
 	mutex sync.Mutex
+
+	model.NoopAmbientIndexes
 }
 
 var (

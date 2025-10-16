@@ -60,6 +60,7 @@ import (
 	"istio.io/istio/pkg/util/sets"
 	"istio.io/istio/pkg/workloadapi"
 	"istio.io/istio/pkg/workloadapi/security"
+	soloapi "istio.io/istio/soloapi/v1alpha1"
 )
 
 // Service describes an Istio service (e.g., catalog.mystore.com:8080)
@@ -1000,6 +1001,9 @@ type AmbientIndexes interface {
 
 	// HACK: we want to get notified of any Global Waypoints in the peering controller
 	FederatedWaypoints() krt.Collection[krt.Named]
+
+	// GetSegmentInfo returns the Segment information for this cluster
+	GetSegmentInfo() *SegmentInfo
 }
 
 // WaypointKey is a multi-address extension of NetworkAddress which is commonly used for lookups in AmbientIndex
@@ -1106,10 +1110,32 @@ func (u NoopAmbientIndexes) ServicesWithWaypoint(string) []ServiceWaypointInfo {
 	return nil
 }
 
+func (u NoopAmbientIndexes) GetSegmentInfo() *SegmentInfo {
+	return nil
+}
+
 var _ AmbientIndexes = NoopAmbientIndexes{}
 
 type FederatedService struct {
 	*workloadapi.FederatedService
+}
+
+// SegmentInfo wraps the Segment API resource and provides helper methods
+type SegmentInfo struct {
+	*soloapi.Segment
+}
+
+// DomainSuffix returns the domain suffix with a leading dot (e.g. ".mesh.internal")
+// Returns empty string if no segment is configured (caller should use peering.DomainSuffix as fallback)
+func (s *SegmentInfo) DomainSuffix() string {
+	if s == nil || s.Segment == nil || s.Segment.Spec.Domain == "" {
+		return ""
+	}
+	domain := s.Segment.Spec.Domain
+	if len(domain) > 0 && domain[0] != '.' {
+		return "." + domain
+	}
+	return domain
 }
 
 func (s FederatedService) ResourceName() string {

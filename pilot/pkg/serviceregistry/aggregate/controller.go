@@ -104,6 +104,19 @@ func (c *Controller) WorkloadsForWaypoint(key model.WaypointKey) []model.Workloa
 	return res
 }
 
+func (c *Controller) GetSegmentInfo() *model.SegmentInfo {
+	if !features.EnableAmbient {
+		return nil
+	}
+	for _, p := range c.GetRegistries() {
+		// Only return segment info from the local cluster/config cluster
+		if p.Cluster() == c.configClusterID && p.Provider() == provider.Kubernetes {
+			return p.GetSegmentInfo()
+		}
+	}
+	return nil
+}
+
 func (c *Controller) AdditionalPodSubscriptions(proxy *model.Proxy, addr, cur sets.String) sets.String {
 	if !features.EnableAmbient {
 		return nil

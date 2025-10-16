@@ -40,10 +40,13 @@ import (
 	apiistioioapinetworkingv1beta1 "istio.io/client-go/pkg/apis/networking/v1beta1"
 	apiistioioapisecurityv1 "istio.io/client-go/pkg/apis/security/v1"
 	apiistioioapitelemetryv1 "istio.io/client-go/pkg/apis/telemetry/v1"
+	solov1alpha1 "istio.io/istio/soloapi/v1alpha1"
 )
 
 func GetWriteClient[T runtime.Object](c ClientGetter, namespace string) ktypes.WriteAPI[T] {
 	switch any(ptr.Empty[T]()).(type) {
+	case *solov1alpha1.Segment:
+		return c.Solo().AdminV1alpha1().Segments(namespace).(ktypes.WriteAPI[T])
 	case *apiistioioapisecurityv1.AuthorizationPolicy:
 		return c.Istio().SecurityV1().AuthorizationPolicies(namespace).(ktypes.WriteAPI[T])
 	case *sigsk8siogatewayapiapisv1.BackendTLSPolicy:
@@ -147,6 +150,8 @@ func GetWriteClient[T runtime.Object](c ClientGetter, namespace string) ktypes.W
 
 func GetClient[T, TL runtime.Object](c ClientGetter, namespace string) ktypes.ReadWriteAPI[T, TL] {
 	switch any(ptr.Empty[T]()).(type) {
+	case *solov1alpha1.Segment:
+		return c.Solo().AdminV1alpha1().Segments(namespace).(ktypes.ReadWriteAPI[T, TL])
 	case *apiistioioapisecurityv1.AuthorizationPolicy:
 		return c.Istio().SecurityV1().AuthorizationPolicies(namespace).(ktypes.ReadWriteAPI[T, TL])
 	case *sigsk8siogatewayapiapisv1.BackendTLSPolicy:
@@ -250,6 +255,8 @@ func GetClient[T, TL runtime.Object](c ClientGetter, namespace string) ktypes.Re
 
 func gvrToObject(g schema.GroupVersionResource) runtime.Object {
 	switch g {
+	case gvr.Segment:
+		return &solov1alpha1.Segment{}
 	case gvr.AuthorizationPolicy:
 		return &apiistioioapisecurityv1.AuthorizationPolicy{}
 	case gvr.BackendTLSPolicy:
@@ -356,6 +363,13 @@ func getInformerFiltered(c ClientGetter, opts ktypes.InformerOptions, g schema.G
 	var w func(options metav1.ListOptions) (watch.Interface, error)
 
 	switch g {
+	case gvr.Segment:
+		l = func(options metav1.ListOptions) (runtime.Object, error) {
+			return c.Solo().AdminV1alpha1().Segments(opts.Namespace).List(context.Background(), options)
+		}
+		w = func(options metav1.ListOptions) (watch.Interface, error) {
+			return c.Solo().AdminV1alpha1().Segments(opts.Namespace).Watch(context.Background(), options)
+		}
 	case gvr.AuthorizationPolicy:
 		l = func(options metav1.ListOptions) (runtime.Object, error) {
 			return c.Istio().SecurityV1().AuthorizationPolicies(opts.Namespace).List(context.Background(), options)

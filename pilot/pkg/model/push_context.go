@@ -483,6 +483,8 @@ const (
 	ClusterUpdate TriggerReason = "cluster"
 	// TagUpdate occurs when the revision's tags change, and all resources must be recalculated.
 	TagUpdate TriggerReason = "tag"
+	// SegmentUpdate describes a push triggered by a Segment change
+	SegmentUpdate TriggerReason = "segment"
 )
 
 // Merge two update requests together

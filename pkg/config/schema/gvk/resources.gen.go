@@ -11,6 +11,7 @@ import (
 )
 
 var (
+	Segment                        = config.GroupVersionKind{Group: "admin.solo.io", Version: "v1alpha1", Kind: "Segment"}
 	AuthorizationPolicy            = config.GroupVersionKind{Group: "security.istio.io", Version: "v1", Kind: "AuthorizationPolicy"}
 	AuthorizationPolicy_v1beta1    = config.GroupVersionKind{Group: "security.istio.io", Version: "v1beta1", Kind: "AuthorizationPolicy"}
 	BackendTLSPolicy               = config.GroupVersionKind{Group: "gateway.networking.k8s.io", Version: "v1", Kind: "BackendTLSPolicy"}
@@ -92,6 +93,8 @@ var (
 // ToGVR converts a GVK to a GVR.
 func ToGVR(g config.GroupVersionKind) (schema.GroupVersionResource, bool) {
 	switch g {
+	case Segment:
+		return gvr.Segment, true
 	case AuthorizationPolicy:
 		return gvr.AuthorizationPolicy, true
 	case AuthorizationPolicy_v1beta1:
@@ -251,6 +254,8 @@ func ToGVR(g config.GroupVersionKind) (schema.GroupVersionResource, bool) {
 
 func ToKind(g config.GroupVersionKind) (kind.Kind, bool) {
 	switch g {
+	case Segment:
+		return kind.Segment, true
 	case AuthorizationPolicy:
 		return kind.AuthorizationPolicy, true
 	case BackendTLSPolicy:
@@ -377,6 +382,8 @@ func MustToGVR(g config.GroupVersionKind) schema.GroupVersionResource {
 // FromGVR converts a GVR to a GVK.
 func FromGVR(g schema.GroupVersionResource) (config.GroupVersionKind, bool) {
 	switch g {
+	case gvr.Segment:
+		return Segment, true
 	case gvr.AuthorizationPolicy:
 		return AuthorizationPolicy, true
 	case gvr.BackendTLSPolicy:

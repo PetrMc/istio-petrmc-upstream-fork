@@ -43,3 +43,6 @@ istioctl-install: istioctl-install-container
 .PHONY: coverage
 coverage:
 	prow/coverage.sh
+
+
+-include soloapi/Makefile.soloapi.mk

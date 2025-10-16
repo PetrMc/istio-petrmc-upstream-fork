@@ -35,9 +35,25 @@ import (
 	"istio.io/istio/pkg/config/schema/resource"
 	"istio.io/istio/pkg/config/validation"
 	"istio.io/istio/pkg/config/validation/envoyfilter"
+	solov1alpha1 "istio.io/istio/soloapi/v1alpha1"
 )
 
 var (
+	Segment = resource.Builder{
+		Identifier:  "Segment",
+		Group:       "admin.solo.io",
+		Kind:        "Segment",
+		Plural:      "segments",
+		Version:     "v1alpha1",
+		Proto:       "",
+		ReflectType: reflect.TypeOf(&solov1alpha1.SegmentSpec{}).Elem(), StatusType: reflect.TypeOf(&solov1alpha1.SegmentStatus{}).Elem(),
+		ProtoPackage:  "",
+		ClusterScoped: false,
+		Synthetic:     false,
+		Builtin:       false,
+		ValidateProto: validation.ValidateSegment,
+	}.MustBuild()
+
 	AuthorizationPolicy = resource.Builder{
 		Identifier: "AuthorizationPolicy",
 		Group:      "security.istio.io",
@@ -848,6 +864,7 @@ var (
 
 	// All contains all collections in the system.
 	All = collection.NewSchemasBuilder().
+		MustAdd(Segment).
 		MustAdd(AuthorizationPolicy).
 		MustAdd(BackendTLSPolicy).
 		MustAdd(CertificateSigningRequest).

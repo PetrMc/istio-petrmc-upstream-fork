@@ -108,7 +108,7 @@ func TestBinarySizes(t *testing.T) {
 		// For now, having two small a range will result in lots of "merge conflicts"
 		"istioctl":        {60, 105},
 		"pilot-agent":     {20, 27},
-		"pilot-discovery": {60, 125},
+		"pilot-discovery": {60, 130},
 		"bug-report":      {60, 80},
 		"client":          {15, 30},
 		"server":          {15, 30},

@@ -176,13 +176,15 @@ func fetchRemoteWaypointForServiceEntry(
 		// If this value is `"true"` or not a hostname, ParseAutogenHostname will reject it.
 		wpAutogenHost = o.Labels[peering.RemoteWaypointLabel]
 	}
-
-	wpName, wpNs, ok := peering.ParseAutogenHostname(wpAutogenHost)
+	wpName, wpNs, _, ok := peering.ParseAutogenHostnameGuessDomain(wpAutogenHost)
 	if !ok {
+		// no waypoint configured
 		return nil, nil
 	}
 
-	wpSeName := fmt.Sprintf("%s/autogen.%s.%s", peering.PeeringNamespace, wpNs, wpName)
+	segmentName := o.Labels[peering.SegmentLabel]
+
+	wpSeName := fmt.Sprintf("%s/%s", peering.PeeringNamespace, peering.ServiceEntryName(wpName, wpNs, segmentName))
 	wpSe := ptr.Flatten(krt.FetchOne(ctx, serviceEntries, krt.FilterKey(wpSeName)))
 	if wpSe == nil || len(wpSe.Spec.GetHosts()) == 0 {
 		return nil, &model.StatusMessage{

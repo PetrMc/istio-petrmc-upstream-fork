@@ -10,6 +10,7 @@ package shared
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -30,17 +31,27 @@ import (
 type TrafficContext struct {
 	framework.TestContext
 	Apps EchoDeployments
+
+	// DomainSuffix overrides the default peering.DomainSuffix (mesh.internal) when set
+	DomainSuffix string
 }
 
-func globalName(serviceName string, appsNs namespace.Instance) string {
+func GlobalNameWithSuffix(serviceName string, appsNs namespace.Instance, domainSuffix string) string {
 	if serviceName == ServiceGlobalTakeover || serviceName == ServiceRemoteOnlyTakeover {
 		return fmt.Sprintf("%s.%s.svc.cluster.local", serviceName, appsNs.Name())
 	}
-	return fmt.Sprintf("%s.%s%s", serviceName, appsNs.Name(), peering.DomainSuffix)
+	if domainSuffix == "" {
+		domainSuffix = peering.DomainSuffix[1:] // Remove leading dot
+	}
+	return fmt.Sprintf("%s.%s.%s", serviceName, appsNs.Name(), domainSuffix)
+}
+
+func HitAllClusters(t framework.TestContext) echo.Checker {
+	return check.ReachedClusters(t.Clusters(), t.Clusters())
 }
 
 func hitAllClusters(t framework.TestContext) echo.Checker {
-	return check.ReachedClusters(t.Clusters(), t.Clusters())
+	return HitAllClusters(t)
 }
 
 var (
@@ -48,23 +59,32 @@ var (
 	hitRemoteNetworkCluster = check.Cluster(RemoteNetworkCluster)
 )
 
-func hitRemoteClusters(t framework.TestContext) echo.Checker {
+func HitRemoteClusters(t framework.TestContext) echo.Checker {
 	return check.ReachedClusters(t.Clusters(), t.Clusters().Exclude(
 		t.Clusters().GetByName(LocalCluster),
 	))
 }
 
-func hitRemoteNetwork(t framework.TestContext) echo.Checker {
+func hitRemoteClusters(t framework.TestContext) echo.Checker {
+	return HitRemoteClusters(t)
+}
+
+func HitRemoteNetwork(t framework.TestContext) echo.Checker {
 	return check.ReachedClusters(
 		t.Clusters(),
 		cluster.Clusters{t.Clusters().GetByName(RemoteNetworkCluster)},
 	)
 }
 
-func testFromZtunnel(t TrafficContext) {
+func hitRemoteNetwork(t framework.TestContext) echo.Checker {
+	return HitRemoteNetwork(t)
+}
+
+func TestFromZtunnel(t TrafficContext) {
 	client := t.Apps.LocalApp[0]
 	appsNs := t.Apps.Namespace
 	localWaypoint := t.Apps.LocalWaypoint.Instances().ForCluster(LocalCluster)[0]
+	domainSuffix := t.DomainSuffix
 
 	callWorkload := func(service echo.Instance, c echo.Checker) {
 		t.Helper()
@@ -87,13 +107,17 @@ func testFromZtunnel(t TrafficContext) {
 	call := func(name string, c echo.Checker) {
 		t.Helper()
 		t.NewSubTestf("to %v", name).Run(func(t framework.TestContext) {
+			if name == ServiceRemoteOnlyTakeover && domainSuffix != defaultDomain {
+				// TODO remove skip when 57782 merges in upstream istio
+				t.Skip("https://github.com/istio/istio/pull/57782")
+			}
 			if c == nil {
 				c = check.Error()
 			} else {
 				c = check.And(c, DestinationWorkload(name))
 			}
 			client.CallOrFail(t, echo.CallOptions{
-				Address: globalName(name, appsNs),
+				Address: GlobalNameWithSuffix(name, appsNs, domainSuffix),
 				Port:    echo.Port{ServicePort: 80},
 				Scheme:  scheme.HTTP,
 				Count:   25,
@@ -132,9 +156,10 @@ func testFromZtunnel(t TrafficContext) {
 	callWorkload(localWaypoint, check.And(check.OK(), hitLocalCluster, IsL7()))
 }
 
-func testFromSidecar(t TrafficContext) {
+func TestFromSidecar(t TrafficContext) {
 	client := t.Apps.Sidecar[0]
 	appsNs := t.Apps.Namespace
+	domainSuffix := t.DomainSuffix
 
 	call := func(name string, c echo.Checker) {
 		t.Helper()
@@ -145,7 +170,7 @@ func testFromSidecar(t TrafficContext) {
 				c = check.And(c, DestinationWorkload(name))
 			}
 			client.CallOrFail(t, echo.CallOptions{
-				Address: globalName(name, appsNs),
+				Address: GlobalNameWithSuffix(name, appsNs, domainSuffix),
 				Port:    echo.Port{ServicePort: 80},
 				Scheme:  scheme.HTTP,
 				Count:   10,
@@ -186,15 +211,25 @@ func testFromSidecar(t TrafficContext) {
 	call(ServiceSidecar, check.And(check.OK(), hitAllClusters(t)))
 }
 
-func testFromGateway(t TrafficContext) {
+func TestFromGateway(t TrafficContext) {
 	apps := t.Apps
+	domainSuffix := t.DomainSuffix
+	if domainSuffix == "" {
+		domainSuffix = peering.DomainSuffix[1:]
+	}
+
+	// Add a suffix to resource names if using a custom domain to avoid conflicts
+	nameSuffix := ""
+	if t.DomainSuffix != "" && t.DomainSuffix != peering.DomainSuffix[1:] {
+		nameSuffix = "-segment"
+	}
 
 	// Setup GW for
-	cb := t.ConfigIstio().YAML(apps.Namespace.Name(), `
+	cb := t.ConfigIstio().YAML(apps.Namespace.Name(), fmt.Sprintf(`
 apiVersion: networking.istio.io/v1
 kind: Gateway
 metadata:
-  name: gateway
+  name: gateway%s
 spec:
   selector:
     istio: ingressgateway
@@ -204,32 +239,43 @@ spec:
       name: http
       protocol: HTTP
     hosts:
-    - "*"
-`)
+    - "*.%s" # global
+    - "*.svc.cluster.local" # global takeover
+`, nameSuffix, domainSuffix))
 
 	for _, svc := range AllServices {
+		// For global-takeover, the destination should always be .svc.cluster.local
+		destHost := GlobalNameWithSuffix(svc, apps.Namespace, t.DomainSuffix)
+		if svc == ServiceGlobalTakeover {
+			destHost = fmt.Sprintf("%s.%s.svc.cluster.local", svc, apps.Namespace.Name())
+		}
+
 		cb.Eval(apps.Namespace.Name(), map[string]string{
-			"name": svc,
-			"host": globalName(svc, apps.Namespace),
+			"name":        svc,
+			"nameSuffix":  nameSuffix,
+			"host":        GlobalNameWithSuffix(svc, apps.Namespace, t.DomainSuffix),
+			"destHost":    destHost,
+			"gatewayName": "gateway" + nameSuffix,
 		}, `apiVersion: networking.istio.io/v1alpha3
 kind: VirtualService
 metadata:
-  name: {{.name}}
+  name: {{.name}}{{.nameSuffix}}
 spec:
   hosts:
   - "{{.host}}"
   gateways:
-  - gateway
+  - {{.gatewayName}}
   http:
   - route:
     - destination:
-        host: "{{.host}}"
+        host: "{{.destHost}}"
         port:
           number: 80
 `)
 	}
 	cb.ApplyOrFail(t)
 	defaultIngress := istio.DefaultIngressOrFail(t, t)
+	domainSuffixForCall := t.DomainSuffix
 	call := func(t framework.TestContext, name string, c echo.Checker) {
 		t.Helper()
 		t.NewSubTestf("to %v", name).Run(func(t framework.TestContext) {
@@ -239,7 +285,7 @@ spec:
 				c = check.And(c, DestinationWorkload(name))
 			}
 			defaultIngress.CallOrFail(t, echo.CallOptions{
-				Address: globalName(name, apps.Namespace),
+				Address: GlobalNameWithSuffix(name, apps.Namespace, domainSuffixForCall),
 				Port:    echo.Port{ServicePort: 80},
 				Scheme:  scheme.HTTP,
 				Count:   10,
@@ -350,37 +396,77 @@ func RestartDeployment(t framework.TestContext, name, ns string) {
 	}
 }
 
-func applyDrainingWorkaround(t TrafficContext) {
+func ApplyDrainingWorkaround(t TrafficContext) {
+	domainSuffix := t.DomainSuffix
+	if domainSuffix == "" {
+		domainSuffix = peering.DomainSuffix[1:]
+	}
 	// Workaround https://github.com/istio/istio/issues/43239
-	t.ConfigIstio().YAML(t.Apps.Namespace.Name(), `apiVersion: networking.istio.io/v1
+	t.ConfigIstio().YAML(t.Apps.Namespace.Name(), fmt.Sprintf(`apiVersion: networking.istio.io/v1
 kind: DestinationRule
 metadata:
   name: single-request
 spec:
-  host: '*.mesh.internal'
+  host: '*.%s'
   trafficPolicy:
     connectionPool:
       http:
-        maxRequestsPerConnection: 1`).ApplyOrFail(t)
+        maxRequestsPerConnection: 1`, domainSuffix)).ApplyOrFail(t)
 }
+
+func applyDrainingWorkaround(t TrafficContext) {
+	ApplyDrainingWorkaround(t)
+}
+
+var defaultDomain = strings.TrimPrefix(peering.DomainSuffix, ".")
 
 func RunAllTrafficTests(t framework.TestContext, apps *EchoDeployments) {
 	if apps == nil {
 		t.Errorf("apps must be set and deployed before running traffic tests")
 	}
-	RunCase := func(name string, f func(t TrafficContext)) {
+	RunCase := func(t framework.TestContext, name string, domainSuffix string, f func(t TrafficContext)) {
 		t.NewSubTest(name).Run(func(t framework.TestContext) {
-			f(TrafficContext{TestContext: t, Apps: *apps})
+			f(TrafficContext{TestContext: t, Apps: *apps, DomainSuffix: domainSuffix})
 		})
 	}
-	RunCase("test-from-ztunnel", testFromZtunnel)
-	RunCase("test-from-sidecar", testFromSidecar)
-	RunCase("test-from-gateway", testFromGateway)
+
+	// Use the default domain suffix (mesh.internal)
+	RunCase(t, "test-from-ztunnel", defaultDomain, TestFromZtunnel)
+	RunCase(t, "test-from-sidecar", defaultDomain, TestFromSidecar)
+	RunCase(t, "test-from-gateway", defaultDomain, TestFromGateway)
+
+	t.NewSubTest("single segment").Run(func(t framework.TestContext) {
+		segmentName := "test-segment"
+		segmentDomain := "test.mesh"
+
+		// put all clusters on the same segment
+		CreateSegmentOrFail(t, segmentName, segmentDomain)
+		UseSegmentForTest(t, segmentName)
+
+		// Setup HTTPRoutes for the segment
+		if err := SetupHTTPRoutesForSegment(t, apps.Namespace, segmentName, segmentDomain); err != nil {
+			t.Fatalf("Failed to setup HTTPRoutes for segment: %v", err)
+		}
+
+		// Wait for config propagation
+		time.Sleep(5 * time.Second)
+
+		// tests are unchanged except we send traffic to `test.mesh` instead of `mesh.internal`
+		RunCase(t, "test-from-ztunnel", segmentDomain, TestFromZtunnel)
+		RunCase(t, "test-from-sidecar", segmentDomain, TestFromSidecar)
+		RunCase(t, "test-from-gateway", segmentDomain, TestFromGateway)
+	})
+
+	// TODO test multi-segment
 
 	t.NewSubTest("namespace-service-scope_traffic-tests").Run(func(t framework.TestContext) {
+		// setting the scope via SetupApps only works on Creation, and we want it
+		// to unset after this subtest scope.
+		SetLabelForTest(t, apps.Namespace.Name(), peering.ServiceScopeLabel, peering.ServiceScopeGlobal)
+
 		SetupApps(t, apps, true)
-		RunCase("test-from-ztunnel", testFromZtunnel)
-		RunCase("test-from-sidecar", testFromSidecar)
-		RunCase("test-from-gateway", testFromGateway)
+		RunCase(t, "test-from-ztunnel", defaultDomain, TestFromZtunnel)
+		RunCase(t, "test-from-sidecar", defaultDomain, TestFromSidecar)
+		RunCase(t, "test-from-gateway", defaultDomain, TestFromGateway)
 	})
 }

@@ -25,6 +25,17 @@ enum ServiceScope {
   GLOBAL_ONLY = 1;
 }
 
+// Segment allows this cluster to tell peers its own segment and domain.
+// Peers will use this to build domains for global services.
+// Peers must have a Segment resource in their own cluster with a matching name and domain,
+// otherwide we will not peer resources.
+message Segment {
+  // name of the segment (globally)
+  string name = 1;
+  // domain suffix for the segment (in the view of this cluster)
+  string domain = 2;
+}
+
 message FederatedService {
   // Name represents the name for the service.
   // For Kubernetes, this is the Service name.

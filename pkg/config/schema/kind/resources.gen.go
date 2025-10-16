@@ -41,6 +41,7 @@ const (
 	ReferenceGrant
 	RequestAuthentication
 	Secret
+	Segment
 	Service
 	ServiceAccount
 	ServiceEntry
@@ -135,6 +136,8 @@ func (k Kind) String() string {
 		return "RequestAuthentication"
 	case Secret:
 		return "Secret"
+	case Segment:
+		return "Segment"
 	case Service:
 		return "Service"
 	case ServiceAccount:
@@ -248,6 +251,8 @@ func FromString(s string) Kind {
 		return RequestAuthentication
 	case "Secret":
 		return Secret
+	case "Segment":
+		return Segment
 	case "Service":
 		return Service
 	case "ServiceAccount":

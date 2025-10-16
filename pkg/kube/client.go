@@ -99,6 +99,8 @@ import (
 	"istio.io/istio/pkg/sleep"
 	"istio.io/istio/pkg/test/util/yml"
 	"istio.io/istio/pkg/version"
+	soloapi "istio.io/istio/soloapi/client/clientset/versioned"
+	soloapifake "istio.io/istio/soloapi/client/clientset/versioned/fake"
 )
 
 const (
@@ -127,6 +129,9 @@ type Client interface {
 
 	// Istio returns the Istio kube client.
 	Istio() istioclient.Interface
+
+	// Solo returns the Solo kube client.
+	Solo() soloapi.Interface
 
 	// GatewayAPI returns the gateway-api kube client.
 	GatewayAPI() gatewayapiclient.Interface
@@ -316,6 +321,10 @@ func NewFakeClient(objects ...runtime.Object) CLIClient {
 	c.gatewayapiinference = setupFakeClient(gatewayapiinferencefake.NewSimpleClientset(), "inference", objects)
 	c.extSet = extfake.NewClientset()
 
+	// SOLO
+	c.solo = setupFakeClient(soloapifake.NewSimpleClientset(), "solo", objects)
+	// END SOLO
+
 	// https://github.com/kubernetes/kubernetes/issues/95372
 	// There is a race condition in the client fakes, where events that happen between the List and Watch
 	// of an informer are dropped. To avoid this, we explicitly manage the list and watch, ensuring all lists
@@ -361,6 +370,7 @@ func NewFakeClient(objects ...runtime.Object) CLIClient {
 		c.gatewayapiinference.(*gatewayapiinferencefake.Clientset),
 		c.dynamic.(*dynamicfake.FakeDynamicClient),
 		c.metadata.(*metadatafake.FakeMetadataClient),
+		c.solo.(*soloapifake.Clientset),
 	} {
 		fc.PrependReactor("list", "*", listReactor)
 		fc.PrependWatchReactor("*", watchReactor(fc.Tracker()))
@@ -405,6 +415,8 @@ type client struct {
 	istio               istioclient.Interface
 	gatewayapi          gatewayapiclient.Interface
 	gatewayapiinference gatewayapiinferenceclient.Interface
+
+	solo soloapi.Interface
 
 	started atomic.Bool
 	// If enabled, will wait for cache syncs with extremely short delay. This should be used only for tests
@@ -492,6 +504,13 @@ func newClientInternal(clientFactory *clientFactory, opts ...ClientOption) (*cli
 	if err != nil {
 		return nil, err
 	}
+
+	// SOLO
+	c.solo, err = soloapi.NewForConfig(c.config)
+	if err != nil {
+		return nil, err
+	}
+	// END SOLO
 
 	c.http = &http.Client{}
 	if c.config != nil && c.config.Timeout != 0 {
@@ -611,6 +630,10 @@ func (c *client) Metadata() metadata.Interface {
 
 func (c *client) Istio() istioclient.Interface {
 	return c.istio
+}
+
+func (c *client) Solo() soloapi.Interface {
+	return c.solo
 }
 
 func (c *client) GatewayAPI() gatewayapiclient.Interface {

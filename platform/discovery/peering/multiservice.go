@@ -34,7 +34,7 @@ func (sw serviceForWorkload) federatedName() string {
 
 // mergedServicesForWorkload grabs all the Services that this workload
 // is a part of and merged selectors that would otherwise fully overlap (subsets)
-func (c *NetworkWatcher) mergedServicesForWorkload(workload *RemoteWorkload) []servicesForWorkload {
+func (c *NetworkWatcher) mergedServicesForWorkload(workload *RemoteWorkload, segment, domainSuffix string) []servicesForWorkload {
 	var unmerged []servicesForWorkload
 	for s, servicePorts := range workload.Services {
 		// we want to find something like 'ns/name.ns.mesh.internal'
@@ -43,7 +43,7 @@ func (c *NetworkWatcher) mergedServicesForWorkload(workload *RemoteWorkload) []s
 			// not a valid service?
 			continue
 		}
-		nsname, _, ok := strings.Cut(hostname, DomainSuffix)
+		nsname, _, ok := strings.Cut(hostname, "."+domainSuffix)
 		if !ok {
 			// Not a peering service
 			continue
@@ -88,6 +88,7 @@ func (c *NetworkWatcher) mergedServicesForWorkload(workload *RemoteWorkload) []s
 		// object in and won't get selected
 		labels[ParentServiceNamespaceLabel] = svcNs
 		labels[ParentServiceLabel] = svcName
+		labels[SegmentLabel] = segment
 
 		// maybe inherit scope from local service
 		// even though this isn't used in the selector, we need the permutations

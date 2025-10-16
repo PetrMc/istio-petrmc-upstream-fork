@@ -66,6 +66,7 @@ func (e WorkloadGenerator) GenerateDeltas(
 	}
 	addrs, removed := e.Server.Env.ServiceDiscovery.AddressInformation(reqAddresses)
 	addrs, filteredOut := e.maybeFilterAddresses(proxy, addrs)
+	// Add the filtered out items to the removed set
 	if len(filteredOut) > 0 {
 		if removed == nil {
 			removed = sets.New[string]()
@@ -102,6 +103,13 @@ func (e WorkloadGenerator) maybeFilterAddresses(proxy *model.Proxy, addrs []mode
 	if !proxy.Metadata.PeeringMode {
 		return addrs, nil
 	}
+	// Get the federated domain suffix from the segment info
+	segmentInfo := e.Server.Env.ServiceDiscovery.GetSegmentInfo()
+	federatedDomainSuffix := segmentInfo.DomainSuffix()
+	if federatedDomainSuffix == "" {
+		// Fallback to default peering domain suffix
+		federatedDomainSuffix = peering.DomainSuffix
+	}
 
 	var removed []model.AddressInfo
 	kept := slices.FilterInPlace(addrs, func(info model.AddressInfo) bool {
@@ -127,7 +135,7 @@ func (e WorkloadGenerator) maybeFilterAddresses(proxy *model.Proxy, addrs []mode
 		for k := range wl.Services {
 			// format: ns/name.ns.domain
 
-			if strings.HasSuffix(k, peering.DomainSuffix) {
+			if strings.HasSuffix(k, federatedDomainSuffix) {
 				// note: we do not return a modified object since they are premarshalled. The client can just ignore the other services.
 				return true
 			}

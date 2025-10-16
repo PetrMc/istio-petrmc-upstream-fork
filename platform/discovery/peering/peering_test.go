@@ -53,6 +53,7 @@ import (
 	"istio.io/istio/pkg/test/util/assert"
 	"istio.io/istio/pkg/test/util/retry"
 	"istio.io/istio/platform/discovery/peering"
+	soloapi "istio.io/istio/soloapi/v1alpha1"
 )
 
 func TestPeering(t *testing.T) {
@@ -358,6 +359,7 @@ func TestPeering(t *testing.T) {
 				Labels: map[string]string{
 					peering.ParentServiceLabel:          "local-only",
 					peering.ParentServiceNamespaceLabel: "default",
+					peering.SegmentLabel:                "default",
 
 					// local service has everything copied
 					label.IoIstioUseWaypoint.Name: "waypoint",
@@ -375,6 +377,7 @@ func TestPeering(t *testing.T) {
 				Labels: map[string]string{
 					peering.ParentServiceLabel:          "svc1",
 					peering.ParentServiceNamespaceLabel: "default",
+					peering.SegmentLabel:                "default",
 					// svc1 is network local, use the global copy so we use all waypoint instances on the network
 					peering.RemoteWaypointLabel:    "true",
 					peering.UseGlobalWaypointLabel: "waypoint.default.mesh.internal",
@@ -392,6 +395,7 @@ func TestPeering(t *testing.T) {
 				Labels: map[string]string{
 					peering.ParentServiceLabel:          "svc2",
 					peering.ParentServiceNamespaceLabel: "default",
+					peering.SegmentLabel:                "default",
 					// svc2 doesn't exist on the network, skip proc but don't use network local waypoint instances
 					peering.RemoteWaypointLabel: "true",
 					peering.ServiceScopeLabel:   peering.ServiceScopeCluster,
@@ -404,6 +408,7 @@ func TestPeering(t *testing.T) {
 					peering.ParentServiceLabel:          "waypoint",
 					peering.ParentServiceNamespaceLabel: "default",
 					peering.ServiceScopeLabel:           peering.ServiceScopeCluster,
+					peering.SegmentLabel:                "default",
 				},
 			},
 		}
@@ -607,7 +612,7 @@ func TestPeering(t *testing.T) {
 		c1k := kube.NewFakeClient()
 		initialStop := make(chan struct{})
 		// Peering will stop when we trigger it, kube client will run for as long as the test
-		c1 := newCluster(t, c1k, initialStop, false, "c1", "c1")
+		c1 := newCluster(t, c1k, initialStop, false, "c1", "c1", true)
 		fullStop := test.NewStop(t)
 		c1k.RunAndWait(fullStop)
 
@@ -690,7 +695,7 @@ func TestPeering(t *testing.T) {
 
 		secondStop := make(chan struct{})
 		// c1 reconnects, but with a simulated an outage against c2
-		c1 = newCluster(t, c1k, secondStop, true, "c1", "c1")
+		c1 = newCluster(t, c1k, secondStop, true, "c1", "c1", true)
 		c1k.RunAndWait(fullStop)
 		// We should NOT clean things up
 		AssertWE(
@@ -754,7 +759,7 @@ func TestPeering(t *testing.T) {
 		// c1 reconnects, but no longer connected
 		c1.DisconnectFrom(c2)
 		thirdStop := make(chan struct{})
-		c1 = newCluster(t, c1k, thirdStop, false, "c1", "c1")
+		c1 = newCluster(t, c1k, thirdStop, false, "c1", "c1", true)
 		c1k.RunAndWait(fullStop)
 		// We should cleanup everything
 		AssertWE(c1)
@@ -795,6 +800,7 @@ func TestPeering(t *testing.T) {
 		AssertWE(c1, DesiredWE{Name: c2Svc1Name, Locality: c2.Locality()})
 		lbls := map[string]string{
 			"app":                               "svc1",
+			peering.SegmentLabel:                "default",
 			peering.ParentServiceLabel:          "svc1",
 			peering.ServiceScopeLabel:           peering.ServiceScopeGlobal,
 			peering.ParentServiceNamespaceLabel: "default",
@@ -822,6 +828,7 @@ func TestPeering(t *testing.T) {
 			peering.ParentServiceLabel:          "svc1",
 			peering.ServiceScopeLabel:           peering.ServiceScopeGlobal,
 			peering.ParentServiceNamespaceLabel: "default",
+			peering.SegmentLabel:                peering.DefaultSegmentName,
 		}
 		AssertSELabels(c1, defaultSvc1Name, seLbls)
 		weLbls := map[string]string{
@@ -830,6 +837,7 @@ func TestPeering(t *testing.T) {
 			peering.ServiceScopeLabel:           peering.ServiceScopeGlobal,
 			peering.ParentServiceNamespaceLabel: "default",
 			peering.SourceClusterLabel:          "c2",
+			peering.SegmentLabel:                peering.DefaultSegmentName,
 			model.TunnelLabel:                   model.TunnelHTTP,
 		}
 		AssertWELabels(c1, c2Svc1Name, weLbls)
@@ -955,13 +963,15 @@ func TestPeering(t *testing.T) {
 		c3.CreateService("svc1", true, nil)
 		c3.CreatePod("svc1", "pod2", "2.3.4.5")
 
+		waitForSegmentInfoSync(t, c1, c2, c3)
+
 		AssertWE(c1,
 			// aggregated ew gw with gateway locality
-			DesiredWE{Name: "autogen.c2.default.svc1", Locality: "region-c2/zone-c2/subzone-c2"},
+			DesiredWE{Name: "autogen.c2.default.svc1", Locality: "region-c2/zone-c2"},
 			// aggregated ew gw with gateway locality
-			DesiredWE{Name: "autogen.c3.default.svc1", Locality: "region-c3/zone-c3/subzone-c3"},
+			DesiredWE{Name: "autogen.c3.default.svc1", Locality: "region-c3/zone-c3"},
 			// direct to pod with gateway locality
-			DesiredWE{Name: "autogenflat.c2.default.pod1.f2396f15c5c2", Address: "1.2.3.4", Locality: "region-c2/zone-c2/subzone-c2"},
+			DesiredWE{Name: "autogenflat.c2.default.pod1.f2396f15c5c2", Address: "1.2.3.4", Locality: "region-c2/zone-c2"},
 			// direct to pod with custom locality
 			DesiredWE{
 				Name:     "autogenflat.c2.default.pod-locality.f2396f15c5c2",
@@ -978,8 +988,8 @@ func TestPeering(t *testing.T) {
 		c2.DeletePod("pod1")
 		c1.Outage.setOutage(false)
 		AssertWE(c1,
-			DesiredWE{Name: "autogen.c2.default.svc1", Locality: "region-c2/zone-c2/subzone-c2"},
-			DesiredWE{Name: "autogen.c3.default.svc1", Locality: "region-c3/zone-c3/subzone-c3"},
+			DesiredWE{Name: "autogen.c2.default.svc1", Locality: "region-c2/zone-c2"},
+			DesiredWE{Name: "autogen.c3.default.svc1", Locality: "region-c3/zone-c3"},
 			// pod remains with gateway locality
 			DesiredWE{
 				Name:     "autogenflat.c2.default.pod-locality.f2396f15c5c2",
@@ -989,10 +999,12 @@ func TestPeering(t *testing.T) {
 		)
 		AssertSE(c1, DesiredSE{Name: "autogen.default.svc1"})
 
-		// Delete services
+		// Delete services from the flat-network cluster
 		c2.DeleteService("svc1")
 		AssertWE(c1,
-			DesiredWE{Name: "autogen.c3.default.svc1", Locality: "region-c3/zone-c3/subzone-c3"},
+			// cross network autogen. WE stays
+			DesiredWE{Name: "autogen.c3.default.svc1", Locality: "region-c3/zone-c3"},
+			// flat network WE (both autogen. and autogenflat.) are gone
 		)
 		AssertSE(c1, DesiredSE{Name: "autogen.default.svc1"})
 
@@ -1015,14 +1027,14 @@ func TestPeering(t *testing.T) {
 		c2.CreateSidecarPod("svc1", "pod2", "4.3.2.1")
 
 		AssertWE(c1,
-			DesiredWE{Name: c2Svc1Name, Locality: "region-c2/zone-c2/subzone-c2"},
-			DesiredWE{Name: "autogenflat.c2.default.pod2.f2396f15c5c2", Address: "4.3.2.1", Locality: "region-c2/zone-c2/subzone-c2", NonHBONE: true},
+			DesiredWE{Name: c2Svc1Name, Locality: "region-c2/zone-c2"},
+			DesiredWE{Name: "autogenflat.c2.default.pod2.f2396f15c5c2", Address: "4.3.2.1", Locality: "region-c2/zone-c2", NonHBONE: true},
 		)
 		AssertSE(c1, DesiredSE{Name: "autogen.default.svc1"})
 
 		AssertWE(c2,
-			DesiredWE{Name: "autogen.c1.default.svc1", Locality: "region-c1/zone-c1/subzone-c1"},
-			DesiredWE{Name: "autogenflat.c1.default.pod1.f2396f15c5c2", Address: "1.2.3.4", Locality: "region-c1/zone-c1/subzone-c1"},
+			DesiredWE{Name: "autogen.c1.default.svc1", Locality: "region-c1/zone-c1"},
+			DesiredWE{Name: "autogenflat.c1.default.pod1.f2396f15c5c2", Address: "1.2.3.4", Locality: "region-c1/zone-c1"},
 		)
 		AssertSE(c2, DesiredSE{Name: "autogen.default.svc1"})
 	})
@@ -1044,11 +1056,10 @@ func TestPeering(t *testing.T) {
 		// istio-remote locality labels changed
 		c2.RegionOverride = "updated-region"
 		c2.ZoneOverride = "updated-zone"
-		c2.SubzoneOverride = "updated-subzone"
 		c1.ConnectTo(c2)
 
 		// workload entry gets updated locality
-		AssertWE(c1, DesiredWE{Name: "autogen.c2.default.svc2", Locality: "updated-region/updated-zone/updated-subzone"})
+		AssertWE(c1, DesiredWE{Name: "autogen.c2.default.svc2", Locality: "updated-region/updated-zone"})
 	})
 
 	t.Run("Re-generate resources", func(t *testing.T) {
@@ -1076,7 +1087,7 @@ func TestPeering(t *testing.T) {
 		flatc2pod := "autogenflat.c2.default.pod1.59f156dddd24"
 		AssertWE(c1, DesiredWE{Name: c2Svc1Name, Locality: c2.Locality()},
 			DesiredWE{Name: c2Svc2Name, Locality: c2.Locality()},
-			DesiredWE{Name: flatc2pod, Address: "1.2.3.4", Locality: "region-c2/zone-c2/subzone-c2"},
+			DesiredWE{Name: flatc2pod, Address: "1.2.3.4", Locality: "region-c2/zone-c2"},
 			DesiredWE{Name: "autogenflat.c2.default.pod-locality.59f156dddd24", Address: "1.2.3.5", Locality: "custom-region/custom-zone"},
 		)
 		AssertSE(c1, DesiredSE{Name: defaultSvc1Name}, DesiredSE{Name: defaultSvc2Name}, DesiredSE{Name: "se1"})
@@ -1114,7 +1125,7 @@ func TestPeering(t *testing.T) {
 		c1.WorkloadEntries.Delete(c2Svc1Name, peering.PeeringNamespace)
 		AssertWE(c1, DesiredWE{Name: c2Svc1Name, Locality: c2.Locality()},
 			DesiredWE{Name: c2Svc2Name, Locality: c2.Locality()},
-			DesiredWE{Name: "autogenflat.c2.default.pod1.59f156dddd24", Address: "1.2.3.4", Locality: "region-c2/zone-c2/subzone-c2"},
+			DesiredWE{Name: "autogenflat.c2.default.pod1.59f156dddd24", Address: "1.2.3.4", Locality: "region-c2/zone-c2"},
 			DesiredWE{Name: "autogenflat.c2.default.pod-locality.59f156dddd24", Address: "1.2.3.5", Locality: "custom-region/custom-zone"},
 		)
 
@@ -1133,7 +1144,7 @@ func TestPeering(t *testing.T) {
 		c1.WorkloadEntries.Delete(flatc2pod, peering.PeeringNamespace)
 		AssertWE(c1, DesiredWE{Name: c2Svc1Name, Locality: c2.Locality()},
 			DesiredWE{Name: c2Svc2Name, Locality: c2.Locality()},
-			DesiredWE{Name: "autogenflat.c2.default.pod1.59f156dddd24", Address: "1.2.3.4", Locality: "region-c2/zone-c2/subzone-c2"},
+			DesiredWE{Name: "autogenflat.c2.default.pod1.59f156dddd24", Address: "1.2.3.4", Locality: "region-c2/zone-c2"},
 			DesiredWE{Name: "autogenflat.c2.default.pod-locality.59f156dddd24", Address: "1.2.3.5", Locality: "custom-region/custom-zone"},
 		)
 
@@ -1167,6 +1178,306 @@ func TestPeering(t *testing.T) {
 		AssertSEHosts(c2, defaultSvc1Name, []string{
 			"svc1.default.mesh.internal", // federated service hostname
 		})
+	})
+
+	t.Run("segment validation", func(t *testing.T) {
+		// create two clusters
+		c1 := NewCluster(t, "c1", "c1")
+		c2 := NewCluster(t, "c2", "c2")
+
+		// create just the _local_ segment CRs for each cluster
+		c1FooSegment := &soloapi.Segment{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "foo",
+				Namespace: "istio-system",
+			},
+			Spec: soloapi.SegmentSpec{
+				Domain: "foo.internal",
+			},
+		}
+		c2BarSegment := &soloapi.Segment{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "bar",
+				Namespace: "istio-system",
+			},
+			Spec: soloapi.SegmentSpec{
+				Domain: "bar.internal",
+			},
+		}
+
+		// tell c1 to use foo segment
+		clienttest.NewWriter[*soloapi.Segment](c1.t, c1.Kube).CreateOrUpdate(c1FooSegment)
+		c1.UseSegment("foo")
+
+		// tell c2 to use bar segment
+		clienttest.NewWriter[*soloapi.Segment](c2.t, c2.Kube).CreateOrUpdate(c2BarSegment)
+		c2.UseSegment("bar")
+
+		retry.UntilSuccessOrFail(t, func() error {
+			if c1.Discovery.Env().ServiceDiscovery.GetSegmentInfo().GetName() != "foo" {
+				return fmt.Errorf("c1 segment not set: got %q", c1.Discovery.Env().ServiceDiscovery.GetSegmentInfo().GetName())
+			}
+			if c2.Discovery.Env().ServiceDiscovery.GetSegmentInfo().GetName() != "bar" {
+				return fmt.Errorf("c2 segment not set: got %q", c2.Discovery.Env().ServiceDiscovery.GetSegmentInfo().GetName())
+			}
+			return nil
+		}, retry.Timeout(3*time.Second))
+
+		// Create global services
+		c1.CreateService("svc1", true, ports1)
+		c2.CreateService("svc2", true, ports2)
+
+		t.Run("missing remote segment", func(t *testing.T) {
+			// connect clusters
+			c1.ConnectTo(c2)
+			c2.ConnectTo(c1)
+			time.Sleep(time.Second) // TODO avoid sleep, but we don't want to check too soon and get a false negative
+			AssertWE(c1)
+			AssertWE(c2)
+		})
+
+		t.Run("segment created", func(t *testing.T) {
+			clienttest.NewWriter[*soloapi.Segment](c1.t, c1.Kube).CreateOrUpdate(c2BarSegment)
+			clienttest.NewWriter[*soloapi.Segment](c2.t, c2.Kube).CreateOrUpdate(c1FooSegment)
+
+			// Now resources should be created
+			// c1 should see c2's svc2, c2 should see c1's svc1
+			AssertWE(c1, DesiredWE{Name: "autogen.c2.default.svc2", Locality: c2.Locality()})
+			AssertWE(c2, DesiredWE{Name: "autogen.c1.default.svc1", Locality: c1.Locality()})
+		})
+
+		t.Run("segment domain mismatch", func(t *testing.T) {
+			// Now break the segments by changing domains
+			c1BarSegmentInvalid := &soloapi.Segment{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "bar",
+					Namespace: "istio-system",
+				},
+				Spec: soloapi.SegmentSpec{
+					Domain: "invalid-c2.com",
+				},
+			}
+			c2FooSegmentInvalid := &soloapi.Segment{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "foo",
+					Namespace: "istio-system",
+				},
+				Spec: soloapi.SegmentSpec{
+					Domain: "invalid-c1.com",
+				},
+			}
+
+			clienttest.NewWriter[*soloapi.Segment](c1.t, c1.Kube).CreateOrUpdate(c1BarSegmentInvalid)
+			clienttest.NewWriter[*soloapi.Segment](c2.t, c2.Kube).CreateOrUpdate(c2FooSegmentInvalid)
+
+			// Resources should be cleaned up
+			AssertWE(c1)
+			AssertWE(c2)
+		})
+
+		t.Run("segments repaired", func(t *testing.T) {
+			clienttest.NewWriter[*soloapi.Segment](c1.t, c1.Kube).CreateOrUpdate(c2BarSegment)
+			clienttest.NewWriter[*soloapi.Segment](c2.t, c2.Kube).CreateOrUpdate(c1FooSegment)
+
+			// Now resources should be re-created
+			// c1 should see c2's svc2, c2 should see c1's svc1
+			AssertWE(c1, DesiredWE{Name: "autogen.c2.default.svc2", Locality: c2.Locality()})
+			AssertWE(c2, DesiredWE{Name: "autogen.c1.default.svc1", Locality: c1.Locality()})
+		})
+	})
+
+	t.Run("no segment from remote", func(t *testing.T) {
+		// create two clusters
+		c1 := NewCluster(t, "c1", "c1")
+		// c2 does NOT support segment resources (simulating older Istio version)
+		c2 := newCluster(t, nil, test.NewStop(t), false, "c2", "c2", false)
+
+		// c1 is setup with segment info
+		c1FooSegment := &soloapi.Segment{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "foo",
+				Namespace: "istio-system",
+			},
+			Spec: soloapi.SegmentSpec{
+				Domain: "foo.internal",
+			},
+		}
+		clienttest.NewWriter[*soloapi.Segment](c1.t, c1.Kube).CreateOrUpdate(c1FooSegment)
+		c1.UseSegment("foo")
+
+		retry.UntilSuccessOrFail(t, func() error {
+			if c1.Discovery.Env().ServiceDiscovery.GetSegmentInfo().GetName() != "foo" {
+				return fmt.Errorf("c1 segment not set: got %q", c1.Discovery.Env().ServiceDiscovery.GetSegmentInfo().GetName())
+			}
+			return nil
+		}, retry.Timeout(3*time.Second))
+
+		// Connect clusters for peering
+		c1.ConnectTo(c2)
+		c2.ConnectTo(c1)
+
+		// Create global services
+		c1.CreateService("svc1", true, ports1)
+		c2.CreateService("svc2", true, ports2)
+
+		// we still get a WE and "default segment" SE for the remote cluster
+		AssertWE(c1, DesiredWE{Name: c2Svc2Name, Locality: c2.Locality()})
+		AssertSE(c1, DesiredSE{Name: "autogen.foo.default.svc1"}, DesiredSE{Name: defaultSvc2Name})
+	})
+
+	t.Run("segment overrides domain suffix", func(t *testing.T) {
+		// create two connected clusters
+		c1 := NewCluster(t, "c1", "c1")
+		c2 := NewCluster(t, "c2", "c2")
+		c1.ConnectTo(c2)
+		c2.ConnectTo(c1)
+
+		c1FooSegment := &soloapi.Segment{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "foo",
+				Namespace: "istio-system",
+			},
+			Spec: soloapi.SegmentSpec{
+				Domain: "foo.internal",
+			},
+		}
+		c2BarSegment := &soloapi.Segment{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "bar",
+				Namespace: "istio-system",
+			},
+			Spec: soloapi.SegmentSpec{
+				Domain: "bar.internal",
+			},
+		}
+
+		// apply both segments to both clusters
+		for _, cls := range []*Cluster{c1, c2} {
+			for _, seg := range []*soloapi.Segment{c1FooSegment, c2BarSegment} {
+				clienttest.NewWriter[*soloapi.Segment](cls.t, cls.Kube).CreateOrUpdate(seg)
+			}
+		}
+		// tell c1 to use foo segment
+		c1.UseSegment("foo")
+		c2.UseSegment("bar")
+
+		// make sure the clusters see their own segment
+		retry.UntilSuccessOrFail(t, func() error {
+			if c1.Discovery.Env().ServiceDiscovery.GetSegmentInfo().GetName() != "foo" {
+				return fmt.Errorf("c1 segment not set: got %q", c1.Discovery.Env().ServiceDiscovery.GetSegmentInfo().GetName())
+			}
+			if c2.Discovery.Env().ServiceDiscovery.GetSegmentInfo().GetName() != "bar" {
+				return fmt.Errorf("c2 segment not set: got %q", c2.Discovery.Env().ServiceDiscovery.GetSegmentInfo().GetName())
+			}
+			return nil
+		}, retry.Timeout(3*time.Second))
+
+		// create services in each cluster
+		c1.CreateService("svc1", true, nil)
+		c2.CreateService("svc2", true, nil)
+
+		// each cluster should see the other cluster's service with the correct domain suffix
+		AssertSE(
+			c1,
+			DesiredSE{Name: "autogen.bar.default.svc2", Hostname: "svc2.default.bar.internal"},
+			DesiredSE{Name: "autogen.foo.default.svc1", Hostname: "svc1.default.foo.internal"},
+		)
+		AssertSE(
+			c2,
+			DesiredSE{Name: "autogen.bar.default.svc2", Hostname: "svc2.default.bar.internal"},
+			DesiredSE{Name: "autogen.foo.default.svc1", Hostname: "svc1.default.foo.internal"},
+		)
+	})
+
+	t.Run("segment change", func(t *testing.T) {
+		// create two connected clusters
+		c1 := NewCluster(t, "c1", "c1")
+		c2 := NewCluster(t, "c2", "c2")
+		c1.ConnectTo(c2)
+		c2.ConnectTo(c1)
+
+		// create 1 service in each cluster
+		c1.CreateService("svc1", true, nil)
+		c2.CreateService("svc2", true, nil)
+		// each cluster should see the other cluster's service with the correct domain suffix
+		for _, cls := range []*Cluster{c1, c2} {
+			AssertSE(
+				cls,
+				DesiredSE{Name: "autogen.default.svc2", Hostname: "svc2.default.mesh.internal"},
+				DesiredSE{Name: "autogen.default.svc1", Hostname: "svc1.default.mesh.internal"},
+			)
+		}
+
+		c1FooSegment := &soloapi.Segment{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "foo",
+				Namespace: "istio-system",
+			},
+			Spec: soloapi.SegmentSpec{
+				Domain: "foo.internal",
+			},
+		}
+		c2BarSegment := &soloapi.Segment{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "bar",
+				Namespace: "istio-system",
+			},
+			Spec: soloapi.SegmentSpec{
+				Domain: "bar.internal",
+			},
+		}
+
+		// apply both segments to both clusters
+		for _, cls := range []*Cluster{c1, c2} {
+			for _, seg := range []*soloapi.Segment{c1FooSegment, c2BarSegment} {
+				clienttest.NewWriter[*soloapi.Segment](cls.t, cls.Kube).CreateOrUpdate(seg)
+			}
+		}
+		// tell c1 to use foo segment
+		c1.UseSegment("foo")
+		// tell c2 to use bar segment
+		c2.UseSegment("bar")
+
+		// make sure the clusters see their own segment
+		retry.UntilSuccessOrFail(t, func() error {
+			if c1.Discovery.Env().ServiceDiscovery.GetSegmentInfo().GetName() != "foo" {
+				return fmt.Errorf("c1 segment not set: got %q", c1.Discovery.Env().ServiceDiscovery.GetSegmentInfo().GetName())
+			}
+			if c2.Discovery.Env().ServiceDiscovery.GetSegmentInfo().GetName() != "bar" {
+				return fmt.Errorf("c2 segment not set: got %q", c2.Discovery.Env().ServiceDiscovery.GetSegmentInfo().GetName())
+			}
+			return nil
+		}, retry.Timeout(3*time.Second))
+
+		// each cluster should see the other cluster's service with the correct domain suffix
+		AssertSE(
+			c1,
+			DesiredSE{Name: "autogen.bar.default.svc2", Hostname: "svc2.default.bar.internal"},
+			DesiredSE{Name: "autogen.foo.default.svc1", Hostname: "svc1.default.foo.internal"},
+		)
+		AssertSE(
+			c2,
+			DesiredSE{Name: "autogen.bar.default.svc2", Hostname: "svc2.default.bar.internal"},
+			DesiredSE{Name: "autogen.foo.default.svc1", Hostname: "svc1.default.foo.internal"},
+		)
+
+		c1FooSegment.Spec.Domain = "new-foo.internal"
+		c2BarSegment.Spec.Domain = "new-bar.internal"
+		for _, cls := range []*Cluster{c1, c2} {
+			clienttest.NewWriter[*soloapi.Segment](cls.t, cls.Kube).CreateOrUpdate(c1FooSegment)
+			clienttest.NewWriter[*soloapi.Segment](cls.t, cls.Kube).CreateOrUpdate(c2BarSegment)
+		}
+
+		AssertSE(
+			c1,
+			DesiredSE{Name: "autogen.bar.default.svc2", Hostname: "svc2.default.new-bar.internal"},
+			DesiredSE{Name: "autogen.foo.default.svc1", Hostname: "svc1.default.new-foo.internal"},
+		)
+		AssertSE(
+			c2,
+			DesiredSE{Name: "autogen.bar.default.svc2", Hostname: "svc2.default.new-bar.internal"},
+			DesiredSE{Name: "autogen.foo.default.svc1", Hostname: "svc1.default.new-foo.internal"},
+		)
 	})
 }
 
@@ -1473,35 +1784,40 @@ func init() {
 }
 
 type Cluster struct {
-	Peering                                       *peering.NetworkWatcher
-	Kube                                          kube.Client
-	Discovery                                     *xds.FakeDiscoveryServer
-	ClusterName                                   string
-	NetworkName                                   string
-	t                                             test.Failer
-	ServiceEntries                                clienttest.TestClient[*networkingclient.ServiceEntry]
-	WorkloadEntries                               clienttest.TestClient[*networkingclient.WorkloadEntry]
-	Gateways                                      clienttest.TestClient[*k8sbeta.Gateway]
-	Services                                      clienttest.TestClient[*corev1.Service]
-	Namespaces                                    clienttest.TestClient[*corev1.Namespace]
-	Outage                                        *OutageInjector
-	RegionOverride, ZoneOverride, SubzoneOverride string
-}
-
-func (c *Cluster) Region() string {
-	return ptr.NonEmptyOrDefault(c.RegionOverride, "region-"+c.ClusterName)
+	Peering                      *peering.NetworkWatcher
+	Kube                         kube.Client
+	Discovery                    *xds.FakeDiscoveryServer
+	ClusterName                  string
+	NetworkName                  string
+	t                            test.Failer
+	ServiceEntries               clienttest.TestClient[*networkingclient.ServiceEntry]
+	WorkloadEntries              clienttest.TestClient[*networkingclient.WorkloadEntry]
+	Gateways                     clienttest.TestClient[*k8sbeta.Gateway]
+	Services                     clienttest.TestClient[*corev1.Service]
+	Namespaces                   clienttest.TestClient[*corev1.Namespace]
+	Outage                       *OutageInjector
+	ZoneOverride, RegionOverride string
 }
 
 func (c *Cluster) Zone() string {
 	return ptr.NonEmptyOrDefault(c.ZoneOverride, "zone-"+c.ClusterName)
 }
 
-func (c *Cluster) Subzone() string {
-	return ptr.NonEmptyOrDefault(c.SubzoneOverride, "subzone-"+c.ClusterName)
+func (c *Cluster) Region() string {
+	return ptr.NonEmptyOrDefault(c.RegionOverride, "region-"+c.ClusterName)
 }
 
 func (c *Cluster) Locality() string {
-	return c.Region() + "/" + c.Zone() + "/" + c.Subzone()
+	return c.Region() + "/" + c.Zone()
+}
+
+func (c *Cluster) UseSegment(segmentName string) {
+	ns := c.Namespaces.Get("istio-system", "")
+	if ns.Labels == nil {
+		ns.Labels = make(map[string]string)
+	}
+	ns.Labels[peering.SegmentLabel] = segmentName
+	c.Namespaces.Update(ns)
 }
 
 func (c *Cluster) CreateService(name string, global bool, ports []corev1.ServicePort) {
@@ -1835,7 +2151,6 @@ func (c *Cluster) ConnectTo(other *Cluster) {
 				label.TopologyCluster.Name:      other.ClusterName,
 				"topology.kubernetes.io/region": other.Region(),
 				"topology.kubernetes.io/zone":   other.Zone(),
-				"topology.istio.io/subzone":     other.Subzone(),
 			},
 		},
 		Spec: k8s.GatewaySpec{
@@ -1859,10 +2174,26 @@ func (c *Cluster) ConnectTo(other *Cluster) {
 }
 
 func NewCluster(t test.Failer, clusterName, networkName string) *Cluster {
-	return newCluster(t, nil, test.NewStop(t), false, clusterName, networkName)
+	return newCluster(
+		t,
+		nil,
+		test.NewStop(t),
+		false,
+		clusterName,
+		networkName,
+		true,
+	)
 }
 
-func newCluster(t test.Failer, premadeKubeClient kube.Client, stop chan struct{}, startWithOutage bool, clusterName, networkName string) *Cluster {
+func newCluster(
+	t test.Failer,
+	premadeKubeClient kube.Client,
+	stop chan struct{},
+	startWithOutage bool,
+	clusterName,
+	networkName string,
+	enableSegmentXds bool,
+) *Cluster {
 	outage := NewOutageInjector()
 	outage.setOutage(startWithOutage)
 	buildConfig := func(clientName string, peeringNodesOnly bool) *adsc.DeltaADSConfig {
@@ -1872,6 +2203,7 @@ func newCluster(t test.Failer, premadeKubeClient kube.Client, stop chan struct{}
 				Namespace:  "istio-system",
 				Workload:   clusterName,
 				Meta: model.NodeMetadata{
+					ClusterID:        cluster.ID(clusterName),
 					PeeringMode:      true,
 					PeeringNodesOnly: model.StringBool(peeringNodesOnly),
 				}.ToStruct(),
@@ -1887,6 +2219,7 @@ func newCluster(t test.Failer, premadeKubeClient kube.Client, stop chan struct{}
 		ListenerBuilder: func() (net.Listener, error) {
 			return net.Listen("tcp", "127.0.0.1:0")
 		},
+		EnableSegmentsServer: enableSegmentXds,
 	}
 	if premadeKubeClient != nil {
 		fo.KubeClientBuilder = func(objects ...runtime.Object) kube.Client {
@@ -2002,17 +2335,25 @@ func AssertWEPorts(c *Cluster, name string, ports map[string]uint32) {
 type DesiredSE struct {
 	Name            string
 	ServiceAccounts []string
+	Hostname        string // will not be checked unless one in the set is non-empty
 }
 
 func AssertSE(c *Cluster, se ...DesiredSE) {
 	c.t.Helper()
+	compareHostname := nil != slices.FindFunc(se, func(d DesiredSE) bool {
+		return d.Hostname != ""
+	})
 	have := slices.SortBy(se, func(a DesiredSE) string {
 		return a.Name
 	})
 	fetch := func() []DesiredSE {
 		return slices.SortBy(
 			slices.Map(c.ServiceEntries.List(metav1.NamespaceAll, klabels.Everything()), func(a *networkingclient.ServiceEntry) DesiredSE {
-				return DesiredSE{Name: a.Name, ServiceAccounts: a.Spec.SubjectAltNames}
+				hostname := ""
+				if compareHostname && len(a.Spec.Hosts) > 0 {
+					hostname = a.Spec.Hosts[0]
+				}
+				return DesiredSE{Name: a.Name, ServiceAccounts: a.Spec.SubjectAltNames, Hostname: hostname}
 			}),
 			func(a DesiredSE) string {
 				return a.Name
@@ -2025,8 +2366,8 @@ func AssertSE(c *Cluster, se ...DesiredSE) {
 func AssertSEPorts(c *Cluster, name string, ports []*networking.ServicePort) {
 	c.t.Helper()
 	fetch := func() []*networking.ServicePort {
-		se := c.ServiceEntries.Get(name, peering.PeeringNamespace)
-		return se.Spec.GetPorts()
+		we := c.ServiceEntries.Get(name, peering.PeeringNamespace)
+		return we.Spec.GetPorts()
 	}
 	assert.EventuallyEqual(c.t, fetch, ports)
 }
@@ -2292,4 +2633,15 @@ func deployWaypoint(clusters ...*Cluster) {
 			},
 		})
 	}
+}
+
+func waitForSegmentInfoSync(t test.Failer, clusters ...*Cluster) {
+	retry.UntilSuccessOrFail(t, func() error {
+		for _, c := range clusters {
+			if c.Discovery.Env().GetSegmentInfo() == nil {
+				return fmt.Errorf("segment info not set for cluster %s", c.ClusterName)
+			}
+		}
+		return nil
+	}, retry.Timeout(3*time.Second))
 }

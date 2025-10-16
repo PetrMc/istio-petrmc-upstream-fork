@@ -6,6 +6,17 @@ import (
 	jsonpb "github.com/golang/protobuf/jsonpb"
 )
 
+// MarshalJSON is a custom marshaler for Segment
+func (this *Segment) MarshalJSON() ([]byte, error) {
+	str, err := FederatedserviceMarshaler.MarshalToString(this)
+	return []byte(str), err
+}
+
+// UnmarshalJSON is a custom unmarshaler for Segment
+func (this *Segment) UnmarshalJSON(b []byte) error {
+	return FederatedserviceUnmarshaler.Unmarshal(bytes.NewReader(b), this)
+}
+
 // MarshalJSON is a custom marshaler for FederatedService
 func (this *FederatedService) MarshalJSON() ([]byte, error) {
 	str, err := FederatedserviceMarshaler.MarshalToString(this)

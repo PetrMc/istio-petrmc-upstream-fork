@@ -32,6 +32,7 @@ import (
 	"istio.io/istio/pkg/cluster"
 	"istio.io/istio/pkg/config"
 	"istio.io/istio/pkg/config/constants"
+	"istio.io/istio/pkg/kube"
 	"istio.io/istio/pkg/kube/controllers"
 	"istio.io/istio/pkg/kube/kclient"
 	"istio.io/istio/pkg/kube/krt"
@@ -76,14 +77,55 @@ func (k Kind) String() string {
 	return "Unknown"
 }
 
-func AutogenHostname(name, ns string) string {
-	return fmt.Sprintf("%s.%s%s", name, ns, DomainSuffix)
+func AutogenHostname(name, ns, domain string) string {
+	if domain == "" {
+		domain = strings.TrimPrefix(DomainSuffix, ".")
+	}
+	return fmt.Sprintf("%s.%s.%s", name, ns, domain)
 }
 
-func ParseAutogenHostname(hostname string) (string, string, bool) {
-	nns, suffixOk := strings.CutSuffix(hostname, DomainSuffix)
+func ParseAutogenHostname(hostname, domain string) (string, string, bool) {
+	if domain == "" {
+		domain = strings.TrimPrefix(DomainSuffix, ".")
+	}
+	suffix := "." + domain
+	nns, suffixOk := strings.CutSuffix(hostname, suffix)
 	name, ns, nnsOk := strings.Cut(nns, ".")
 	return name, ns, suffixOk && nnsOk
+}
+
+// ParseAutogenHostnameGuessDomain parses a hostname of the form "name.namespace.domain[.more.parts]"
+// This is useful when we know the domain comes from a generated peering resource and we can safely assume
+// the first two parts are name and namespace.
+func ParseAutogenHostnameGuessDomain(wpAutogenHost string) (string, string, string, bool) {
+	if wpAutogenHost == "" {
+		return "", "", "", false
+	}
+
+	parts := strings.Split(wpAutogenHost, ".")
+	if len(parts) < 3 {
+		return "", "", "", false
+	}
+
+	// The domain is everything after name and namespace
+	wpDomain := strings.Join(parts[2:], ".")
+
+	// Now parse with the extracted domain to validate and extract name/namespace
+	wpName, wpNs, ok := ParseAutogenHostname(wpAutogenHost, wpDomain)
+	if !ok {
+		return "", "", "", false
+	}
+	return wpName, wpNs, wpDomain, true
+}
+
+// ServiceEntryName generates the ServiceEntry name for a given service and segment.
+// For the default segment, it returns "autogen.namespace.serviceName"
+// For other segments, it returns "autogen.segmentName.namespace.serviceName"
+func ServiceEntryName(serviceName, namespace, segment string) string {
+	if segment == DefaultSegmentName || segment == "" {
+		return fmt.Sprintf("autogen.%s.%s", namespace, serviceName)
+	}
+	return fmt.Sprintf("autogen.%s.%s.%s", segment, namespace, serviceName)
 }
 
 func (c *NetworkWatcher) Reconcile(raw any) error {
@@ -97,7 +139,9 @@ func (c *NetworkWatcher) Reconcile(raw any) error {
 		c.queue.Add(raw)
 		return nil
 	}
-	log.WithLabels("kind", key.kind, "resource", key.NamespacedName).Infof("reconciling")
+	log := log.WithLabels("kind", key.kind, "resource", key.NamespacedName)
+	log.Infof("reconciling")
+	defer log.Infof("reconciled")
 	switch key.kind {
 	case Gateway:
 		// Gateway: triggered when we have a change to a Gateway object, which may mean we need to add/remove/update our
@@ -118,7 +162,8 @@ func (c *NetworkWatcher) Reconcile(raw any) error {
 	case Cluster:
 		// Cluster: triggered when an entire cluster has changed.
 		// Intended to cleanup stale resources
-		return c.reconcileClusterSync(key.Name)
+		c.reconcileClusterSync(key.Name)
+		return nil
 	case NodeWorkloadEntry:
 		// NodeWorkloadEntry: triggered when we may need to change a generated WE
 		// The key is: Name=name of target node, Namespace=cluster
@@ -134,35 +179,32 @@ func (c *NetworkWatcher) Reconcile(raw any) error {
 }
 
 func (c *NetworkWatcher) reconcileGateway(name types.NamespacedName) error {
-	c.clustersMu.Lock()
-	defer c.clustersMu.Unlock()
 	log := log.WithLabels("gateway", name)
 
-	cleanupPeerCluster := func(err error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	// don't use getters here, they rlock
+	localNetwork := c.localNetwork
+
+	gw := c.gateways.Get(name.Name, name.Namespace)
+	if EnableAutomaticGatewayCreation {
+		c.reconcileEastWestGateway(gw)
+	}
+	peer, err := TranslatePeerGateway(gw)
+	if err != nil {
 		oldCluster, f := c.gatewaysToCluster[name]
 		delete(c.gatewaysToCluster, name)
 		if !f {
 			c.enqueueStatusUpdate(name)
 			log.Debugf("gateway is not a peer gateway (%v) and we were not tracking it", err)
-			return
+			return nil
 		}
 		log.Infof("gateway for cluster %q is no longer a peer gateway (%v), shutting down cluster controller", oldCluster, err)
 		peerCluster := c.remoteClusters[oldCluster]
 		peerCluster.shutdownNow()
 		delete(c.remoteClusters, oldCluster)
 		c.enqueueStatusUpdate(name)
-	}
-
-	gw := c.gateways.Get(name.Name, name.Namespace)
-	if EnableAutomaticGatewayCreation {
-		if err := c.reconcileEastWestGateway(gw); err != nil {
-			cleanupPeerCluster(err)
-			return err
-		}
-	}
-	peer, err := TranslatePeerGateway(gw)
-	if err != nil {
-		cleanupPeerCluster(err)
 		return nil
 	}
 
@@ -170,12 +212,14 @@ func (c *NetworkWatcher) reconcileGateway(name types.NamespacedName) error {
 	if f {
 		cluster := c.remoteClusters[oldClusterID]
 		oldNetworkID := cluster.networkName
-		if oldClusterID != peer.Cluster || oldNetworkID != peer.Network {
+		wasFlat := cluster.IsFlat()
+		isFlat := EnableFlatNetworks && peer.Network == localNetwork
+		if oldClusterID != peer.Cluster || oldNetworkID != peer.Network || wasFlat != isFlat {
 			// total cluster update, id or network changed
 			log.Infof(
-				"cluster changed from %v/%v to %v/%v",
-				oldClusterID, oldNetworkID,
-				peer.Cluster, peer.Network,
+				"cluster changed from %v/%v (%s) to %v/%v (%s)",
+				oldClusterID, oldNetworkID, wasFlat,
+				peer.Cluster, peer.Network, isFlat,
 			)
 			cluster.shutdownNow()
 			delete(c.remoteClusters, oldClusterID)
@@ -226,7 +270,7 @@ func (c *NetworkWatcher) reconcileGateway(name types.NamespacedName) error {
 	}
 
 	peerCluster := newPeerCluster(
-		c.localNetwork,
+		localNetwork,
 		peer,
 		c.buildConfig(fmt.Sprintf("peering-%s", peer.Cluster), peeringNodesOnly),
 		c.debugger,
@@ -273,40 +317,46 @@ func (c *NetworkWatcher) reconcileGateway(name types.NamespacedName) error {
 }
 
 // reconcileClusterSync is called when a cluster watch has synced. This is used to cleanup stale resources
-func (c *NetworkWatcher) reconcileClusterSync(clusterID string) error {
+func (c *NetworkWatcher) reconcileClusterSync(cid string) {
 	// Get all current workload entries. This appears "racy" to look at one time and act on it, but
 	// since we are cleaning up stale resources this is not a problem.
 	currentWorkloadEntries := c.workloadEntries.List(PeeringNamespace, klabels.SelectorFromSet(map[string]string{
-		SourceClusterLabel: clusterID,
+		SourceClusterLabel: cid,
 	}))
+
+	seen := sets.New[types.NamespacedName]()
 	for _, w := range currentWorkloadEntries {
+		nn := types.NamespacedName{
+			Namespace: cid,
+			Name:      w.Labels[ParentServiceNamespaceLabel] + "/" + w.Labels[ParentServiceLabel],
+		}
 		// Enqueue it; if it no longer exists it will be removed
 		c.queue.Add(typedNamespace{
-			NamespacedName: types.NamespacedName{
-				Namespace: clusterID,
-				Name:      w.Labels[ParentServiceNamespaceLabel] + "/" + w.Labels[ParentServiceLabel],
-			},
-			kind: WorkloadEntry,
+			NamespacedName: nn,
+			kind:           WorkloadEntry,
 		})
+		seen.Insert(nn)
 	}
 
-	// Also enqueue all federated services from this cluster to ensure gateway workload entries are created
-	// if not already done.
-	c.clustersMu.RLock()
-	pc := c.remoteClusters[cluster.ID(clusterID)]
-	c.clustersMu.RUnlock()
-	if pc != nil && pc.HasSynced() {
-		for _, fs := range pc.federatedServices.List() {
-			c.queue.Add(typedNamespace{
-				NamespacedName: types.NamespacedName{
-					Namespace: clusterID,
-					Name:      config.NamespacedName(fs.Service).String(),
-				},
-				kind: WorkloadEntry,
-			})
-		}
+	// also queue federatedServices to handle workloadEntries we didn't create before this Cluster event
+	pc := c.getClusterByID(cluster.ID(cid))
+	if pc == nil {
+		return
 	}
-	return nil
+
+	for _, fs := range pc.federatedServices.List() {
+		nn := types.NamespacedName{
+			Namespace: cid,
+			Name:      fs.Service.Namespace + "/" + fs.Service.Name,
+		}
+		if seen.Contains(nn) {
+			continue
+		}
+		c.queue.Add(typedNamespace{
+			NamespacedName: nn,
+			kind:           WorkloadEntry,
+		})
+	}
 }
 
 func (c *NetworkWatcher) genericReconcileWorkloadEntries(want []*clientnetworking.WorkloadEntry, groupLabel string) error {
@@ -364,6 +414,13 @@ func (c *NetworkWatcher) reconcileFlatWorkloadEntry(tn types.NamespacedName) err
 		return nil
 	}
 
+	segment := c.getSegmentForCluster(clusterID)
+	segmentDomain, err := c.getSegmentDomain(segment)
+	if err != nil {
+		log.Errorf("cannot get domain for segment %s: %v, deleting WorkloadEntry", segment, err)
+		return controllers.IgnoreNotFound(c.workloadEntries.Delete(tn.Name, PeeringNamespace))
+	}
+
 	// because a single RemoteWorkload results in multiple WorkloadEntries (when it needs to be selected by more than one Service)
 	// we add a common label to all of the WorkloadEntries so we can reliably clean them up.
 	weGroupLabel := fmt.Sprintf("autogenflat.%v.%v.%v", clusterID, uidNamespace, uidName)
@@ -379,7 +436,7 @@ func (c *NetworkWatcher) reconcileFlatWorkloadEntry(tn types.NamespacedName) err
 		return c.genericReconcileWorkloadEntries(nil, weGroupLabel)
 	}
 	if !cluster.HasSynced() {
-		log.Debugf("skipping, network not yet synced")
+		log.Debugf("skipping, cluster not yet synced")
 		return nil
 	}
 	workload := cluster.workloads.GetKey(tn.Name)
@@ -397,7 +454,7 @@ func (c *NetworkWatcher) reconcileFlatWorkloadEntry(tn types.NamespacedName) err
 		return c.genericReconcileWorkloadEntries(nil, weGroupLabel)
 	}
 
-	mergedServices := c.mergedServicesForWorkload(workload)
+	mergedServices := c.mergedServicesForWorkload(workload, segment, segmentDomain)
 
 	// potentially write multiple workloadEntries so we can be selected by multiple services
 	wantEntries := slices.MapFilter(mergedServices, func(servicesWithMergedSelector servicesForWorkload) **clientnetworking.WorkloadEntry {
@@ -412,6 +469,8 @@ func (c *NetworkWatcher) reconcileFlatWorkloadEntry(tn types.NamespacedName) err
 		labels[SourceWorkloadLabel] = weGroupLabel
 		// always write the source cluster
 		labels[SourceClusterLabel] = clusterID
+		// always write segment and domain
+		labels[SegmentLabel] = segment
 		// Indicate we support tunneling. This is for Envoy dataplanes mostly.
 		if workload.TunnelProtocol == workloadapi.TunnelProtocol_HBONE {
 			labels[model.TunnelLabel] = model.TunnelHTTP
@@ -452,7 +511,7 @@ func (c *NetworkWatcher) reconcileFlatWorkloadEntry(tn types.NamespacedName) err
 			},
 			Spec: networking.WorkloadEntry{
 				Address:  address.String(),
-				Network:  string(c.localNetwork),
+				Network:  string(c.GetLocalNetwork()),
 				Ports:    flatWorkloadEntryPorts(servicesWithMergedSelector),
 				Weight:   1, // weight,
 				Locality: locality,
@@ -524,8 +583,8 @@ func workloadEntryChanged(desired *clientnetworking.WorkloadEntry, live *clientn
 	return proto.Equal(&desired.Spec, &live.Spec)
 }
 
-func getSoloScope(kc kclient.Client[*corev1.Namespace], ns string, labels map[string]string) string {
-	namespace := ptr.OrEmpty(kc.Get(ns, ""))
+func GetSoloScope(client kube.Client, ns string, labels map[string]string) string {
+	namespace := ptr.OrEmpty(kclient.New[*corev1.Namespace](client).Get(ns, ""))
 
 	return CalculateScope(labels, namespace.GetLabels())
 }
@@ -542,15 +601,37 @@ func (c *NetworkWatcher) reconcileGatewayWorkloadEntry(tn types.NamespacedName) 
 	var locality string
 	var fs *RemoteFederatedService
 	var networkName networkid.ID
-	if pc := c.getClusterByID(cluster.ID(clusterID)); pc != nil {
-		if !pc.HasSynced() {
-			log.Debugf("skipping, cluster not yet synced")
-			return nil
-		}
-		fs = pc.federatedServices.GetKey(tn.String())
-		locality = pc.locality
-		networkName = pc.networkName
+	pc := c.getClusterByID(cluster.ID(clusterID))
+	if pc == nil {
+		log.Infof("workload entry will be deleted (cluster not found for key %v)", tn.String())
+		// Actually delete the WorkloadEntry since the cluster is gone
+		return controllers.IgnoreNotFound(c.workloadEntries.Delete(weName, PeeringNamespace))
 	}
+	if !pc.HasSynced() {
+		log.Debugf("skipping, cluster not yet synced")
+		return nil
+	}
+
+	segmentInfo := pc.GetSegmentInfo()
+	if segmentInfo == nil {
+		// this should never happen, we should set segmentInfo to the default elsewhere
+		log.Debugf("cluster %s has no segment info, using default segment", clusterID)
+		segmentInfo = &workloadapi.Segment{
+			Name:   DefaultSegmentName,
+			Domain: strings.TrimPrefix(DomainSuffix, "."),
+		}
+	}
+	segmentName := ptr.NonEmptyOrDefault(segmentInfo.GetName(), DefaultSegmentName)
+	segmentDomain := segmentInfo.GetDomain()
+	if !c.validatePeerSegment(cluster.ID(clusterID), segmentInfo) {
+		log.Debugf("cluster %s has invalid segment configuration, removing workload entry", clusterID)
+		return controllers.IgnoreNotFound(c.workloadEntries.Delete(weName, PeeringNamespace))
+	}
+
+	fs = pc.federatedServices.GetKey(tn.String())
+	locality = pc.locality
+	networkName = pc.networkName
+
 	if fs == nil {
 		// No federated service exists, remove
 		log.Infof("workload entry will be deleted (key %v not found)", tn.String())
@@ -558,20 +639,23 @@ func (c *NetworkWatcher) reconcileGatewayWorkloadEntry(tn types.NamespacedName) 
 	}
 
 	// HACK: don't peer waypoint services for remote networks, let the gateway route to the waypoint
-	if fs.Service.WaypointFor != "" && networkName != c.localNetwork {
+	if fs.Service.WaypointFor != "" && networkName != c.GetLocalNetwork() {
 		return controllers.IgnoreNotFound(c.workloadEntries.Delete(weName, PeeringNamespace))
 	}
 
 	localService := c.services.Get(name, ns)
+	if segmentName != c.GetLocalSegment() {
+		localService = nil // we are not in the same segment, ignore local service
+	}
 	weScope := ConvertScopeFromWorkloadAPI(fs.Service.Scope)
 	var localPorts []corev1.ServicePort
 	if localService != nil {
-		localScope := getSoloScope(c.namespaces, localService.GetNamespace(), localService.GetLabels())
-		if !IsGlobal(localScope) {
+		scope := GetSoloScope(c.client, localService.GetNamespace(), localService.GetLabels())
+		if !IsGlobal(scope) {
 			// It's not global, so ignore it
 			localService = nil
 		} else {
-			weScope = localScope
+			weScope = scope
 			// If the local service exists, the SE is going to set the label selectors to the service's so we can select the Pod
 			// We need to include those
 			labels = maps.Clone(localService.Spec.Selector)
@@ -583,6 +667,7 @@ func (c *NetworkWatcher) reconcileGatewayWorkloadEntry(tn types.NamespacedName) 
 	}
 
 	// Add our identification labels always. If there is no labels this will be used as the selector in the SE
+	labels[SegmentLabel] = segmentName
 	labels[ParentServiceLabel] = name
 	labels[ServiceScopeLabel] = weScope
 	labels[ParentServiceNamespaceLabel] = ns
@@ -591,7 +676,11 @@ func (c *NetworkWatcher) reconcileGatewayWorkloadEntry(tn types.NamespacedName) 
 	labels[model.TunnelLabel] = model.TunnelHTTP
 	fss := fs.Service
 	if fss.Waypoint != nil && fss.Waypoint.Name != "" && fss.Waypoint.Namespace != "" {
-		labels[UseGlobalWaypointLabel] = AutogenHostname(fss.Waypoint.Name, fss.Waypoint.Namespace)
+		waypointDomain := segmentDomain
+		if waypointDomain == "" {
+			waypointDomain = strings.TrimPrefix(DomainSuffix, ".")
+		}
+		labels[UseGlobalWaypointLabel] = AutogenHostname(fss.Waypoint.Name, fss.Waypoint.Namespace, waypointDomain)
 	}
 
 	ports := map[string]uint32{}
@@ -629,7 +718,7 @@ func (c *NetworkWatcher) reconcileGatewayWorkloadEntry(tn types.NamespacedName) 
 
 	}
 
-	if EnableFlatNetworks && c.localNetwork == networkName {
+	if EnableFlatNetworks && c.GetLocalNetwork() == networkName {
 		// In flat mode, we still make the network WE, but disable it.
 		// This is pretty hacky, but the reason is we derive FederatedService --> WorkloadEntry --> ServiceEntry.
 		// This is so if there is an outage connecting to a remote, we have the FederatedService state stored locally in order
@@ -663,13 +752,121 @@ func (c *NetworkWatcher) reconcileGatewayWorkloadEntry(tn types.NamespacedName) 
 }
 
 // reconcileServiceEntry converts the WorkloadEntry from reconcileGatewayWorkloadEntry
-// into a ServiceEntry. Do not query the FederatedService from the krt collection/xds here.
-// The WorkloadEntry persists info from the FederatedService so that it will be available
-// even during a loss of connection to the remote cluster or istiod restart.
+// into a ServiceEntry. Avoid querying anything that comes from xDS here, instead prefer
+// information serialized to the reconcileGatewayWorkloadEntry annotations/labels.
+// This should prevent race conditions between WE and SE processing, and better handle
+// restarts or outage scenarios.
 func (c *NetworkWatcher) reconcileServiceEntry(name types.NamespacedName) error {
-	log := log.WithLabels("federatedservice", name)
-	hostname := AutogenHostname(name.Name, name.Namespace)
-	seName := fmt.Sprintf("autogen.%v.%v", name.Namespace, name.Name)
+	serviceNs := name.Namespace
+	serviceName := name.Name
+
+	// Group WorkloadEntries by segment
+	remoteServicesBySegment := make(map[string][]*clientnetworking.WorkloadEntry)
+	allRemoteServices := c.workloadEntryServiceIndex.Lookup(name)
+	for _, we := range allRemoteServices {
+		segmentLabel := we.Labels[SegmentLabel]
+		if segmentLabel == "" {
+			segmentLabel = DefaultSegmentName
+		}
+		remoteServicesBySegment[segmentLabel] = append(remoteServicesBySegment[segmentLabel], we)
+	}
+
+	// Check if local service exists and get its segment
+	localService := c.services.Get(serviceName, serviceNs)
+	localSegment := ""
+	locallyGlobalOnly := false
+	if localService != nil {
+		ns := ptr.OrEmpty(kclient.New[*corev1.Namespace](c.client).Get(serviceNs, ""))
+		scope := CalculateScope(localService.Labels, ns.GetLabels())
+		if IsGlobal(scope) || c.isGlobalWaypoint(localService) {
+			localSegment = c.GetLocalSegment()
+			// Add local segment to the map even if no remote services exist for it
+			// Lets us decide whether to cleanup below
+			if _, exists := remoteServicesBySegment[localSegment]; !exists {
+				remoteServicesBySegment[localSegment] = []*clientnetworking.WorkloadEntry{}
+			}
+			locallyGlobalOnly = scope == ServiceScopeGlobalOnly
+		} else {
+			// Not a global service or waypoint, clear it
+			localService = nil
+			localSegment = ""
+		}
+	}
+
+	// Now reconcile a ServiceEntry for each active segment
+	var errs []error
+	for segmentName, remoteServices := range remoteServicesBySegment {
+		segmentLocal := segmentName == localSegment
+
+		var localServiceForSegment *corev1.Service
+		if segmentLocal {
+			localServiceForSegment = localService
+		}
+		if err := c.reconcileServiceEntryForSegment(
+			serviceName,
+			serviceNs,
+			segmentName,
+			localServiceForSegment,
+			segmentLocal && locallyGlobalOnly,
+			remoteServices,
+		); err != nil {
+			errs = append(errs, err)
+		}
+	}
+
+	// Cleanup serviceEntries for segments where this Service no longer exists
+	// in any of the segments where we have a generated WorkloadEntry.
+	// This must be done last so that migrating from segment-less to segment-aware
+	// control plane doesn't cause a blip.
+	existingServiceEntries := c.serviceEntries.List(PeeringNamespace, klabels.Everything()) // lister is cached, using a label selector is actually slower
+	for _, se := range existingServiceEntries {
+		if se.Labels[ParentServiceLabel] != serviceName || se.Labels[ParentServiceNamespaceLabel] != serviceNs {
+			continue // not the current service
+		}
+		segment := se.Labels[SegmentLabel]
+		if _, f := remoteServicesBySegment[segment]; f {
+			continue // don't cleanup
+		}
+		log.WithLabels(
+			"serviceentry",
+			se.Name,
+			"segment",
+			segment,
+		).Info("service entry will be deleted (no longer needed for any segment)")
+		// This SE is for a segment that no longer exists, delete it
+		if err := controllers.IgnoreNotFound(c.serviceEntries.Delete(se.Name, PeeringNamespace)); err != nil {
+			log.Errorf("failed to delete ServiceEntry %s: %v", se.Name, err)
+		}
+	}
+
+	if len(errs) > 0 {
+		return errors.Join(errs...)
+	}
+	return nil
+}
+
+// reconcileServiceEntryForSegment handles a single segment for a service
+func (c *NetworkWatcher) reconcileServiceEntryForSegment(
+	serviceName,
+	serviceNs,
+	segmentName string,
+	localService *corev1.Service,
+	locallyGlobalOnly bool,
+	remoteServices []*clientnetworking.WorkloadEntry,
+) error {
+	log := log.WithLabels("segment", segmentName, "service", serviceName, "namespace", serviceNs)
+
+	// Get the segment domain
+	segmentDomain, err := c.getSegmentDomain(segmentName)
+	if err != nil {
+		log.Errorf("cannot get domain for segment %s: %v, deleting ServiceEntry", segmentName, err)
+		seName := ServiceEntryName(serviceName, serviceNs, segmentName)
+		return controllers.IgnoreNotFound(c.serviceEntries.Delete(seName, PeeringNamespace))
+	}
+
+	hostname := AutogenHostname(serviceName, serviceNs, segmentDomain)
+	seName := ServiceEntryName(serviceName, serviceNs, segmentName)
+	log.Debugf("reconciling ServiceEntry %s with hostname %s", seName, hostname)
 
 	se := &clientnetworking.ServiceEntry{
 		ObjectMeta: metav1.ObjectMeta{
@@ -683,29 +880,31 @@ func (c *NetworkWatcher) reconcileServiceEntry(name types.NamespacedName) error 
 		},
 	}
 
-	remoteServices := c.workloadEntryServiceIndex.Lookup(name)
-
-	var globalOnly bool
-	for _, remote := range remoteServices {
-		if remote.Labels[ServiceScopeLabel] == ServiceScopeGlobalOnly {
-			globalOnly = true
-			break
+	// localService and remoteServices are already filtered by the caller
+	// Check if any of the remote services are global-only
+	globalOnly := locallyGlobalOnly
+	if segmentName == c.GetLocalSegment() {
+		// we can only to takeover if this SE is for the local segment
+		for _, remote := range remoteServices {
+			if remote.Labels[ServiceScopeLabel] == ServiceScopeGlobalOnly {
+				globalOnly = true
+				break
+			}
 		}
 	}
 
-	localService := c.services.Get(name.Name, name.Namespace)
 	if localService == nil && globalOnly {
 		// if the local service does not exist at all (regardless of it existing but not being global)
 		// and the FederatedService is global-only, add the standard k8s fqdn to the SE's hosts.
 		// We don't need to add the variants here, zTunnel DNS will handle that.
 		se.Spec.Hosts = append(se.Spec.Hosts,
-			fmt.Sprintf("%s.%s.svc.%s", name.Name, name.Namespace, c.clusterDomain),
+			fmt.Sprintf("%s.%s.svc.%s", serviceName, serviceNs, c.clusterDomain),
 		)
 	}
 
 	scope := ServiceScopeCluster
 	if localService != nil {
-		scope = getSoloScope(c.namespaces, localService.GetNamespace(), localService.GetLabels())
+		scope = GetSoloScope(c.client, localService.GetNamespace(), localService.GetLabels())
 		if !IsGlobal(scope) && !c.isGlobalWaypoint(localService) {
 			// It's not global, so ignore it
 			localService = nil
@@ -721,9 +920,10 @@ func (c *NetworkWatcher) reconcileServiceEntry(name types.NamespacedName) error 
 	if localService != nil && localService.Labels != nil {
 		labels = maps.Clone(localService.Labels)
 	}
-	labels[ParentServiceLabel] = name.Name
-	labels[ParentServiceNamespaceLabel] = name.Namespace
+	labels[ParentServiceLabel] = serviceName
+	labels[ParentServiceNamespaceLabel] = serviceNs
 	labels[ServiceScopeLabel] = scope
+	labels[SegmentLabel] = segmentName
 	se.Labels = labels
 
 	annos := make(map[string]string)
@@ -749,20 +949,33 @@ func (c *NetworkWatcher) reconcileServiceEntry(name types.NamespacedName) error 
 	} else {
 		se.Spec.Ports = mergeRemotePorts(remoteServices)
 		se.Spec.WorkloadSelector = &networking.WorkloadSelector{Labels: map[string]string{
-			ParentServiceLabel:          name.Name,
-			ParentServiceNamespaceLabel: name.Namespace,
+			ParentServiceLabel:          serviceName,
+			ParentServiceNamespaceLabel: serviceNs,
+			SegmentLabel:                segmentName,
 		}}
 	}
 
 	globalWaypointHost := ""
+	globalWaypointDomain := ""
 	haveLocalNet := localService != nil
+	localNetwork := c.GetLocalNetwork()
 	for _, remote := range remoteServices {
-		haveLocalNet = haveLocalNet || remote.Spec.Network == string(c.localNetwork)
+		haveLocalNet = haveLocalNet || remote.Spec.Network == string(localNetwork)
 		if rw, f := remote.Labels[UseGlobalWaypointLabel]; f && rw != "" {
 			globalWaypointHost = rw
+
+			// The waypoint must be in the same segment as the service
+			remoteSegment := remote.Labels[SegmentLabel]
+			if d, err := c.getSegmentDomain(remoteSegment); err == nil {
+				globalWaypointDomain = d
+			} else {
+				globalWaypointDomain = strings.TrimPrefix(DomainSuffix, ".")
+				log.Warnf("cannot get domain for segment %s, default to %q: %v", remoteSegment, globalWaypointDomain, err)
+			}
 			break // TODO handle the case where two remote clusters disagree...
 		}
 	}
+
 	if globalWaypointHost != "" {
 		// Semantics: sidecar will skip processing if there is a local waypoint (determined by standard waypoint codepath)
 		// OR if any cluster has a remote waypoint (determined by remote waypoint label).
@@ -775,7 +988,7 @@ func (c *NetworkWatcher) reconcileServiceEntry(name types.NamespacedName) error 
 		// is separate from deciding to skip processing. We only do it if the service is at least partially
 		// network local. We're effectively overriding istio.io/use-waypoint here.
 		if haveLocalNet {
-			remoteWaypointName, remoteWaypointNs, useRemote := ParseAutogenHostname(globalWaypointHost)
+			remoteWaypointName, remoteWaypointNs, useRemote := ParseAutogenHostname(globalWaypointHost, globalWaypointDomain)
 
 			// local use-waypoint takes precedence
 			if useRemote && localService != nil {
@@ -1107,25 +1320,25 @@ func computeTrafficDistribution(remoteServices []*clientnetworking.WorkloadEntry
 }
 
 // reconcileEastWestGateway creates/updates/deletes the generated istio-remote peer gateway for the given istio-eastwest gateway
-func (c *NetworkWatcher) reconcileEastWestGateway(gw *gateway.Gateway) error {
+func (c *NetworkWatcher) reconcileEastWestGateway(gw *gateway.Gateway) {
 	if gw == nil {
 		log.Debug("gateway was deleted")
-		return nil
+		return
 	}
 	if gw.Spec.GatewayClassName != constants.EastWestGatewayClassName {
 		log.Debugf("gateway is not an istio-eastwest gateway (was %q)", gw.Spec.GatewayClassName)
-		return nil
+		return
 	}
 	meshConfig := c.meshConfigWatcher.Mesh()
 	if meshConfig == nil {
 		log.Error("mesh config not found")
-		return nil
+		return
 	}
 	td := meshConfig.GetTrustDomain()
 	generatedPeer, err := TranslateEastWestGateway(gw, td)
 	if err != nil {
 		log.Warnf("failed to generate peer gateway: %v", err)
-		return nil
+		return
 	}
 	changed, err := CreateOrUpdateIfNeeded(c.gateways, generatedPeer, func(desired *gateway.Gateway, live *gateway.Gateway) bool {
 		if desired.Name != live.Name {
@@ -1145,10 +1358,9 @@ func (c *NetworkWatcher) reconcileEastWestGateway(gw *gateway.Gateway) error {
 	})
 	if err != nil {
 		log.Errorf("failed to create or update peer gateway: %v", err)
-		return err
+		return
 	}
 	log.WithLabels("updated", changed).Infof("generated peer gateway %q processed", generatedPeer.Name)
-	return nil
 }
 
 func (c *NetworkWatcher) ReconcileStatus(raw any) error {
@@ -1177,7 +1389,6 @@ func (c *NetworkWatcher) reconcileGatewayStatus(name types.NamespacedName) error
 		return nil
 	}
 
-	now := metav1.Now()
 	var gatewayConditions []metav1.Condition
 	err := ValidatePeerGateway(*gw)
 	if err != nil {
@@ -1187,14 +1398,14 @@ func (c *NetworkWatcher) reconcileGatewayStatus(name types.NamespacedName) error
 			Status:             metav1.ConditionFalse,
 			Reason:             string(k8s.GatewayReasonInvalid),
 			Message:            fmt.Sprintf("no network started encountered error validating gateway: %v", err.Error()),
-			LastTransitionTime: now,
+			LastTransitionTime: metav1.Now(),
 		}, metav1.Condition{
 			ObservedGeneration: gw.Generation,
 			Type:               constants.SoloConditionPeerConnected,
 			Status:             metav1.ConditionFalse,
 			Reason:             string(k8s.GatewayReasonInvalid),
 			Message:            fmt.Sprintf("no network started encountered error validating gateway: %v", err.Error()),
-			LastTransitionTime: now,
+			LastTransitionTime: metav1.Now(),
 		})
 		return c.setGatewayStatus(log, gw, gatewayConditions)
 	}
@@ -1216,7 +1427,7 @@ func (c *NetworkWatcher) reconcileGatewayStatus(name types.NamespacedName) error
 			Type:               constants.SoloConditionPeerConnected,
 			Status:             metav1.ConditionTrue,
 			Reason:             string(k8s.GatewayReasonProgrammed),
-			LastTransitionTime: now,
+			LastTransitionTime: metav1.Now(),
 		})
 	} else {
 		gatewayConditions = append(gatewayConditions, metav1.Condition{
@@ -1225,7 +1436,7 @@ func (c *NetworkWatcher) reconcileGatewayStatus(name types.NamespacedName) error
 			Status:             metav1.ConditionFalse,
 			Reason:             string(k8s.GatewayReasonPending),
 			Message:            "not connected to peer",
-			LastTransitionTime: now,
+			LastTransitionTime: metav1.Now(),
 		})
 	}
 
@@ -1236,7 +1447,7 @@ func (c *NetworkWatcher) reconcileGatewayStatus(name types.NamespacedName) error
 			Status:             metav1.ConditionUnknown,
 			Reason:             string(k8s.GatewayReasonPending),
 			Message:            "network not yet synced check istiod log for more details",
-			LastTransitionTime: now,
+			LastTransitionTime: metav1.Now(),
 		})
 	} else {
 		gatewayConditions = append(gatewayConditions, metav1.Condition{
@@ -1244,7 +1455,7 @@ func (c *NetworkWatcher) reconcileGatewayStatus(name types.NamespacedName) error
 			Type:               constants.SoloConditionPeeringSucceeded,
 			Status:             metav1.ConditionTrue,
 			Reason:             string(k8s.GatewayReasonProgrammed),
-			LastTransitionTime: now,
+			LastTransitionTime: metav1.Now(),
 		})
 	}
 	return c.setGatewayStatus(log, gw, gatewayConditions)
@@ -1274,4 +1485,26 @@ func (c *NetworkWatcher) enqueueStatusUpdate(name types.NamespacedName) {
 		NamespacedName: name,
 		kind:           Gateway,
 	})
+}
+
+// getSegmentDomain returns the domain for the given segment
+func (c *NetworkWatcher) getSegmentDomain(segmentName string) (string, error) {
+	if segmentName == DefaultSegmentName {
+		return DefaultSegment.Spec.Domain, nil
+	}
+
+	// Check if it's our local segment first (avoid extra lookup)
+	if segmentName == c.GetLocalSegment() {
+		return c.GetLocalSegmentDomain(), nil
+	}
+
+	segment := c.segments.Get(segmentName, PeeringNamespace)
+	if segment == nil {
+		return "", fmt.Errorf("segment %s not found", segmentName)
+	}
+	if segment.Spec.Domain == "" {
+		return "", fmt.Errorf("segment %s has no domain configured", segmentName)
+	}
+
+	return segment.Spec.Domain, nil
 }

@@ -1,0 +1,8 @@
+#!/bin/bash
+# Wrapper that emulates gofmt as a pass-through
+# gengo v2 calls: gofmt -s < input > output
+#
+# We use cat to pass through stdin to stdout without formatting.
+# The generated code will be formatted later anyway.
+
+cat

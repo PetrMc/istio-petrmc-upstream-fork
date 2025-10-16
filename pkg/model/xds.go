@@ -41,6 +41,7 @@ const (
 	WorkloadAuthorizationType = APITypePrefix + "istio.security.Authorization"
 
 	FederatedServiceType = APITypePrefix + "istio.workload.FederatedService"
+	SegmentType          = APITypePrefix + "istio.workload.Segment"
 )
 
 // GetShortType returns an abbreviated form of a type, useful for logging or human friendly messages
@@ -68,6 +69,8 @@ func GetShortType(typeURL string) string {
 		return "WADS"
 	case FederatedServiceType:
 		return "FSDS"
+	case SegmentType:
+		return "SGDS"
 	default:
 		return typeURL
 	}
@@ -100,6 +103,8 @@ func GetMetricType(typeURL string) string {
 		return "wads"
 	case FederatedServiceType:
 		return "fsds"
+	case SegmentType:
+		return "sgds"
 	default:
 		return typeURL
 	}
@@ -131,6 +136,8 @@ func GetResourceType(shortType string) string {
 		return WorkloadAuthorizationType
 	case "FSDS":
 		return FederatedServiceType
+	case "SGDS":
+		return SegmentType
 	default:
 		return shortType
 	}

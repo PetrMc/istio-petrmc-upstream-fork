@@ -45,6 +45,7 @@ import (
 	"istio.io/istio/pkg/workloadapi"
 	"istio.io/istio/pkg/workloadapi/security"
 	"istio.io/istio/platform/discovery/peering"
+	soloapi "istio.io/istio/soloapi/v1alpha1"
 )
 
 func TestPodWorkloads(t *testing.T) {
@@ -1577,6 +1578,7 @@ func TestWorkloadEntryWorkloads(t *testing.T) {
 				WorkloadServicesNamespaceIndex,
 				krttest.GetMockCollection[*v1.Namespace](mock),
 				krttest.GetMockCollection[*v1.Service](mock),
+				krttest.GetMockCollection[*soloapi.Segment](mock),
 			)
 			wrapper := builder(krt.TestingDummyContext{}, tt.we)
 			var res *workloadapi.Workload
@@ -2096,6 +2098,7 @@ func newAmbientUnitTest(t test.Failer) *index {
 		SystemNamespace: systemNS,
 		ClusterID:       testC,
 		DomainSuffix:    "domain.suffix",
+		clusterSegment:  krt.NewStatic[*soloapi.Segment](ptr.Of(&peering.DefaultSegment), true),
 		Flags: FeatureFlags{
 			DefaultAllowFromWaypoint:              features.DefaultAllowFromWaypoint,
 			EnableK8SServiceSelectWorkloadEntries: features.EnableK8SServiceSelectWorkloadEntries,

@@ -82,6 +82,64 @@ func (ServiceScope) EnumDescriptor() ([]byte, []int) {
 	return file_workloadapi_federatedservice_proto_rawDescGZIP(), []int{0}
 }
 
+// Segment allows this cluster to tell peers its own segment and domain.
+// Peers will use this to build domains for global services.
+// Peers must have a Segment resource in their own cluster with a matching name and domain,
+// otherwide we will not peer resources.
+type Segment struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// name of the segment (globally)
+	Name string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	// domain suffix for the segment (in the view of this cluster)
+	Domain        string `protobuf:"bytes,2,opt,name=domain,proto3" json:"domain,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Segment) Reset() {
+	*x = Segment{}
+	mi := &file_workloadapi_federatedservice_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Segment) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Segment) ProtoMessage() {}
+
+func (x *Segment) ProtoReflect() protoreflect.Message {
+	mi := &file_workloadapi_federatedservice_proto_msgTypes[0]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Segment.ProtoReflect.Descriptor instead.
+func (*Segment) Descriptor() ([]byte, []int) {
+	return file_workloadapi_federatedservice_proto_rawDescGZIP(), []int{0}
+}
+
+func (x *Segment) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *Segment) GetDomain() string {
+	if x != nil {
+		return x.Domain
+	}
+	return ""
+}
+
 type FederatedService struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Name represents the name for the service.
@@ -119,7 +177,7 @@ type FederatedService struct {
 
 func (x *FederatedService) Reset() {
 	*x = FederatedService{}
-	mi := &file_workloadapi_federatedservice_proto_msgTypes[0]
+	mi := &file_workloadapi_federatedservice_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -131,7 +189,7 @@ func (x *FederatedService) String() string {
 func (*FederatedService) ProtoMessage() {}
 
 func (x *FederatedService) ProtoReflect() protoreflect.Message {
-	mi := &file_workloadapi_federatedservice_proto_msgTypes[0]
+	mi := &file_workloadapi_federatedservice_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -144,7 +202,7 @@ func (x *FederatedService) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FederatedService.ProtoReflect.Descriptor instead.
 func (*FederatedService) Descriptor() ([]byte, []int) {
-	return file_workloadapi_federatedservice_proto_rawDescGZIP(), []int{0}
+	return file_workloadapi_federatedservice_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *FederatedService) GetName() string {
@@ -238,7 +296,7 @@ type RemoteWaypoint struct {
 
 func (x *RemoteWaypoint) Reset() {
 	*x = RemoteWaypoint{}
-	mi := &file_workloadapi_federatedservice_proto_msgTypes[1]
+	mi := &file_workloadapi_federatedservice_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -250,7 +308,7 @@ func (x *RemoteWaypoint) String() string {
 func (*RemoteWaypoint) ProtoMessage() {}
 
 func (x *RemoteWaypoint) ProtoReflect() protoreflect.Message {
-	mi := &file_workloadapi_federatedservice_proto_msgTypes[1]
+	mi := &file_workloadapi_federatedservice_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -263,7 +321,7 @@ func (x *RemoteWaypoint) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoteWaypoint.ProtoReflect.Descriptor instead.
 func (*RemoteWaypoint) Descriptor() ([]byte, []int) {
-	return file_workloadapi_federatedservice_proto_rawDescGZIP(), []int{1}
+	return file_workloadapi_federatedservice_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *RemoteWaypoint) GetName() string {
@@ -284,7 +342,10 @@ var File_workloadapi_federatedservice_proto protoreflect.FileDescriptor
 
 const file_workloadapi_federatedservice_proto_rawDesc = "" +
 	"\n" +
-	"\"workloadapi/federatedservice.proto\x12\x0eistio.workload\x1a\x1egoogle/protobuf/wrappers.proto\x1a\x1aworkloadapi/workload.proto\"\xdf\x04\n" +
+	"\"workloadapi/federatedservice.proto\x12\x0eistio.workload\x1a\x1egoogle/protobuf/wrappers.proto\x1a\x1aworkloadapi/workload.proto\"5\n" +
+	"\aSegment\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x16\n" +
+	"\x06domain\x18\x02 \x01(\tR\x06domain\"\xdf\x04\n" +
 	"\x10FederatedService\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1c\n" +
 	"\tnamespace\x18\x02 \x01(\tR\tnamespace\x12\x1a\n" +
@@ -322,20 +383,21 @@ func file_workloadapi_federatedservice_proto_rawDescGZIP() []byte {
 }
 
 var file_workloadapi_federatedservice_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_workloadapi_federatedservice_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
+var file_workloadapi_federatedservice_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
 var file_workloadapi_federatedservice_proto_goTypes = []any{
 	(ServiceScope)(0),              // 0: istio.workload.ServiceScope
-	(*FederatedService)(nil),       // 1: istio.workload.FederatedService
-	(*RemoteWaypoint)(nil),         // 2: istio.workload.RemoteWaypoint
-	nil,                            // 3: istio.workload.FederatedService.ProtocolsByPortEntry
-	(*Port)(nil),                   // 4: istio.workload.Port
-	(*wrapperspb.UInt32Value)(nil), // 5: google.protobuf.UInt32Value
+	(*Segment)(nil),                // 1: istio.workload.Segment
+	(*FederatedService)(nil),       // 2: istio.workload.FederatedService
+	(*RemoteWaypoint)(nil),         // 3: istio.workload.RemoteWaypoint
+	nil,                            // 4: istio.workload.FederatedService.ProtocolsByPortEntry
+	(*Port)(nil),                   // 5: istio.workload.Port
+	(*wrapperspb.UInt32Value)(nil), // 6: google.protobuf.UInt32Value
 }
 var file_workloadapi_federatedservice_proto_depIdxs = []int32{
-	4, // 0: istio.workload.FederatedService.ports:type_name -> istio.workload.Port
-	5, // 1: istio.workload.FederatedService.capacity:type_name -> google.protobuf.UInt32Value
-	2, // 2: istio.workload.FederatedService.waypoint:type_name -> istio.workload.RemoteWaypoint
-	3, // 3: istio.workload.FederatedService.protocols_by_port:type_name -> istio.workload.FederatedService.ProtocolsByPortEntry
+	5, // 0: istio.workload.FederatedService.ports:type_name -> istio.workload.Port
+	6, // 1: istio.workload.FederatedService.capacity:type_name -> google.protobuf.UInt32Value
+	3, // 2: istio.workload.FederatedService.waypoint:type_name -> istio.workload.RemoteWaypoint
+	4, // 3: istio.workload.FederatedService.protocols_by_port:type_name -> istio.workload.FederatedService.ProtocolsByPortEntry
 	0, // 4: istio.workload.FederatedService.scope:type_name -> istio.workload.ServiceScope
 	5, // [5:5] is the sub-list for method output_type
 	5, // [5:5] is the sub-list for method input_type
@@ -356,7 +418,7 @@ func file_workloadapi_federatedservice_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_workloadapi_federatedservice_proto_rawDesc), len(file_workloadapi_federatedservice_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   3,
+			NumMessages:   4,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

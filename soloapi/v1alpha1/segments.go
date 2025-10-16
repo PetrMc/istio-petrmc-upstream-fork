@@ -1,0 +1,53 @@
+// Copyright Solo.io, Inc
+//
+// Licensed under a Solo commercial license, not Apache License, Version 2 or any other variant
+
+package v1alpha1
+
+import (
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+)
+
+// +genclient
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+// +kubebuilder:object:root=true
+// +kubebuilder:resource:categories={solo-io,admin},shortName=seg
+// +kubebuilder:subresource:status
+// +kubebuilder:printcolumn:name="Domain",type="string",JSONPath=".spec.domain",description="DNS domain for the segment"
+// +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp",description="Server time when this object was created."
+// +kubebuilder:validation:Optional
+
+// Segment defines a network segment with its own DNS domain
+type Segment struct {
+	metav1.TypeMeta   `json:",inline"` // nolint: revive
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+
+	Spec   SegmentSpec   `json:"spec,omitempty"`
+	Status SegmentStatus `json:"status,omitempty"`
+}
+
+// SegmentSpec defines the desired state of Segment
+type SegmentSpec struct {
+	// Domain is the DNS domain for this segment.
+	// Must be a valid DNS name and cannot be "cluster.local".
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$`
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=63
+	Domain string `json:"domain"`
+}
+
+// SegmentStatus defines the observed state of Segment
+type SegmentStatus struct {
+	// Conditions represent the latest available observations of an object's state
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
+}
+
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+
+// SegmentList contains a list of Segment
+type SegmentList struct {
+	metav1.TypeMeta `json:",inline"` // nolint: revive
+	metav1.ListMeta `json:"metadata,omitempty"`
+	Items           []Segment `json:"items"`
+}

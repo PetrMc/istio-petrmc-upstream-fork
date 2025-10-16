@@ -39,6 +39,7 @@ import (
 	"istio.io/istio/pkg/log"
 	"istio.io/istio/pkg/ptr"
 	"istio.io/istio/pkg/typemap"
+	soloapi "istio.io/istio/soloapi/client/clientset/versioned"
 )
 
 type ClientGetter interface {
@@ -56,6 +57,9 @@ type ClientGetter interface {
 
 	// Istio returns the Istio kube client.
 	Istio() istioclient.Interface
+
+	// Solo returns the Solo kube client.
+	Solo() soloapi.Interface
 
 	// GatewayAPI returns the gateway-api kube client.
 	GatewayAPI() gatewayapiclient.Interface

@@ -33,6 +33,7 @@ func InitGenerators(
 	systemNameSpace string,
 	clusterID cluster.ID,
 	internalDebugMux *http.ServeMux,
+	sendSegments bool,
 ) {
 	env := s.Env
 	generators := map[string]model.XdsResourceGenerator{}
@@ -56,6 +57,10 @@ func InitGenerators(
 	if features.EnablePeering {
 		// SOLO: for peering, we specifically request Services
 		generators[v3.FederatedServiceType] = &xds.FederatedServiceGenerator{Server: s}
+		// SOLO: allow disabling segments for backwards compat testing
+		if sendSegments {
+			generators[v3.SegmentType] = &xds.SegmentGenerator{Server: s, SystemNamespace: systemNameSpace}
+		}
 	}
 	generators[v3.WorkloadAuthorizationType] = &xds.WorkloadRBACGenerator{Server: s}
 

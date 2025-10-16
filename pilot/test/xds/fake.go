@@ -112,6 +112,9 @@ type FakeOptions struct {
 	DisableSecretAuthorization bool
 	Services                   []*model.Service
 	Gateways                   []model.NetworkGateway
+
+	// SOLO allow testing backwards compat where an xds server does not send segments
+	EnableSegmentsServer bool
 }
 
 type FakeDiscoveryServer struct {
@@ -195,6 +198,7 @@ func NewFakeDiscoveryServer(t test.Failer, opts FakeOptions) *FakeDiscoveryServe
 			SkipRun:         true,
 			ConfigCluster:   k8sCluster == opts.DefaultClusterName,
 			MeshWatcher:     meshwatcher.NewTestWatcher(m),
+			SystemNamespace: "istio-system",
 			CRDs: []schema.GroupVersionResource{
 				// Install all CRDs used (mostly in Ambient)
 				gvr.AuthorizationPolicy,
@@ -209,6 +213,7 @@ func NewFakeDiscoveryServer(t test.Failer, opts FakeOptions) *FakeDiscoveryServe
 				gvr.ReferenceGrant,
 				gvr.ServiceEntry,
 				gvr.KubernetesGateway,
+				gvr.Segment,
 			},
 		})
 		stop := test.NewStop(t)
@@ -264,7 +269,7 @@ func NewFakeDiscoveryServer(t test.Failer, opts FakeOptions) *FakeDiscoveryServe
 		t.Fatal(err)
 	}
 
-	bootstrap.InitGenerators(s, core.NewConfigGenerator(s.Cache), "istio-system", "", nil)
+	bootstrap.InitGenerators(s, core.NewConfigGenerator(s.Cache), "istio-system", "", nil, opts.EnableSegmentsServer)
 	s.Generators[v3.SecretType] = xds.NewSecretGen(creds, s.Cache, opts.DefaultClusterName, nil)
 	s.Generators[v3.ExtensionConfigurationType].(*xds.EcdsGenerator).SetCredController(creds)
 

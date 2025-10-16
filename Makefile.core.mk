@@ -320,6 +320,7 @@ gen: \
 	proto \
 	copy-templates \
 	gen-addons \
+	gen-soloapi \
 	update-golden ## Update all generated code.
 
 gen-check: gen check-clean-repo

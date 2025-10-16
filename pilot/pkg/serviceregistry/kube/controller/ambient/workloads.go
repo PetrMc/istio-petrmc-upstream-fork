@@ -55,6 +55,7 @@ import (
 	"istio.io/istio/pkg/workloadapi"
 	ecsplatform "istio.io/istio/platform/discovery/ecs"
 	"istio.io/istio/platform/discovery/peering"
+	soloapi "istio.io/istio/soloapi/v1alpha1"
 )
 
 // WorkloadsCollection builds out the core Workload object type used in ambient mode.
@@ -74,6 +75,7 @@ func (a *index) WorkloadsCollection(
 	endpointSlices krt.Collection[*discovery.EndpointSlice],
 	namespaces krt.Collection[*v1.Namespace],
 	services krt.Collection[*v1.Service],
+	segments krt.Collection[*soloapi.Segment],
 	opts krt.OptionsBuilder,
 ) krt.Collection[model.WorkloadInfo] {
 	WorkloadServicesNamespaceIndex := krt.NewNamespaceIndex(workloadServices)
@@ -114,6 +116,7 @@ func (a *index) WorkloadsCollection(
 			WorkloadServicesNamespaceIndex,
 			namespaces,
 			services,
+			segments,
 		),
 		opts.WithName("WorkloadEntryWorkloads")...,
 	)
@@ -173,11 +176,16 @@ func MergedGlobalWorkloadsCollection(
 	globalWorkloadServices krt.Collection[krt.Collection[krt.ObjectWithCluster[model.ServiceInfo]]],
 	globalWorkloadServicesByCluster krt.Index[cluster.ID, krt.Collection[krt.ObjectWithCluster[model.ServiceInfo]]],
 	globalNetworks networkCollections,
+	localSystemNamespace string,
 	localClusterID cluster.ID,
 	flags FeatureFlags,
 	domainSuffix string,
 	opts krt.OptionsBuilder,
 ) krt.Collection[model.WorkloadInfo] {
+	// SOLO: OSS multicluster does not use segments and shouldn't be enabled alongside peering
+	segments := krt.NewStaticCollection[*soloapi.Segment](nil, nil)
+	clusterSegment := krt.NewStatic[*soloapi.Segment](nil, true)
+
 	// More setup to do here so we can't use nestedCollectionFromLocalAndRemote
 	LocalWorkloadServicesNamespaceIndex := krt.NewNamespaceIndex(localWorkloadServices)
 	LocalEndpointSlicesByIPIndex := endpointSliceAddressIndex(localCluster.EndpointSlices())
@@ -234,7 +242,10 @@ func MergedGlobalWorkloadsCollection(
 			localNetworkGetter,
 			globalNetworks.NetworkGateways,
 			globalNetworks.GatewaysByNetwork,
+			clusterSegment,
+			segments,
 			flags,
+			localSystemNamespace,
 		),
 		opts.WithName("LocalWorkloadEntryWorkloads")...,
 	)
@@ -507,7 +518,10 @@ func MergedGlobalWorkloadsCollection(
 					},
 					globalNetworks.NetworkGateways,
 					globalNetworks.GatewaysByNetwork,
+					clusterSegment,
+					segments,
 					flags,
+					localSystemNamespace,
 				),
 				append(
 					opts,
@@ -678,7 +692,10 @@ func workloadEntryWorkloadBuilder(
 	networkGetter func(krt.HandlerContext) network.ID,
 	networkGateways krt.Collection[NetworkGateway],
 	gatewaysByNetwork krt.Index[network.ID, NetworkGateway],
+	clusterSegment krt.Singleton[*soloapi.Segment],
+	segments krt.Collection[*soloapi.Segment],
 	flags FeatureFlags,
+	systemNamespace string,
 ) krt.TransformationSingle[*networkingclient.WorkloadEntry, model.WorkloadInfo] {
 	peeringEnabled := features.EnablePeering
 	return func(ctx krt.HandlerContext, wle *networkingclient.WorkloadEntry) *model.WorkloadInfo {
@@ -697,20 +714,39 @@ func workloadEntryWorkloadBuilder(
 
 		var services []model.ServiceInfo
 		if wasPeerObject {
+			defaultSegment := peering.DefaultSegment
+
+			// service segment defined on labels
+			serviceSegmentName := ptr.NonEmptyOrDefault(wle.Labels[peering.SegmentLabel], peering.DefaultSegmentName)
+			serviceSegment := ptr.OrDefault(
+				ptr.Flatten(krt.FetchOne(ctx, segments, krt.FilterKey(types.NamespacedName{
+					Namespace: systemNamespace, // always look in system ns
+					Name:      wle.Labels[peering.SegmentLabel],
+				}.String()))),
+				defaultSegment,
+			)
+
 			// This is a peering object, so this WE is a pointer to a remote cluster. Attach to the global service
 			svc := wle.Labels[peering.ParentServiceLabel]
-			svcKey := fmt.Sprintf("%s/%s.%s%s", wle.Namespace, svc, wle.Namespace, peering.DomainSuffix)
+			peeringSuffix := "." + serviceSegment.Spec.Domain
+
+			svcKey := fmt.Sprintf("%s/%s.%s%s", wle.Namespace, svc, wle.Namespace, peeringSuffix)
 			if nodePortPeering {
 				// this is  a WE for nodeport peering,
 				// logical ns is the (parent) e/w gw service ns and
 				// hostname is the e/w gw service account and remote networ
-				svcKey = fmt.Sprintf("%s/%s.%s%s", wle.Labels[peering.ParentServiceNamespaceLabel], svc, wle.Spec.Network, peering.DomainSuffix)
+				svcKey = fmt.Sprintf("%s/%s.%s%s", wle.Labels[peering.ParentServiceNamespaceLabel], svc, wle.Spec.Network, peeringSuffix)
 			}
 			services = krt.Fetch(ctx, workloadServices, krt.FilterKey(svcKey), krt.FilterGeneric(func(a any) bool {
 				return a.(model.ServiceInfo).Source.Kind == kind.ServiceEntry
 			}))
+
+			// if the system namespace label matches the segment of this service
+			segmentLocal := localSegmentName(ctx, clusterSegment) == serviceSegmentName
 			// use empty map for namespace labels to re-use the calculate scope function
-			if peering.CalculateScope(wle.GetLabels(), map[string]string{}) == peering.ServiceScopeGlobalOnly {
+			scope := peering.CalculateScope(wle.GetLabels(), map[string]string{})
+
+			if scope == peering.ServiceScopeGlobalOnly && segmentLocal {
 				// If we are taking over the Service, also attach to that
 				services = append(services, krt.Fetch(
 					ctx, workloadServices,
@@ -810,6 +846,7 @@ func (a *index) workloadEntryWorkloadBuilder(
 	workloadServicesNamespaceIndex krt.Index[string, model.ServiceInfo],
 	namespaces krt.Collection[*v1.Namespace],
 	services krt.Collection[*v1.Service],
+	segments krt.Collection[*soloapi.Segment],
 ) krt.TransformationSingle[*networkingclient.WorkloadEntry, model.WorkloadInfo] {
 	localNetworkGetter := func(ctx krt.HandlerContext) network.ID {
 		return a.Network(ctx)
@@ -831,7 +868,10 @@ func (a *index) workloadEntryWorkloadBuilder(
 		localNetworkGetter,
 		a.networks.NetworkGateways,
 		a.networks.GatewaysByNetwork,
+		a.clusterSegment,
+		segments,
 		a.Flags,
+		a.SystemNamespace,
 	)
 }
 

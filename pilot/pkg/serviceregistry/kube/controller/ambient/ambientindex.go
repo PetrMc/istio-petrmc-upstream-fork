@@ -53,6 +53,8 @@ import (
 	"istio.io/istio/pkg/slices"
 	"istio.io/istio/pkg/util/sets"
 	"istio.io/istio/pkg/workloadapi"
+	"istio.io/istio/platform/discovery/peering"
+	soloapi "istio.io/istio/soloapi/v1alpha1"
 )
 
 type Index interface {
@@ -114,6 +116,8 @@ type index struct {
 	federatedServices federatedServicesCollection
 
 	authorizationPolicies krt.Collection[model.WorkloadAuthorization]
+
+	clusterSegment krt.Singleton[*soloapi.Segment]
 
 	statusQueue *statusqueue.StatusQueue
 
@@ -293,6 +297,17 @@ func New(options Options) Index {
 		return a
 	}
 
+	segments := kclient.NewDelayedInformer[*soloapi.Segment](options.Client,
+		gvr.Segment, kubetypes.StandardInformer, configFilter)
+	Segments := krt.WrapClient[*soloapi.Segment](segments, opts.With(
+		append(opts.WithName("informer/Segments"),
+			krt.WithMetadata(krt.Metadata{
+				multicluster.ClusterKRTMetadataKey: options.ClusterID,
+			}),
+		)...,
+	)...)
+	a.clusterSegment = clusterSegment(options.SystemNamespace, Namespaces, Segments)
+
 	Networks := buildNetworkCollections(Namespaces, Gateways, options, opts)
 	a.networks = Networks
 	// N.B Waypoints depends on networks
@@ -423,6 +438,7 @@ func New(options Options) Index {
 		EndpointSlices,
 		Namespaces,
 		Services,
+		Segments,
 		opts,
 	)
 
@@ -505,6 +521,16 @@ func New(options Options) Index {
 			func(i model.FederatedService) model.ConfigKey {
 				return model.ConfigKey{Kind: kind.FederatedService, Name: i.ResourceName()}
 			}), false)
+
+		a.clusterSegment.Register(func(segment krt.Event[*soloapi.Segment]) {
+			// Push Segment changes to peer clusters
+			a.XDSUpdater.ConfigUpdate(&model.PushRequest{
+				ConfigsUpdated: sets.New(model.ConfigKey{
+					Kind: kind.Segment,
+					Name: peering.ClusterSegmentResourceName,
+				}),
+			})
+		})
 
 		a.federatedServices.Collection = FederatedServices
 		a.federatedServices.WaypointsCollection = FederatedWaypoints
@@ -788,6 +814,19 @@ func (a *index) ServicesWithWaypointOrRemoteWaypoint() sets.Set[host.Name] {
 		}
 	}
 	return res
+}
+
+func (a *index) GetSegmentInfo() *model.SegmentInfo {
+	segment := ptr.Flatten(a.clusterSegment.Get())
+	if segment == nil {
+		// Return default segment if none is configured
+		return &model.SegmentInfo{
+			Segment: &peering.DefaultSegment,
+		}
+	}
+	return &model.SegmentInfo{
+		Segment: segment,
+	}
 }
 
 func (a *index) ServicesForWaypoint(key model.WaypointKey) []model.ServiceInfo {

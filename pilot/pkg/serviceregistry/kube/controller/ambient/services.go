@@ -52,6 +52,7 @@ import (
 	"istio.io/istio/pkg/slices"
 	"istio.io/istio/pkg/workloadapi"
 	"istio.io/istio/platform/discovery/peering"
+	soloapi "istio.io/istio/soloapi/v1alpha1"
 )
 
 func (a *index) ServicesCollection(
@@ -148,6 +149,7 @@ func GlobalMergedWorkloadServicesCollection(
 				namespaces,
 				services,
 				localServiceEntries,
+				krt.NewStatic[*soloapi.Segment](nil, true), // SOLO this codepath should be unused in peering mode
 				meshConfig,
 				domainSuffix,
 				false,
@@ -191,6 +193,7 @@ func serviceServiceBuilder(
 	namespaces krt.Collection[*v1.Namespace],
 	services krt.Collection[*v1.Service],
 	serviceEntries krt.Collection[*networkingclient.ServiceEntry],
+	clusterSegment krt.Singleton[*soloapi.Segment],
 	meshConfig krt.Singleton[MeshConfig],
 	domainSuffix string,
 	localCluster bool,
@@ -243,7 +246,16 @@ func serviceServiceBuilder(
 		waypointStatus.Error = wperr
 
 		soloScope := getServiceScope(ctx, namespaces, s)
-		svc := constructService(ctx, s, waypoint, serviceEntries, domainSuffix, soloScope, networkGetter)
+		svc := constructService(
+			ctx,
+			s,
+			waypoint,
+			serviceEntries,
+			clusterSegment,
+			domainSuffix,
+			soloScope,
+			networkGetter,
+		)
 
 		// SOLO: handle nodeport gateway services for peering
 		var hboneNodePort uint32
@@ -399,6 +411,7 @@ func (a *index) serviceServiceBuilder(
 		namespaces,
 		services,
 		serviceEntries,
+		a.clusterSegment,
 		meshConfig,
 		a.DomainSuffix,
 		true,
@@ -584,6 +597,7 @@ func constructService(
 	svc *v1.Service,
 	w *Waypoint,
 	serviceEntries krt.Collection[*networkingclient.ServiceEntry],
+	clusterSegment krt.Singleton[*soloapi.Segment],
 	domainSuffix string,
 	scope string,
 	networkGetter func(krt.HandlerContext) network.ID,
@@ -652,7 +666,9 @@ func constructService(
 	// as remote SANs will be placed on the peered SE
 	var sans []string
 	if scope == peering.ServiceScopeGlobalOnly {
-		name := fmt.Sprintf("%s/autogen.%s.%s", peering.PeeringNamespace, svc.Namespace, svc.Name)
+		// global-only must be using the local segment
+		seName := peering.ServiceEntryName(svc.Name, svc.Namespace, localSegmentName(ctx, clusterSegment))
+		name := fmt.Sprintf("%s/%s", peering.PeeringNamespace, seName)
 		se := ptr.Flatten(krt.FetchOne(ctx, serviceEntries, krt.FilterKey(name)))
 		if se != nil {
 			sans = se.Spec.SubjectAltNames

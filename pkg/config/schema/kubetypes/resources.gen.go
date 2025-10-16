@@ -34,10 +34,13 @@ import (
 	apiistioioapitelemetryv1 "istio.io/client-go/pkg/apis/telemetry/v1"
 	"istio.io/istio/pkg/config"
 	"istio.io/istio/pkg/config/schema/gvk"
+	solov1alpha1 "istio.io/istio/soloapi/v1alpha1"
 )
 
 func getGvk(obj any) (config.GroupVersionKind, bool) {
 	switch obj.(type) {
+	case *solov1alpha1.Segment:
+		return gvk.Segment, true
 	case *istioioapisecurityv1beta1.AuthorizationPolicy:
 		return gvk.AuthorizationPolicy, true
 	case *apiistioioapisecurityv1.AuthorizationPolicy:

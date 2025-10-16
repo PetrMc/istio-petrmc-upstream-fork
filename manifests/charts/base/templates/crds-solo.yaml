@@ -1,0 +1,23 @@
+# Solo.io CRDs - templated for Helm management
+{{- if .Values.base.enableCRDTemplates }}
+{{- $replacement := include "istio.labels" . | fromYaml}}
+{{- range $crd := .Files.Get "files/crd-solo.gen.yaml"|splitList "\n---\n"}}
+{{- $name := (index ($crd |fromYaml) "metadata" "name") }}
+{{- if not (has $name $.Values.base.excludedCRDs)}}
+{{- $asDict := ($crd | fromYaml) }}
+# If we are templating these CRDs, we want to wipe out the "static"/legacy
+# labels and replace them with the standard templated istio ones.
+# This allows the continued use of `kubectl apply -f crd-solo.gen.yaml`
+# without any templating+the old labels, if desired.
+{{- $_ := set $asDict.metadata "labels" $replacement }}
+{{- if not $asDict.metadata.annotations }}
+{{- $_ := set $asDict.metadata "annotations" (dict) }}
+{{- end }}
+{{- $_ := set $asDict.metadata.annotations "helm.sh/resource-policy" "keep" }}
+{{$asDict | toYaml }}
+---
+{{- end }}
+{{- end }}
+{{- else }}
+{{ .Files.Get "files/crd-solo.gen.yaml" }}
+{{- end }}
