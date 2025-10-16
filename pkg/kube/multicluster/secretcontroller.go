@@ -73,6 +73,8 @@ type ClientBuilder = func(kubeConfig []byte, clusterId cluster.ID, configOverrid
 
 // Controller is the controller implementation for Secret resources
 type Controller struct {
+	disabled bool
+
 	namespace            string
 	configClusterID      cluster.ID
 	configCluster        *Cluster
@@ -134,17 +136,31 @@ func NewController(kubeclientset kube.Client, namespace string, clusterID cluste
 		secrets:         secrets,
 		configOverrides: configOverrides,
 		meshWatcher:     meshWatcher,
+		disabled:        features.DisableRemoteSecrets,
 	}
 
-	// Queue does NOT retry. The only error that can occur is if the kubeconfig is
-	// malformed. This is a static analysis that cannot be resolved by retry. Actual
-	// connectivity issues would result in HasSynced returning false rather than an
-	// error. In this case, things will be retried automatically (via informers or
-	// others), and the time is capped by RemoteClusterTimeout).
-	controller.queue = controllers.NewQueue("multicluster secret",
-		controllers.WithReconciler(controller.processItem))
+	if features.DisableRemoteSecrets {
+		log.Info("Secrets based multi-cluster is disabled. Remote secrets will be ignored. " +
+			"Cross-cluster service discovery can only be done via peering.")
+	}
 
-	secrets.AddEventHandler(controllers.ObjectHandler(controller.queue.AddObject))
+	if features.EnablePeering && !features.DisableRemoteSecrets {
+		log.Warn("Secrets based multi-cluster does not work well with peering based multi-cluster." +
+			" Consider setting DISABLE_LEGACY_MULTICLUSTER=true for this revision.")
+	}
+
+	// SOLO no queue, no events when this is disabled
+	if !features.DisableRemoteSecrets {
+		// Queue does NOT retry. The only error that can occur is if the kubeconfig is
+		// malformed. This is a static analysis that cannot be resolved by retry. Actual
+		// connectivity issues would result in HasSynced returning false rather than an
+		// error. In this case, things will be retried automatically (via informers or
+		// others), and the time is capped by RemoteClusterTimeout).
+		controller.queue = controllers.NewQueue("multicluster secret",
+			controllers.WithReconciler(controller.processItem))
+
+		secrets.AddEventHandler(controllers.ObjectHandler(controller.queue.AddObject))
+	}
 	return controller
 }
 
@@ -175,6 +191,11 @@ func (c *Controller) Run(stopCh <-chan struct{}) error {
 	// run handlers for the config cluster; do not store this *Cluster in the ClusterStore or give it a SyncTimeout
 	// this is done outside the goroutine, we should block other Run/startFuncs until this is registered
 	c.configClusterSyncers = c.handleAdd(c.configCluster)
+
+	// SOLO
+	if c.disabled {
+		return nil
+	}
 	go func() {
 		t0 := time.Now()
 		log.Info("Starting multicluster remote secrets controller")
@@ -194,6 +215,11 @@ func (c *Controller) Run(stopCh <-chan struct{}) error {
 }
 
 func (c *Controller) HasSynced() bool {
+	// SOLO
+	if c.disabled {
+		return true
+	}
+
 	if !c.queue.HasSynced() {
 		log.Debug("secret controller did not sync secrets presented at startup")
 		// we haven't finished processing the secrets that were present at startup

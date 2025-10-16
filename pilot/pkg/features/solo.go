@@ -24,6 +24,9 @@ var EnableAmbientEnvoyFilterUnlicensed, EnableAmbientEnvoyFilterSet = env.Regist
 var EnablePeering, EnablePeeringExplicitly = env.Register("ENABLE_PEERING_DISCOVERY", false,
 	"If enabled, cross-cluster service discovery will be done via peering.").Lookup()
 
+var DisableRemoteSecrets, _ = env.Register("DISABLE_LEGACY_MULTICLUSTER", false,
+	"If enabled, cross-cluster service discovery can ONLY be done via peering. Remote secrets will be ignored.").Lookup()
+
 var EnableEnvoyMultiNetworkHBONE = func() bool {
 	v, f := env.Register("ENABLE_AMBIENT_ENVOY_MULTI_NETWORK", false,
 		"If enabled, ambient multi-network mode will work for Envoy based data-planes (Sidecar, Gateway, Waypoint).").Lookup()

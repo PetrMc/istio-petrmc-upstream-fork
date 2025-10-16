@@ -1,0 +1,16 @@
+apiVersion: release-notes/v2
+
+kind: feature
+
+area: traffic-management
+
+issue:
+  - https://github.com/solo-io/istio/issues/3411
+
+releaseNotes:
+  - |
+    **Added** an envirionment variable to istiod `DISABLE_LEGACY_MULTICLUSTER`
+    to disable legacy remote secrets based mult-cluster. This is useful for
+    migrating from a legacy sidecar environment by setting this on the new
+    revision of the control plane.
+

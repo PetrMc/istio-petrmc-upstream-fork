@@ -260,7 +260,7 @@ func New(options Options) Index {
 
 	// In the multicluster use-case, we populate the collections with global, dynamically changing data.
 	// We only do this if this cluster is the config cluster
-	if features.EnableAmbientMultiNetwork && options.IsConfigCluster {
+	if !features.EnablePeering && !features.DisableRemoteSecrets && features.EnableAmbientMultiNetwork && options.IsConfigCluster {
 		mcCollections := multicluster.NewRemoteClusterCollections(
 			Namespaces,
 			Pods,

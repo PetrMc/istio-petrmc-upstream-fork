@@ -75,9 +75,9 @@ func TestMain(m *testing.M) {
 			return nil
 		}).
 		Setup(istio.Setup(&i, func(ctx resource.Context, cfg *istio.Config) {
-			ctx.Settings().SkipVMs()                 // can't deploy VMs in this mode
-			cfg.DeployEastWestGW = false             // this is the sidecar/SNI eastwest
-			cfg.SkipDeployCrossClusterSecrets = true // TODO disable this, secrets shouldn't break peering
+			ctx.Settings().SkipVMs()                  // can't deploy VMs in this mode
+			cfg.DeployEastWestGW = false              // this is the sidecar/SNI eastwest
+			cfg.SkipDeployCrossClusterSecrets = false // remote secrets existing must not break our multi-cluster
 			cfg.SetUniqueTrustDomain = true
 			cfg.ControlPlaneValues = `
 profile: ambient
@@ -91,6 +91,7 @@ values:
       PILOT_ENABLE_IP_AUTOALLOCATE: "true"
       PILOT_SKIP_VALIDATE_TRUST_DOMAIN: "true"
       PEERING_ENABLE_FLAT_NETWORKS: "true"
+      DISABLE_LEGACY_MULTICLUSTER: "true"
   cni:
     ambient:
       dnsCapture: true
