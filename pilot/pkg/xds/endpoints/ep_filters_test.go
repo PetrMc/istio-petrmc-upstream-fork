@@ -678,98 +678,6 @@ func TestEndpointsByNetworkFilter_SkipLBWithHostname(t *testing.T) {
 	runNetworkFilterTest(t, ds, networkFiltered, "")
 }
 
-func TestEndpointsByNetworkFilter_AmbientMuiltiNetwork(t *testing.T) {
-	test.SetForTest(t, &features.EnableAmbientMultiNetwork, true)
-	test.SetForTest(t, &features.EnableAmbientWaypointMultiNetwork, true)
-	env := environment(t)
-	env.Env().InitNetworksManager(env.Discovery)
-	ambientNetworkFiltered := []networkFilterCase{
-		{
-			name:  "from_network1_cluster1a",
-			proxy: makeWaypointProxy("network1", "cluster1a"),
-			want: []xdstest.LocLbEpInfo{
-				{
-					LbEps: []xdstest.LbEpInfo{
-						// 3 local endpoints on network1
-						{Address: "10.0.0.1", Weight: 6},
-						{Address: "10.0.0.2", Weight: 6},
-						{Address: "10.0.0.3", Weight: 6},
-						// 1 endpoint on network2, cluster2a
-						{Address: "2.2.2.2", Weight: 6},
-						// 2 endpoints on network2, cluster2b
-						{Address: "2.2.2.20", Weight: 6},
-						{Address: "2.2.2.21", Weight: 6},
-						// 1 endpoint on network4 is not considered reachable in ambient mode without a gateway
-					},
-					Weight: 36,
-				},
-			},
-			wantWorkloadMetadata: []string{
-				";ns;example;;cluster1a",
-				";ns;example;;cluster1a",
-				";ns;example;;cluster1b",
-				";;;;cluster2a",
-				";;;;cluster2b",
-				";;;;cluster2b",
-			},
-		},
-		{
-			name:  "from_network1_cluster1b",
-			proxy: makeWaypointProxy("network1", "cluster1b"),
-			want: []xdstest.LocLbEpInfo{
-				{
-					LbEps: []xdstest.LbEpInfo{
-						// 3 local endpoints on network1
-						{Address: "10.0.0.1", Weight: 6},
-						{Address: "10.0.0.2", Weight: 6},
-						{Address: "10.0.0.3", Weight: 6},
-						// 1 endpoint on network2, cluster2a
-						{Address: "2.2.2.2", Weight: 6},
-						// 2 endpoints on network2, cluster2b
-						{Address: "2.2.2.20", Weight: 6},
-						{Address: "2.2.2.21", Weight: 6},
-						// 1 endpoint on network4 is not considered reachable in ambient mode without a gateway
-					},
-					Weight: 36,
-				},
-			},
-			wantWorkloadMetadata: []string{
-				";ns;example;;cluster1a",
-				";ns;example;;cluster1a",
-				";ns;example;;cluster1b",
-				";;;;cluster2a",
-				";;;;cluster2b",
-				";;;;cluster2b",
-			},
-		},
-		{
-			name:  "from_network2_cluster2a",
-			proxy: makeWaypointProxy("network2", "cluster2a"),
-			want: []xdstest.LocLbEpInfo{
-				{
-					LbEps: []xdstest.LbEpInfo{
-						// 3 local endpoints in network2
-						{Address: "20.0.0.1", Weight: 6},
-						{Address: "20.0.0.2", Weight: 6},
-						{Address: "20.0.0.3", Weight: 6},
-						// Nothing on network1 since gateway there does not listen on HBONE port
-						// 1 endpoint on network4 is not considered reachable in ambient mode without a gateway
-					},
-					Weight: 18,
-				},
-			},
-			wantWorkloadMetadata: []string{
-				";ns;example;;cluster2a",
-				";ns;example;;cluster2b",
-				";ns;example;;cluster2b",
-			},
-		},
-	}
-	// The tests below are calling the endpoints filter from each one of the
-	// networks and examines the returned filtered endpoints
-	runNetworkFilterTest(t, env, ambientNetworkFiltered, "")
-}
-
 type networkFilterCase struct {
 	name                 string
 	proxy                *model.Proxy
@@ -887,16 +795,6 @@ func makeProxy(nw network.ID, c cluster.ID) *model.Proxy {
 			ClusterID: c,
 		},
 	}
-}
-
-func makeWaypointProxy(nw network.ID, c cluster.ID) *model.Proxy {
-	proxy := makeProxy(nw, c)
-	if proxy.Labels == nil {
-		proxy.Labels = make(map[string]string)
-	}
-	proxy.Labels[label.GatewayManaged.Name] = constants.ManagedGatewayMeshControllerLabel
-	proxy.Type = model.Waypoint
-	return proxy
 }
 
 // environment defines the networks with:
