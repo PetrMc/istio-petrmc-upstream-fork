@@ -678,7 +678,7 @@ func TestEndpointsByNetworkFilter_SkipLBWithHostname(t *testing.T) {
 }
 
 func TestEndpointsByNetworkFilter_AmbientMuiltiNetwork(t *testing.T) {
-	t.Skip("Solo has different multicluster implementation - upstream ambient multi-network test not applicable. See https://github.com/solo-io/istio/issues/3622")
+	t.Skip("https://github.com/solo-io/istio/issues/3622")
 
 	test.SetForTest(t, &features.EnableAmbientMultiNetwork, true)
 	test.SetForTest(t, &features.EnableAmbientWaypointMultiNetwork, true)
