@@ -939,4 +939,3 @@ func isEastWestGateway(node *model.Proxy) bool {
 
 	return isManagedGateway && controller == constants.ManagedGatewayEastWestControllerLabel
 }
-
