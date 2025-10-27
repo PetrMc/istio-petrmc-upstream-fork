@@ -85,10 +85,6 @@ func (w PeeringNamespaceWrapper) UpdateStatus(config config.Config) (newRevision
 	return w.inner.UpdateStatus(config)
 }
 
-func (w PeeringNamespaceWrapper) Patch(orig config.Config, patchFn config.PatchFunc) (string, error) {
-	return w.inner.Patch(orig, patchFn)
-}
-
 func (w PeeringNamespaceWrapper) Delete(typ config.GroupVersionKind, name, namespace string, resourceVersion *string) error {
 	return w.inner.Delete(typ, name, namespace, resourceVersion)
 }
