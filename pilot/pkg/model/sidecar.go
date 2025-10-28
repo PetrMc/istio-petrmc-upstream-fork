@@ -40,6 +40,9 @@ const (
 	wildcardNamespace = "*"
 	currentNamespace  = "."
 	wildcardService   = host.Name("*")
+	// SOLO: label to indicate a service is unique to ambient nodeport peering case
+	// can't import this from peering pkg due to circular import cycle
+	peeringNodeClusterLabel = "node.peer.solo.io/cluster"
 )
 
 var (
@@ -679,6 +682,11 @@ func (ilw *IstioEgressListenerWrapper) selectServices(services []*Service, confi
 	importedServices := make([]*Service, 0)
 	wildcardHosts, wnsFound := hostsByNamespace[wildcardNamespace]
 	for _, s := range services {
+		// SOLO: don't include services unique to ambient nodeport peering case
+		if s != nil && s.Attributes.Labels[peeringNodeClusterLabel] != "" {
+			continue
+		}
+		// SOLO end
 		configNamespace := s.Attributes.Namespace
 
 		// Check if there is an explicit import of form ns/* or ns/host

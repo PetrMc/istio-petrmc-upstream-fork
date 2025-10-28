@@ -6,8 +6,9 @@ package constants
 
 const (
 	// Solo status condition types
-	SoloConditionPeeringSucceeded = "gloo.solo.io/PeeringSucceeded"
-	SoloConditionPeerConnected    = "gloo.solo.io/PeerConnected"
+	SoloConditionPeeringSucceeded        = "gloo.solo.io/PeeringSucceeded"
+	SoloConditionPeerConnected           = "gloo.solo.io/PeerConnected"
+	SoloConditionPeerDataPlaneProgrammed = "gloo.solo.io/PeerDataPlaneProgrammed"
 
 	// Solo annotations
 	// applied to a istio-eastwest gateway resource, indicates the type of data plane service to use for peering.

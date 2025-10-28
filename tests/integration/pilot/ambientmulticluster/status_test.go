@@ -82,6 +82,13 @@ func TestStatus(t *testing.T) {
 						Status:             metav1.ConditionTrue,
 						Reason:             string(k8s.GatewayReasonProgrammed),
 					},
+					{
+						ObservedGeneration: 1,
+						Type:               constants.SoloConditionPeerDataPlaneProgrammed,
+						Status:             metav1.ConditionTrue,
+						Reason:             string(k8s.GatewayReasonProgrammed),
+						Message:            "peering data plane programmed for cross-network traffic with LoadBalancer service type",
+					},
 				},
 			}
 			AssertPeerGatewayStatus(t, localCluster, localToRemoteGwName, peeringNamespace, expectedStatus)

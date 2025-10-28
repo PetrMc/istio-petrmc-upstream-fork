@@ -6,6 +6,7 @@ package peering_test
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"net"
 	"reflect"
@@ -1479,6 +1480,227 @@ func TestPeering(t *testing.T) {
 			DesiredSE{Name: "autogen.foo.default.svc1", Hostname: "svc1.default.new-foo.internal"},
 		)
 	})
+
+	t.Run("nodeport peering", func(t *testing.T) {
+		c1 := NewCluster(t, "c1", "c1")
+		c2 := NewCluster(t, "c2", "c2")
+		c2.ConnectByNodePortTo(c1)
+
+		var (
+			nodeName         = "node1"
+			nodeAddress      = "1.2.3.4"
+			nodeAddressHash  = fmt.Sprintf("%x", sha256.Sum256([]byte(nodeAddress)))[:8]
+			nodeWEName       = fmt.Sprintf("autogen.node.%v.%v.%v", c1.ClusterName, nodeName, nodeAddressHash)
+			gwServiceAccount = "istio-eastwest"
+			gwSEName         = fmt.Sprintf("autogen.peering.%v.%v", gwServiceAccount, c1.NetworkName)
+		)
+
+		c1.CreateNode(nodeName, nodeAddress)
+		c1.CreateNodePortGatewayService() // enables node workloads to be sent to peer
+		c1.CreateService("svc1", true, nil)
+		c1.CreatePod("svc1", "pod1", "2.3.4.5")
+		// when nodeport peering is enabled, we should have a gw-derived SE
+		AssertSE(c2,
+			DesiredSE{Name: gwSEName},
+			// global service SE created from corresponding we
+			DesiredSE{Name: "autogen.default.svc1"},
+		)
+		// SE should be well formed
+		AssertSELabels(c2, gwSEName, map[string]string{
+			peering.NodePeerClusterLabel:        c1.ClusterName,
+			peering.ParentGatewayLabel:          "peer-to-" + c1.ClusterName,
+			peering.ParentGatewayNamespaceLabel: constants.IstioSystemNamespace,
+			peering.ParentServiceLabel:          gwServiceAccount,
+			peering.ParentServiceNamespaceLabel: constants.IstioSystemNamespace,
+		})
+		AssertSEHosts(c2, gwSEName, []string{peering.NodePortPeeringWellKnownHost(gwServiceAccount, c1.NetworkName)})
+		AssertSEPorts(c2, gwSEName, []*networking.ServicePort{
+			{Name: fmt.Sprintf("%d", model.HBoneInboundListenPort), Protocol: "TCP", Number: model.HBoneInboundListenPort},
+		})
+
+		AssertWE(c2,
+			// should have a node WE when nodeport peering is enabled
+			DesiredWE{
+				Name:     nodeWEName,
+				Address:  nodeAddress,
+				Locality: c1.Locality(),
+				NonHBONE: true,
+			},
+			// global service WE from service we created
+			DesiredWE{
+				Name:     "autogen.c1.default.svc1",
+				Locality: c1.Locality(),
+			},
+			// in multi-network setup, no pod WEs should be present
+		)
+		AssertWELabels(c2, nodeWEName, map[string]string{
+			peering.NodePeerClusterLabel:        c1.ClusterName,
+			peering.ParentGatewayLabel:          "peer-to-" + c1.ClusterName,
+			peering.ParentGatewayNamespaceLabel: constants.IstioSystemNamespace,
+			peering.ParentServiceLabel:          "node." + gwServiceAccount,
+			peering.ParentServiceNamespaceLabel: constants.IstioSystemNamespace,
+			peering.SourceClusterLabel:          c1.ClusterName,
+			peering.SourceWorkloadLabel:         fmt.Sprintf("autogen.node.%v.%v", c1.ClusterName, nodeName),
+		})
+		AssertWEPorts(c2, nodeWEName, map[string]uint32{
+			fmt.Sprintf("%d", model.HBoneInboundListenPort): 32000,
+		})
+		AssertWEAddress(c2, nodeWEName, nodeAddress)
+		AssertWEServiceAccount(c2, nodeWEName, gwServiceAccount)
+		AssertWENetwork(c2, nodeWEName, c1.NetworkName)
+	})
+
+	t.Run("nodeport peering node WEs kept during outage", func(t *testing.T) {
+		c1 := NewCluster(t, "c1", "c1")
+		c2 := NewCluster(t, "c2", "c2")
+		c2.ConnectByNodePortTo(c1)
+
+		nodeName := "node1"
+		nodeAddress := "1.2.3.4"
+
+		c1.CreateNode(nodeName, nodeAddress)
+		c1.CreateNodePortGatewayService() // enables node workloads to be sent to peer
+
+		addressHash := fmt.Sprintf("%x", sha256.Sum256([]byte(nodeAddress)))[:8]
+		nodeWEName := fmt.Sprintf("autogen.node.%v.%v.%v", c1.ClusterName, nodeName, addressHash)
+		AssertWE(c2,
+			// should have a node WE when nodeport peering is enabled
+			DesiredWE{
+				Name:     nodeWEName,
+				Address:  nodeAddress,
+				Locality: c1.Locality(),
+				NonHBONE: true,
+			},
+		)
+
+		// create outage
+		c2.Outage.setOutage(true)
+		AssertWE(c2, DesiredWE{
+			Name:     nodeWEName,
+			Address:  nodeAddress,
+			Locality: c1.Locality(),
+			NonHBONE: true,
+		})
+		c2.Outage.setOutage(false)
+		AssertWE(c2, DesiredWE{
+			Name:     nodeWEName,
+			Address:  nodeAddress,
+			Locality: c1.Locality(),
+			NonHBONE: true,
+		})
+	})
+
+	t.Run("nodeport data plane programming reflected in gateway status", func(t *testing.T) {
+		c1 := NewCluster(t, "c1", "c1")
+		c2 := NewCluster(t, "c2", "c2")
+		c2.ConnectByNodePortTo(c1)
+		c1.CreateNodePortGatewayService()
+
+		// no node WEs have been generated yet
+		AssertPeerGatewayStatus(c2, "peer-to-c1", peering.PeeringNamespace, k8s.GatewayStatus{
+			Conditions: []metav1.Condition{
+				{
+					Type:               constants.SoloConditionPeerConnected,
+					Status:             metav1.ConditionTrue,
+					Reason:             string(k8s.GatewayReasonProgrammed),
+					LastTransitionTime: metav1.Now(),
+				},
+				{
+					Type:               constants.SoloConditionPeeringSucceeded,
+					Status:             metav1.ConditionTrue,
+					Reason:             string(k8s.GatewayReasonProgrammed),
+					LastTransitionTime: metav1.Now(),
+				},
+				{
+					Type:               constants.SoloConditionPeerDataPlaneProgrammed,
+					Status:             metav1.ConditionFalse,
+					Reason:             string(k8s.GatewayReasonPending),
+					Message:            "peering data plane not programmed for cross-network traffic, no node workload entries generated yet for NodePort peering",
+					LastTransitionTime: metav1.Now(),
+				},
+			},
+		})
+
+		// generate a node resource on c1
+		c1.CreateNode("node1", "1.2.3.4")
+		var (
+			nodeName        = "node1"
+			nodeAddress     = "1.2.3.4"
+			nodeAddressHash = fmt.Sprintf("%x", sha256.Sum256([]byte(nodeAddress)))[:8]
+			nodeWEName      = fmt.Sprintf("autogen.node.%v.%v.%v", c1.ClusterName, nodeName, nodeAddressHash)
+		)
+		// node WE should be generated on c2
+		AssertWE(c2, DesiredWE{
+			Name:     nodeWEName,
+			Address:  nodeAddress,
+			Locality: c1.Locality(),
+			NonHBONE: true,
+		})
+
+		AssertPeerGatewayStatus(c2, "peer-to-c1", peering.PeeringNamespace, k8s.GatewayStatus{
+			Conditions: []metav1.Condition{
+				{
+					Type:               constants.SoloConditionPeerConnected,
+					Status:             metav1.ConditionTrue,
+					Reason:             string(k8s.GatewayReasonProgrammed),
+					LastTransitionTime: metav1.Now(),
+				},
+				{
+					Type:               constants.SoloConditionPeeringSucceeded,
+					Status:             metav1.ConditionTrue,
+					Reason:             string(k8s.GatewayReasonProgrammed),
+					LastTransitionTime: metav1.Now(),
+				},
+				{
+					Type:               constants.SoloConditionPeerDataPlaneProgrammed,
+					Status:             metav1.ConditionTrue,
+					Reason:             string(k8s.GatewayReasonProgrammed),
+					Message:            "peering data plane programmed for cross-network traffic with NodePort service type",
+					LastTransitionTime: metav1.Now(),
+				},
+			},
+		})
+	})
+
+	t.Run("loadbalancer data plane programming reflected in gateway status", func(t *testing.T) {
+		c1 := NewCluster(t, "c1", "c1")
+		c2 := NewCluster(t, "c2", "c2")
+		c2.ConnectByNodePortTo(c1)
+
+		// get istio-remote gateway and remove nodeport peering annotation to default to loadbalancer
+		gw := c2.Gateways.Get("peer-to-c1", constants.IstioSystemNamespace)
+		for anno := range gw.Annotations {
+			if anno == constants.SoloAnnotationPeeringPreferredDataPlaneServiceType {
+				delete(gw.Annotations, anno)
+			}
+		}
+		c2.CreateGateway(gw)
+
+		// status should be programmed with failed to program loadbalancer
+		AssertPeerGatewayStatus(c2, "peer-to-c1", constants.IstioSystemNamespace, k8s.GatewayStatus{
+			Conditions: []metav1.Condition{
+				{
+					Type:               constants.SoloConditionPeerConnected,
+					Status:             metav1.ConditionTrue,
+					Reason:             string(k8s.GatewayReasonProgrammed),
+					LastTransitionTime: metav1.Now(),
+				},
+				{
+					Type:               constants.SoloConditionPeeringSucceeded,
+					Status:             metav1.ConditionTrue,
+					Reason:             string(k8s.GatewayReasonProgrammed),
+					LastTransitionTime: metav1.Now(),
+				},
+				{
+					Type:               constants.SoloConditionPeerDataPlaneProgrammed,
+					Status:             metav1.ConditionFalse,
+					Reason:             string(k8s.GatewayReasonInvalid),
+					Message:            "peering data plane not programmed for cross-network traffic, missing HBONE listener",
+					LastTransitionTime: metav1.Now(),
+				},
+			},
+		})
+	})
 }
 
 func init() {
@@ -1511,10 +1733,18 @@ func TestAutomatedPeering(t *testing.T) {
 					Status:             metav1.ConditionTrue,
 					Reason:             string(k8s.GatewayReasonProgrammed),
 					LastTransitionTime: metav1.Now(),
-				}, {
+				},
+				{
 					Type:               constants.SoloConditionPeeringSucceeded,
 					Status:             metav1.ConditionTrue,
 					Reason:             string(k8s.GatewayReasonProgrammed),
+					LastTransitionTime: metav1.Now(),
+				},
+				{
+					Type:               constants.SoloConditionPeerDataPlaneProgrammed,
+					Status:             metav1.ConditionTrue,
+					Reason:             string(k8s.GatewayReasonProgrammed),
+					Message:            "peering data plane programmed for cross-network traffic with LoadBalancer service type",
 					LastTransitionTime: metav1.Now(),
 				},
 			},
@@ -1559,6 +1789,12 @@ func TestAutomatedPeering(t *testing.T) {
 					Reason:             string(k8s.GatewayReasonPending),
 					Message:            "network not yet synced check istiod log for more details",
 					LastTransitionTime: metav1.Now(),
+				}, {
+					Type:               constants.SoloConditionPeerDataPlaneProgrammed,
+					Status:             metav1.ConditionTrue,
+					Reason:             string(k8s.GatewayReasonProgrammed),
+					Message:            "peering data plane programmed for cross-network traffic with LoadBalancer service type",
+					LastTransitionTime: metav1.Now(),
 				},
 			},
 		}
@@ -1585,13 +1821,19 @@ func TestAutomatedPeering(t *testing.T) {
 					Type:               constants.SoloConditionPeeringSucceeded,
 					Status:             metav1.ConditionFalse,
 					Reason:             string(k8s.GatewayReasonInvalid),
-					Message:            "no network started encountered error validating gateway: no network label found in gateway",
+					Message:            "no network started, encountered error validating gateway: no network label found in gateway",
 					LastTransitionTime: metav1.Now(),
 				}, {
 					Type:               constants.SoloConditionPeerConnected,
 					Status:             metav1.ConditionFalse,
 					Reason:             string(k8s.GatewayReasonInvalid),
-					Message:            "no network started encountered error validating gateway: no network label found in gateway",
+					Message:            "no network started, encountered error validating gateway: no network label found in gateway",
+					LastTransitionTime: metav1.Now(),
+				}, {
+					Type:               constants.SoloConditionPeerDataPlaneProgrammed,
+					Status:             metav1.ConditionFalse,
+					Reason:             string(k8s.GatewayReasonInvalid),
+					Message:            "peering data plane not programmed for cross-network traffic, encountered error validating gateway: no network label found in gateway",
 					LastTransitionTime: metav1.Now(),
 				},
 			},
@@ -1820,6 +2062,29 @@ func (c *Cluster) UseSegment(segmentName string) {
 	c.Namespaces.Update(ns)
 }
 
+func (c *Cluster) CreateNodePortGatewayService() {
+	c.Services.CreateOrUpdate(&corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "istio-eastwest",
+			Namespace: constants.IstioSystemNamespace,
+			Annotations: map[string]string{
+				constants.SoloAnnotationPeeringDataPlaneServiceType: "NodePort",
+			},
+		},
+		Spec: corev1.ServiceSpec{
+			Ports: []corev1.ServicePort{
+				{
+					Name:       "tls-hbone",
+					Port:       15008,
+					TargetPort: intstr.FromInt(15008),
+					Protocol:   "TCP",
+					NodePort:   32000,
+				},
+			},
+		},
+	})
+}
+
 func (c *Cluster) CreateService(name string, global bool, ports []corev1.ServicePort) {
 	if global {
 		c.CreateServiceLabel(name, peering.ServiceScopeGlobal, "", ports)
@@ -1876,6 +2141,27 @@ func (c *Cluster) DeleteNamespace(name string) {
 	c.Namespaces.Delete(name, "")
 }
 
+func (c *Cluster) CreateNode(nodeName string, nodeIP string) {
+	clienttest.NewWriter[*corev1.Node](c.t, c.Kube).CreateOrUpdate(&corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: nodeName,
+			Labels: map[string]string{
+				"topology.kubernetes.io/zone":   c.Zone(),
+				"topology.kubernetes.io/region": c.Region(),
+			},
+		},
+		Spec: corev1.NodeSpec{},
+		Status: corev1.NodeStatus{
+			Addresses: []corev1.NodeAddress{
+				{
+					Type:    corev1.NodeInternalIP,
+					Address: nodeIP,
+				},
+			},
+		},
+	})
+}
+
 func (c *Cluster) CreateWorkload(serviceName string, workloadName string, serviceAccount string, ports map[string]uint32) {
 	clienttest.NewWriter[*networkingclient.WorkloadEntry](c.t, c.Kube).CreateOrUpdate(&networkingclient.WorkloadEntry{
 		ObjectMeta: metav1.ObjectMeta{
@@ -1890,6 +2176,10 @@ func (c *Cluster) CreateWorkload(serviceName string, workloadName string, servic
 			Ports:          ports,
 		},
 	})
+}
+
+func (c *Cluster) DeleteWorkload(workloadName string) {
+	clienttest.NewWriter[*networkingclient.WorkloadEntry](c.t, c.Kube).Delete(workloadName, "default")
 }
 
 func (c *Cluster) DeletePod(podName string) {
@@ -1952,10 +2242,6 @@ func (c *Cluster) CreatePodWithLocality(serviceName, podName, podIP, region, zon
 			Phase: corev1.PodRunning,
 		},
 	})
-}
-
-func (c *Cluster) DeleteWorkload(workloadName string) {
-	clienttest.NewWriter[*networkingclient.WorkloadEntry](c.t, c.Kube).Delete(workloadName, "default")
 }
 
 func (c *Cluster) CreateOrUpdateEastWestGateway(gwName, gwNs string, gwAddresses []k8sbeta.GatewaySpecAddress) *k8sbeta.Gateway {
@@ -2173,6 +2459,41 @@ func (c *Cluster) ConnectTo(other *Cluster) {
 	clienttest.NewWriter[*k8sbeta.Gateway](c.t, c.Kube).CreateOrUpdate(gw)
 }
 
+func (c *Cluster) ConnectByNodePortTo(other *Cluster) {
+	addr := other.Discovery.Listener.Addr().String()
+	ip, ports, _ := net.SplitHostPort(addr)
+	port, _ := strconv.Atoi(ports)
+	gw := &k8sbeta.Gateway{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "peer-to-" + other.ClusterName,
+			Namespace: "istio-system",
+			Annotations: map[string]string{
+				annotation.GatewayServiceAccount.Name:                        "istio-eastwest",
+				constants.SoloAnnotationPeeringPreferredDataPlaneServiceType: "NodePort",
+			},
+			Labels: map[string]string{
+				label.TopologyNetwork.Name:      other.NetworkName,
+				label.TopologyCluster.Name:      other.ClusterName,
+				"topology.kubernetes.io/region": other.Region(),
+				"topology.kubernetes.io/zone":   other.Zone(),
+			},
+		},
+		Spec: k8s.GatewaySpec{
+			GatewayClassName: "istio-remote",
+			Listeners: []k8s.Listener{{
+				Name:     "xds-tls",
+				Port:     k8s.PortNumber(port),
+				Protocol: k8s.TLSProtocolType,
+			}},
+			Addresses: []k8s.GatewaySpecAddress{{
+				Type:  ptr.Of(k8s.IPAddressType),
+				Value: ip,
+			}},
+		},
+	}
+	clienttest.NewWriter[*k8sbeta.Gateway](c.t, c.Kube).CreateOrUpdate(gw)
+}
+
 func NewCluster(t test.Failer, clusterName, networkName string) *Cluster {
 	return newCluster(
 		t,
@@ -2330,6 +2651,42 @@ func AssertWEPorts(c *Cluster, name string, ports map[string]uint32) {
 		return we.Spec.GetPorts()
 	}
 	assert.EventuallyEqual(c.t, fetch, ports)
+}
+
+func AssertWEAddress(c *Cluster, name string, address string) {
+	c.t.Helper()
+	fetch := func() string {
+		we := c.WorkloadEntries.Get(name, peering.PeeringNamespace)
+		if we == nil {
+			return ""
+		}
+		return we.Spec.GetAddress()
+	}
+	assert.EventuallyEqual(c.t, fetch, address)
+}
+
+func AssertWEServiceAccount(c *Cluster, name string, serviceAccount string) {
+	c.t.Helper()
+	fetch := func() string {
+		we := c.WorkloadEntries.Get(name, peering.PeeringNamespace)
+		if we == nil {
+			return ""
+		}
+		return we.Spec.GetServiceAccount()
+	}
+	assert.EventuallyEqual(c.t, fetch, serviceAccount)
+}
+
+func AssertWENetwork(c *Cluster, name string, network string) {
+	c.t.Helper()
+	fetch := func() string {
+		we := c.WorkloadEntries.Get(name, peering.PeeringNamespace)
+		if we == nil {
+			return ""
+		}
+		return we.Spec.GetNetwork()
+	}
+	assert.EventuallyEqual(c.t, fetch, network)
 }
 
 type DesiredSE struct {

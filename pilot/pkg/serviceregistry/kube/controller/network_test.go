@@ -23,25 +23,31 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	k8sv1 "sigs.k8s.io/gateway-api/apis/v1"
 	"sigs.k8s.io/gateway-api/apis/v1beta1"
 
 	"istio.io/api/annotation"
 	"istio.io/api/label"
 	meshconfig "istio.io/api/mesh/v1alpha1"
+	"istio.io/api/networking/v1alpha3"
+	networkingclient "istio.io/client-go/pkg/apis/networking/v1"
 	"istio.io/istio/pilot/pkg/features"
 	"istio.io/istio/pilot/pkg/model"
 	"istio.io/istio/pkg/config/constants"
 	"istio.io/istio/pkg/config/mesh/meshwatcher"
 	"istio.io/istio/pkg/config/schema/gvr"
+	kubelib "istio.io/istio/pkg/kube"
 	"istio.io/istio/pkg/kube/controllers"
 	"istio.io/istio/pkg/kube/kclient"
 	"istio.io/istio/pkg/kube/kclient/clienttest"
 	"istio.io/istio/pkg/ptr"
+	"istio.io/istio/pkg/queue"
 	"istio.io/istio/pkg/test"
 	"istio.io/istio/pkg/test/util/assert"
 	"istio.io/istio/pkg/test/util/retry"
 	"istio.io/istio/pkg/util/sets"
+	"istio.io/istio/platform/discovery/peering"
 )
 
 func TestNetworkUpdateTriggers(t *testing.T) {
@@ -431,4 +437,163 @@ func createOrUpdateNamespace(t *testing.T, c *FakeController, name, network stri
 		},
 	}
 	clienttest.Wrap(t, c.namespaces).CreateOrUpdate(namespace)
+}
+
+func TestNodePortPeering(t *testing.T) {
+	test.SetForTest(t, &features.EnableAmbient, true)
+	test.SetForTest(t, &features.EnablePeering, true)
+
+	gateway := &v1beta1.Gateway{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "remote-beta",
+			Namespace: "default",
+			UID:       types.UID("1234567890"),
+			Annotations: map[string]string{
+				annotation.GatewayServiceAccount.Name:                        "istio-eastwest",
+				constants.SoloAnnotationPeeringPreferredDataPlaneServiceType: "nodeport",
+			},
+			Labels: map[string]string{
+				label.TopologyNetwork.Name: "cluster1",
+				label.TopologyCluster.Name: "cluster1",
+			},
+		},
+		Spec: v1beta1.GatewaySpec{
+			GatewayClassName: "istio-remote",
+			Addresses: []v1beta1.GatewaySpecAddress{
+				{
+					Type:  ptr.Of(v1beta1.IPAddressType),
+					Value: "172.18.1.45",
+				},
+			},
+			Listeners: []v1beta1.Listener{
+				{
+					Name:     "cross-network",
+					Port:     15008,
+					Protocol: v1beta1.ProtocolType("HBONE"),
+					TLS: &v1beta1.ListenerTLSConfig{
+						Mode: ptr.Of(v1beta1.TLSModeType("Passthrough")),
+					},
+				},
+				{
+					Name:     "xds-tls",
+					Port:     15012,
+					Protocol: v1beta1.ProtocolType("TLS"),
+					TLS: &v1beta1.ListenerTLSConfig{
+						Mode: ptr.Of(v1beta1.TLSModeType("Passthrough")),
+					},
+				},
+			},
+		},
+		Status: v1beta1.GatewayStatus{
+			Addresses: []k8sv1.GatewayStatusAddress{
+				{
+					Type:  ptr.Of(v1beta1.IPAddressType),
+					Value: "172.18.1.45",
+				},
+			},
+		},
+	}
+
+	t.Run("nodeport network gateways override loadbalancer network gateways", func(t *testing.T) {
+		var (
+			systemNS   = "istio-system"
+			stop       = test.NewStop(t)
+			options    = Options{ConfigCluster: true}
+			crds       = []schema.GroupVersionResource{gvr.KubernetesGateway, gvr.WorkloadEntry}
+			kubeClient = kubelib.NewFakeClient(gateway)
+			weWriter   = clienttest.NewWriter[*networkingclient.WorkloadEntry](t, kubeClient)
+		)
+		// make CRDs so we can create write those resources
+		for _, crd := range crds {
+			clienttest.MakeCRD(t, kubeClient, crd)
+		}
+
+		// not using NewFakeControllerWithOptions because we don't want to run the controller (goroutine leaks from segments collections)
+		c := &Controller{
+			opts:   options,
+			client: kubeClient,
+			queue:  queue.NewQueueWithID(1*time.Second, string(kubeClient.ClusterID())),
+			stop:   stop,
+		}
+		netManager := initNetworkManager(c, options)
+
+		// start client and queue so kube events get processed and collections populated
+		kubeClient.RunAndWait(stop)
+		kubelib.WaitForCacheSync("test", stop, netManager.HasSynced)
+		go c.queue.Run(stop)
+		assert.EventuallyEqual(t, netManager.HasSynced, true)
+
+		// no node WEs yet, so only one hbone listener-based network gateway should exist
+		assert.EventuallyEqual(t, func() int {
+			netManager.RLock()
+			defer netManager.RUnlock()
+			return len(netManager.gatewaysFromResource[types.UID("1234567890")])
+		}, 1)
+
+		// generate node WEs which triggers a gw event to reprocess the gateway and create the NetworkGateways based on the node WEs
+		nodeWEs := []*networkingclient.WorkloadEntry{
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "autogen.node.cluster1.node1.12345678",
+					Namespace: systemNS,
+					Labels: map[string]string{
+						peering.NodePeerClusterLabel:        "cluster1",
+						peering.ParentGatewayLabel:          "remote-beta",
+						peering.ParentGatewayNamespaceLabel: "default",
+					},
+				},
+				Spec: v1alpha3.WorkloadEntry{
+					Address:        "172.18.0.2",
+					Network:        "cluster1",
+					Ports:          map[string]uint32{fmt.Sprintf("%d", model.HBoneInboundListenPort): 32000},
+					ServiceAccount: "istio-eastwest",
+					Weight:         1,
+				},
+			},
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "autogen.node.cluster1.node2.56789012",
+					Namespace: systemNS,
+					Labels: map[string]string{
+						peering.NodePeerClusterLabel:        "cluster1",
+						peering.ParentGatewayLabel:          "remote-beta",
+						peering.ParentGatewayNamespaceLabel: "default",
+					},
+				},
+				Spec: v1alpha3.WorkloadEntry{
+					Address:        "172.18.0.3",
+					Network:        "cluster1",
+					Ports:          map[string]uint32{fmt.Sprintf("%d", model.HBoneInboundListenPort): 33000},
+					ServiceAccount: "istio-eastwest",
+					Weight:         1,
+				},
+			},
+		}
+		weWriter.Create(nodeWEs[0])
+		weWriter.Create(nodeWEs[1])
+		// only two network gateways should exist, one for each valid node WE which then overrides the LB gateway
+		assert.EventuallyEqual(t, func() int {
+			netManager.RLock()
+			defer netManager.RUnlock()
+			return len(netManager.gatewaysFromResource[types.UID("1234567890")])
+		}, 2)
+
+		// verify the NetworkGateways are created with the correct addresses and ports from the node WEs
+		netManager.RLock()
+		defer netManager.RUnlock()
+		for _, gwSet := range netManager.gatewaysFromResource {
+			for gw := range gwSet {
+				switch gw.Addr {
+				case "172.18.0.2":
+					assert.Equal(t, gw.Port, uint32(32000))
+					assert.Equal(t, gw.HBONEPort, uint32(32000))
+				case "172.18.0.3":
+					assert.Equal(t, gw.Port, uint32(33000))
+					assert.Equal(t, gw.HBONEPort, uint32(33000))
+				default:
+					t.Fatalf("unexpected network gateway: %+v", gw)
+				}
+			}
+		}
+	})
 }

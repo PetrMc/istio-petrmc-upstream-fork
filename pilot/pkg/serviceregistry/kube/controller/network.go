@@ -15,8 +15,10 @@
 package controller
 
 import (
+	"fmt"
 	"net"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/yl2chen/cidranger"
@@ -26,6 +28,7 @@ import (
 	"sigs.k8s.io/gateway-api/apis/v1beta1"
 
 	"istio.io/api/label"
+	clientnetworking "istio.io/client-go/pkg/apis/networking/v1"
 	"istio.io/istio/pilot/pkg/features"
 	"istio.io/istio/pilot/pkg/model"
 	"istio.io/istio/pilot/pkg/serviceregistry/kube"
@@ -35,9 +38,12 @@ import (
 	"istio.io/istio/pkg/config/mesh"
 	"istio.io/istio/pkg/config/schema/gvr"
 	"istio.io/istio/pkg/kube/kclient"
+	"istio.io/istio/pkg/kube/krt"
 	"istio.io/istio/pkg/kube/kubetypes"
 	"istio.io/istio/pkg/network"
+	"istio.io/istio/pkg/ptr"
 	"istio.io/istio/pkg/slices"
+	"istio.io/istio/platform/discovery/peering"
 )
 
 type networkManager struct {
@@ -45,6 +51,11 @@ type networkManager struct {
 	// CIDR ranger based on path-compressed prefix trie
 	ranger    cidranger.Ranger
 	clusterID cluster.ID
+
+	// SOLO: support for nodeport peering
+	nodeWorkloadEntryCollection   krt.Collection[*clientnetworking.WorkloadEntry]
+	gatewayNodeWorkloadEntryIndex krt.Index[types.NamespacedName, *clientnetworking.WorkloadEntry]
+	// SOLO end
 
 	gatewayResourceClient kclient.Informer[*v1beta1.Gateway]
 	meshNetworksWatcher   mesh.NetworksWatcher
@@ -82,12 +93,73 @@ func initNetworkManager(c *Controller, options Options) *networkManager {
 		discoverRemoteGatewayResources: options.ConfigCluster,
 	}
 	// initialize the gateway resource client when any feature that uses it is enabled
-	if features.MultiNetworkGatewayAPI {
+	if features.MultiNetworkGatewayAPI || features.EnablePeering {
 		n.gatewayResourceClient = kclient.NewDelayedInformer[*v1beta1.Gateway](c.client, gvr.KubernetesGateway, kubetypes.StandardInformer, kubetypes.Filter{})
 		// conditionally register this handler
 		registerHandlers(c, n.gatewayResourceClient, "Gateways", n.handleGatewayResource, nil)
+
+		// SOLO: support for nodeport peering with envoy proxies
+		if features.EnablePeering {
+			n.registerNodeWorkloadEntryToGatewayHandler(c)
+		}
+		// SOLO end
 	}
 	return n
+}
+
+// SOLO: registerNodeWorkloadEntryToGatewayHandler registers a handler for node WorkloadEntry events and queues the corresponding parent gateway so that
+// we can build the NetworkGateway(s) for envoy proxies
+// TODO (conradhanson): registerHandlers adds metrics to the informer event handler, we should add metrics for this handler as well
+func (n *networkManager) registerNodeWorkloadEntryToGatewayHandler(c *Controller) {
+	n.nodeWorkloadEntryCollection = krt.NewInformerFiltered[*clientnetworking.WorkloadEntry](
+		c.client,
+		// include WorkloadEntries that have the node peer cluster label and live in the peering namespace
+		kubetypes.Filter{
+			ObjectFilter: kubetypes.NewStaticObjectFilter(func(obj any) bool {
+				we := obj.(*clientnetworking.WorkloadEntry)
+				return we.Labels[peering.NodePeerClusterLabel] != ""
+			}),
+			Namespace: peering.PeeringNamespace,
+		},
+		krt.NewOptionsBuilder(c.stop, "networkManager", c.opts.KrtDebugger).WithName("informer/NodeWorkloadEntries")...,
+	)
+	n.nodeWorkloadEntryCollection.Register(
+		func(weEvent krt.Event[*clientnetworking.WorkloadEntry]) {
+			var we *clientnetworking.WorkloadEntry
+			if weEvent.Old != nil {
+				we = ptr.Flatten(weEvent.Old)
+			}
+			if weEvent.New != nil {
+				we = ptr.Flatten(weEvent.New)
+			}
+
+			gwName := we.Labels[peering.ParentGatewayLabel]
+			gwNS := we.Labels[peering.ParentGatewayNamespaceLabel]
+			if gwName == "" || gwNS == "" {
+				log.Warnf("node WE %s/%s missing parent gateway labels when attempting to process node WE event, skipping", we.Namespace, we.Name)
+				return
+			}
+			gw := n.gatewayResourceClient.Get(gwName, gwNS)
+			if gw == nil {
+				log.Warnf("parent gateway %s/%s not found for node WE %s/%s, skipping", gwNS, gwName, we.Namespace, we.Name)
+				return
+			}
+			c.queue.Push(func() error {
+				// event type doesn't matter as long as it's not a delete
+				return n.handleGatewayResource(nil, gw, model.EventUpdate)
+			})
+		},
+	)
+	n.gatewayNodeWorkloadEntryIndex = krt.NewIndex(n.nodeWorkloadEntryCollection, "gatewayNodeWorkloadEntryIndex",
+		func(we *clientnetworking.WorkloadEntry) []types.NamespacedName {
+			gwName := we.Labels[peering.ParentGatewayLabel]
+			gwNS := we.Labels[peering.ParentGatewayNamespaceLabel]
+			if gwName == "" || gwNS == "" {
+				return nil
+			}
+			return []types.NamespacedName{{Namespace: gwNS, Name: gwName}}
+		},
+	)
 }
 
 // setNetworkFromNamespace sets network got from system namespace, returns whether it has changed
@@ -438,6 +510,30 @@ func (n *networkManager) handleGatewayResource(_ *v1beta1.Gateway, gw *v1beta1.G
 			}
 		}
 	}
+
+	// SOLO: for nodeport peering, create a NetworkGateway from the node WEs when the peering preferred dataplane annotation is set to "nodeport"
+	if n.gatewayNodeWorkloadEntryIndex != nil && strings.EqualFold(gw.Annotations[constants.SoloAnnotationPeeringPreferredDataPlaneServiceType], "nodeport") {
+		nodeportGateways := model.NetworkGatewaySet{}
+		nodeWEs := n.gatewayNodeWorkloadEntryIndex.Lookup(types.NamespacedName{Namespace: gw.Namespace, Name: gw.Name})
+		networkGateway := base
+		for _, we := range nodeWEs {
+			networkGateway.Addr = we.Spec.Address
+			for portName, port := range we.Spec.GetPorts() {
+				if portName == fmt.Sprintf("%d", model.HBoneInboundListenPort) {
+					networkGateway.Port = port
+					networkGateway.HBONEPort = port
+					nodeportGateways.Insert(networkGateway)
+					break
+				}
+			}
+		}
+		if len(nodeportGateways) > 0 {
+			// override the LB gateways with the nodeport gateways to avoid load balancing between the two
+			newGateways = nodeportGateways
+		}
+	}
+	// SOLO end
+
 	n.gatewaysFromResource[gw.UID] = newGateways
 
 	if len(previousGateways) != len(newGateways) {
@@ -456,10 +552,22 @@ func (n *networkManager) handleGatewayResource(_ *v1beta1.Gateway, gw *v1beta1.G
 }
 
 func (n *networkManager) HasSynced() bool {
+	gatewayClientSynced := false
+	nodeWorkloadEntryCollectionSynced := false
+
 	if n.gatewayResourceClient == nil {
-		return true
+		gatewayClientSynced = true
+	} else {
+		gatewayClientSynced = n.gatewayResourceClient.HasSynced()
 	}
-	return n.gatewayResourceClient.HasSynced()
+
+	if n.nodeWorkloadEntryCollection == nil {
+		nodeWorkloadEntryCollectionSynced = true
+	} else {
+		nodeWorkloadEntryCollectionSynced = n.nodeWorkloadEntryCollection.HasSynced()
+	}
+
+	return gatewayClientSynced && nodeWorkloadEntryCollectionSynced
 }
 
 // updateServiceNodePortAddresses updates ClusterExternalAddresses for Services of nodePort type

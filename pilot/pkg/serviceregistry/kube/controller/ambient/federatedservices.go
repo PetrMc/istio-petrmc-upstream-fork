@@ -87,7 +87,12 @@ func (a *index) FederatedServicesCollection(
 				return spiffe.MustGenSpiffeURIForTrustDomain(meshCfg.GetTrustDomain(), waypoint.Namespace, sa)
 			})...)
 		} else {
-			log.Debugf("service %s/%s is global and references waypoint %q, but waypoint does not exist")
+			log.Debugf(
+				"service %s/%s is global and references waypoint %q, but waypoint does not exist",
+				svc.Service.GetNamespace(),
+				svc.Service.GetName(),
+				svc.Waypoint.ResourceName,
+			)
 		}
 
 		s := svc.Service

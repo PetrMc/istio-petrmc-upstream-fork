@@ -118,6 +118,10 @@ func ParseAutogenHostnameGuessDomain(wpAutogenHost string) (string, string, stri
 	return wpName, wpNs, wpDomain, true
 }
 
+func NodePortPeeringWellKnownHost(serviceAccount, network string) string {
+	return fmt.Sprintf("node.%s.%s%s", serviceAccount, network, DomainSuffix)
+}
+
 // ServiceEntryName generates the ServiceEntry name for a given service and segment.
 // For the default segment, it returns "autogen.namespace.serviceName"
 // For other segments, it returns "autogen.segmentName.namespace.serviceName"
@@ -254,7 +258,8 @@ func (c *NetworkWatcher) reconcileGateway(name types.NamespacedName) error {
 			} else {
 				log.Infof("gateway changed but not in a meaningful way")
 			}
-
+			// always enqueue a status update for the gateway since labels or annotations may have changed which affects status of data plane programming
+			c.enqueueStatusUpdate(name)
 			return nil
 		}
 	}
@@ -1091,7 +1096,7 @@ func (c *NetworkWatcher) reconcileGatewayServiceEntry(name types.NamespacedName)
 			Namespace: seNs,
 		},
 		Spec: networking.ServiceEntry{
-			Hosts: []string{fmt.Sprintf("node.%s.%s%s", serviceAccount, network, DomainSuffix)},
+			Hosts: []string{NodePortPeeringWellKnownHost(serviceAccount, network)},
 			Ports: []*networking.ServicePort{
 				{
 					// use the wellknown hbone port
@@ -1168,11 +1173,11 @@ func (c *NetworkWatcher) reconcileNodeWorkloadEntry(tn types.NamespacedName) err
 
 	cluster := c.getClusterByID(cluster.ID(clusterID))
 	if cluster == nil {
-		log.Infof("node workload entry will be deleted (network not found for key %v)", tn.String())
+		log.Infof("node workload entry will be deleted (cluster not found for key %v)", tn.String())
 		return c.genericReconcileWorkloadEntries(nil, weGroupLabel)
 	}
 	if !cluster.HasSynced() {
-		log.Debugf("skipping, network not yet synced")
+		log.Debugf("skipping, cluster not yet synced")
 		return nil
 	}
 	// get the Node RemoteWorkload object
@@ -1193,6 +1198,35 @@ func (c *NetworkWatcher) reconcileNodeWorkloadEntry(tn types.NamespacedName) err
 		for _, port := range portList.Ports {
 			ports[fmt.Sprintf("%d", port.GetTargetPort())] = port.GetServicePort()
 		}
+	}
+
+	// find the gateway-based SE that selects this node WE by matching the node peer cluster label workload selector
+	// so that we can copy the parent service labels to the node WE
+	var seParentServiceLabel, seParentServiceNamespaceLabel, seParentGatewayLabel, seParentGatewayNamespaceLabel string
+
+	req, err := klabels.NewRequirement(NodePeerClusterLabel, selection.Equals, []string{clusterID})
+	if err != nil {
+		log.Errorf("failed to create label requirement: %v", err)
+		return err
+	}
+	for _, serviceEntry := range c.serviceEntries.List(PeeringNamespace, klabels.NewSelector().Add(*req)) {
+		if serviceEntry.Spec.WorkloadSelector.Labels[NodePeerClusterLabel] == clusterID {
+			// need parent svc info to form svc key hostname for svc lookup in wds (to associate NodePort SE with Node IP WE)
+			seParentServiceLabel = serviceEntry.Labels[ParentServiceLabel]
+			seParentServiceNamespaceLabel = serviceEntry.Labels[ParentServiceNamespaceLabel]
+			// set parent gw labels on node WE for gateway lookup during envoy config generation
+			seParentGatewayLabel = serviceEntry.Labels[ParentGatewayLabel]
+			seParentGatewayNamespaceLabel = serviceEntry.Labels[ParentGatewayNamespaceLabel]
+			break
+		}
+	}
+	// we should always find the gw SE for node WE
+	// but if we don't, return an error so we requeue/reconcile again
+	if seParentServiceLabel == "" || seParentServiceNamespaceLabel == "" || seParentGatewayLabel == "" || seParentGatewayNamespaceLabel == "" {
+		return fmt.Errorf(
+			"failed to apply parent svc and parent gw labels on node WE %s; either no SE found or SE does not have necessary parent labels",
+			tn.String(),
+		)
 	}
 
 	// write a separate WorkloadEntry for each address
@@ -1226,34 +1260,11 @@ func (c *NetworkWatcher) reconcileNodeWorkloadEntry(tn types.NamespacedName) err
 		labels[SourceClusterLabel] = clusterID
 		// label to indicate this is a node of a specific cluster
 		labels[NodePeerClusterLabel] = clusterID
-
-		seParentServiceLabel := ""
-		seParentServiceNamespaceLabel := ""
-
-		// get SEs that are in the peering ns and have the node peer cluster label
-		labelRequirement, err := klabels.NewRequirement(NodePeerClusterLabel, selection.Equals, []string{clusterID})
-		if err != nil {
-			log.Errorf("failed to create label requirement: %v", err)
-			return err
-		}
-		// find the SE that selects this node WE by matching the node peer cluster label workload selector
-		// so that we can copy the parent service labels to the node WE
-		for _, serviceEntry := range c.serviceEntries.List(PeeringNamespace, klabels.NewSelector().Add(*labelRequirement)) {
-			if serviceEntry.Spec.WorkloadSelector.Labels[NodePeerClusterLabel] == clusterID {
-				// set a prefix on parent service label so this WE isn't included in lookups for generating SEs
-				// need parent svc info to form svc key hostname for svc lookup in wds (to associate NodePort SE with Node IP WE)
-				seParentServiceLabel = serviceEntry.Labels[ParentServiceLabel]
-				seParentServiceNamespaceLabel = serviceEntry.Labels[ParentServiceNamespaceLabel]
-				break
-			}
-		}
-		// we should always find the gw SE for node WE
-		// but if we don't, return an error so we requeue/reconcile again
-		if seParentServiceLabel == "" || seParentServiceNamespaceLabel == "" {
-			return fmt.Errorf("failed to apply parent svc labels on node WE %s; either no SE found or SE does not have parent service labels", tn.String())
-		}
+		// set a prefix on parent service label so this WE isn't included in lookups for generating SEs
 		labels[ParentServiceLabel] = "node." + seParentServiceLabel
 		labels[ParentServiceNamespaceLabel] = seParentServiceNamespaceLabel
+		labels[ParentGatewayLabel] = seParentGatewayLabel
+		labels[ParentGatewayNamespaceLabel] = seParentGatewayNamespaceLabel
 
 		// hash the address to ensure uniqueness and valid k8s name when truncating
 		addressHash := fmt.Sprintf("%x", sha256.Sum256([]byte(address.String())))[:8]
@@ -1397,14 +1408,24 @@ func (c *NetworkWatcher) reconcileGatewayStatus(name types.NamespacedName) error
 			Type:               constants.SoloConditionPeeringSucceeded,
 			Status:             metav1.ConditionFalse,
 			Reason:             string(k8s.GatewayReasonInvalid),
-			Message:            fmt.Sprintf("no network started encountered error validating gateway: %v", err.Error()),
+			Message:            fmt.Sprintf("no network started, encountered error validating gateway: %v", err.Error()),
 			LastTransitionTime: metav1.Now(),
 		}, metav1.Condition{
 			ObservedGeneration: gw.Generation,
 			Type:               constants.SoloConditionPeerConnected,
 			Status:             metav1.ConditionFalse,
 			Reason:             string(k8s.GatewayReasonInvalid),
-			Message:            fmt.Sprintf("no network started encountered error validating gateway: %v", err.Error()),
+			Message:            fmt.Sprintf("no network started, encountered error validating gateway: %v", err.Error()),
+			LastTransitionTime: metav1.Now(),
+		}, metav1.Condition{
+			ObservedGeneration: gw.Generation,
+			Type:               constants.SoloConditionPeerDataPlaneProgrammed,
+			Status:             metav1.ConditionFalse,
+			Reason:             string(k8s.GatewayReasonInvalid),
+			Message: fmt.Sprintf(
+				"peering data plane not programmed for cross-network traffic, encountered error validating gateway: %v",
+				err.Error(),
+			),
 			LastTransitionTime: metav1.Now(),
 		})
 		return c.setGatewayStatus(log, gw, gatewayConditions)
@@ -1440,7 +1461,15 @@ func (c *NetworkWatcher) reconcileGatewayStatus(name types.NamespacedName) error
 		})
 	}
 
-	if !peerCluster.HasSynced() {
+	if peerCluster.HasSynced() {
+		gatewayConditions = append(gatewayConditions, metav1.Condition{
+			ObservedGeneration: gw.Generation,
+			Type:               constants.SoloConditionPeeringSucceeded,
+			Status:             metav1.ConditionTrue,
+			Reason:             string(k8s.GatewayReasonProgrammed),
+			LastTransitionTime: metav1.Now(),
+		})
+	} else {
 		gatewayConditions = append(gatewayConditions, metav1.Condition{
 			ObservedGeneration: gw.Generation,
 			Type:               constants.SoloConditionPeeringSucceeded,
@@ -1449,14 +1478,78 @@ func (c *NetworkWatcher) reconcileGatewayStatus(name types.NamespacedName) error
 			Message:            "network not yet synced check istiod log for more details",
 			LastTransitionTime: metav1.Now(),
 		})
+	}
+
+	if strings.EqualFold(gw.GetAnnotations()[constants.SoloAnnotationPeeringPreferredDataPlaneServiceType], "nodeport") {
+		gwLabels := gw.GetLabels()
+		seName := fmt.Sprintf("autogen.peering.%s.%s", gw.GetAnnotations()[constants.GatewayServiceAccountAnnotation], gwLabels[label.TopologyNetwork.Name])
+		// check SE exists, then check node WEs exist, then give success status condition
+		if se := c.serviceEntries.Get(seName, PeeringNamespace); se != nil {
+			labelRequirement, err := klabels.NewRequirement(NodePeerClusterLabel, selection.Equals, []string{gwLabels[label.TopologyCluster.Name]})
+			if err != nil {
+				log.Errorf("failed to create label requirement: %v", err)
+				return err
+			}
+			if weList := c.workloadEntries.List(PeeringNamespace, klabels.NewSelector().Add(*labelRequirement)); len(weList) > 0 {
+				// success
+				gatewayConditions = append(gatewayConditions, metav1.Condition{
+					ObservedGeneration: gw.Generation,
+					Type:               constants.SoloConditionPeerDataPlaneProgrammed,
+					Status:             metav1.ConditionTrue,
+					Reason:             string(k8s.GatewayReasonProgrammed),
+					Message:            "peering data plane programmed for cross-network traffic with NodePort service type",
+					LastTransitionTime: metav1.Now(),
+				})
+			} else {
+				// node WEs have not been generated yet
+				gatewayConditions = append(gatewayConditions, metav1.Condition{
+					ObservedGeneration: gw.Generation,
+					Type:               constants.SoloConditionPeerDataPlaneProgrammed,
+					Status:             metav1.ConditionFalse,
+					Reason:             string(k8s.GatewayReasonPending),
+					Message: "peering data plane not programmed for cross-network traffic, " +
+						"no node workload entries generated yet for NodePort peering",
+				})
+			}
+		} else {
+			// SE has not been generated yet
+			gatewayConditions = append(gatewayConditions, metav1.Condition{
+				ObservedGeneration: gw.Generation,
+				Type:               constants.SoloConditionPeerDataPlaneProgrammed,
+				Status:             metav1.ConditionFalse,
+				Reason:             string(k8s.GatewayReasonPending),
+				Message: "peering data plane not programmed for cross-network traffic, " +
+					"gateway-based service entry has not been generated yet for NodePort peering",
+			})
+		}
 	} else {
-		gatewayConditions = append(gatewayConditions, metav1.Condition{
-			ObservedGeneration: gw.Generation,
-			Type:               constants.SoloConditionPeeringSucceeded,
-			Status:             metav1.ConditionTrue,
-			Reason:             string(k8s.GatewayReasonProgrammed),
-			LastTransitionTime: metav1.Now(),
-		})
+		// when defaulting to LoadBalancer, verify the gateway has the hbone listener to be confident dataplane is programmed
+		hboneListenerExists := false
+		for _, listener := range gw.Spec.Listeners {
+			if listener.Protocol == "HBONE" {
+				hboneListenerExists = true
+				break
+			}
+		}
+		if hboneListenerExists {
+			gatewayConditions = append(gatewayConditions, metav1.Condition{
+				ObservedGeneration: gw.Generation,
+				Type:               constants.SoloConditionPeerDataPlaneProgrammed,
+				Status:             metav1.ConditionTrue,
+				Reason:             string(k8s.GatewayReasonProgrammed),
+				Message:            "peering data plane programmed for cross-network traffic with LoadBalancer service type",
+				LastTransitionTime: metav1.Now(),
+			})
+		} else {
+			gatewayConditions = append(gatewayConditions, metav1.Condition{
+				ObservedGeneration: gw.Generation,
+				Type:               constants.SoloConditionPeerDataPlaneProgrammed,
+				Status:             metav1.ConditionFalse,
+				Reason:             string(k8s.GatewayReasonInvalid),
+				Message:            "peering data plane not programmed for cross-network traffic, missing HBONE listener",
+				LastTransitionTime: metav1.Now(),
+			})
+		}
 	}
 	return c.setGatewayStatus(log, gw, gatewayConditions)
 }

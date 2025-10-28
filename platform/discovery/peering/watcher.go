@@ -160,7 +160,7 @@ func New(
 		controllers.WithGenericReconciler(c.ReconcileStatus),
 		controllers.WithMaxAttempts(25))
 
-	c.gateways.AddEventHandler(controllers.ObjectHandler(func(o controllers.Object) {
+	queueGatewayEventFunc := func(o controllers.Object) {
 		if strings.EqualFold(o.GetAnnotations()[constants.SoloAnnotationPeeringPreferredDataPlaneServiceType], "nodeport") {
 			c.queue.Add(typedNamespace{
 				NamespacedName: config.NamespacedName(o),
@@ -171,7 +171,26 @@ func New(
 			NamespacedName: config.NamespacedName(o),
 			kind:           Gateway,
 		})
-	}))
+	}
+
+	c.gateways.AddEventHandler(controllers.EventHandler[controllers.Object]{
+		AddFunc: func(o controllers.Object) {
+			queueGatewayEventFunc(o)
+		},
+		UpdateFunc: func(old, current controllers.Object) {
+			if old.GetGeneration() == current.GetGeneration() &&
+				maps.Equal(old.GetLabels(), current.GetLabels()) &&
+				maps.Equal(old.GetAnnotations(), current.GetAnnotations()) {
+				// only status changed, we don't need to reconcile
+				log.Debugf("only gateway status changed for %s/%s, dropping event", current.GetNamespace(), current.GetName())
+				return
+			}
+			queueGatewayEventFunc(current)
+		},
+		DeleteFunc: func(o controllers.Object) {
+			queueGatewayEventFunc(o)
+		},
+	})
 
 	// update ServiceEntry and associated WorkloadEntry when a service changes
 	// triggered by local Service object changes and federatedWaypoints changes
@@ -247,6 +266,16 @@ func New(
 		svc := o.GetLabels()[ParentServiceLabel]
 		ns := o.GetLabels()[ParentServiceNamespaceLabel]
 
+		if o.GetLabels()[NodePeerClusterLabel] != "" {
+			// node WE event, only enqueue status update for the parent gateway
+			gwName := o.GetLabels()[ParentGatewayLabel]
+			gwNs := o.GetLabels()[ParentGatewayNamespaceLabel]
+			if gwName != "" && gwNs != "" {
+				c.enqueueStatusUpdate(types.NamespacedName{Namespace: gwNs, Name: gwName})
+			}
+			return
+		}
+
 		c.queue.Add(typedNamespace{
 			NamespacedName: types.NamespacedName{
 				Namespace: ns,
@@ -255,10 +284,6 @@ func New(
 			kind: ServiceEntry,
 		})
 	}, func(o controllers.Object) bool {
-		// if WE represents node, we don't need to create SE for it
-		if o.GetLabels()[NodePeerClusterLabel] != "" {
-			return false // drop event
-		}
 		return o.GetLabels()[ParentServiceLabel] != "" &&
 			o.GetLabels()[ParentServiceNamespaceLabel] != "" &&
 			o.GetLabels()[SourceClusterLabel] != ""
@@ -994,7 +1019,7 @@ func ValidatePeerGateway(gw gateway.Gateway) error {
 	if gw.Spec.GatewayClassName != "istio-remote" {
 		return fmt.Errorf("gateway is not an istio-remote gateway (was %q)", gw.Spec.GatewayClassName)
 	}
-	if gw.Labels["topology.istio.io/network"] == "" {
+	if gw.Labels[label.TopologyNetwork.Name] == "" {
 		return fmt.Errorf("no network label found in gateway")
 	}
 	if len(gw.Spec.Addresses) == 0 {
@@ -1003,6 +1028,15 @@ func ValidatePeerGateway(gw gateway.Gateway) error {
 			return fmt.Errorf("no spec.addresses found in gateway (but found status.addresses)")
 		}
 		return fmt.Errorf("no addresses found in gateway")
+	}
+	if strings.EqualFold(gw.GetAnnotations()[constants.SoloAnnotationPeeringPreferredDataPlaneServiceType], "nodeport") {
+		// for nodeport peering, validate the required labels and annotations exist
+		if v, exists := gw.GetAnnotations()[constants.GatewayServiceAccountAnnotation]; !exists || v == "" {
+			return fmt.Errorf("nodeport peering is enabled, expected %s annotation not found in gateway", constants.GatewayServiceAccountAnnotation)
+		}
+		if v, exists := gw.GetLabels()[label.TopologyCluster.Name]; !exists || v == "" {
+			return fmt.Errorf("nodeport peering is enabled, expected %s label not found in gateway", label.TopologyCluster.Name)
+		}
 	}
 	return nil
 }

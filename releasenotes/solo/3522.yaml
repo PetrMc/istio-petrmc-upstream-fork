@@ -1,0 +1,14 @@
+apiVersion: release-notes/v2
+
+kind: feature
+
+area: traffic-management
+
+issue:
+  - https://github.com/solo-io/istio/issues/3522
+  - https://github.com/solo-io/istio/issues/3502
+
+releaseNotes:
+- |
+  **Added** support for envoy-based ingress gateways, waypoints, and sidecars when peering via NodePort is enabled.
+  **Added** a new gateway status condition to indicate what data plane service type is currently being used for peering.
