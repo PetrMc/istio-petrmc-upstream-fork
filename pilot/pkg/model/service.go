@@ -1249,6 +1249,9 @@ type ServiceInfo struct {
 	// HboneNodePort is the node port for the hbone port.
 	// only used for nodeport gateway services.
 	HboneNodePort uint32
+	// CreationTime is the time when the service was created. Note this is used internally only
+	// for conflict resolution.
+	CreationTime time.Time
 }
 
 // IsPeered returns true if the service is exported/peered
@@ -1367,6 +1370,10 @@ func (i WaypointBindingStatus) Equals(other WaypointBindingStatus) bool {
 
 func (i ServiceInfo) NamespacedName() types.NamespacedName {
 	return types.NamespacedName{Name: i.Service.Name, Namespace: i.Service.Namespace}
+}
+
+func (i ServiceInfo) GetName() string {
+	return i.Service.Name
 }
 
 func (i ServiceInfo) GetNamespace() string {

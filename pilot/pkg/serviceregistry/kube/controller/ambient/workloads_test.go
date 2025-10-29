@@ -15,6 +15,7 @@
 package ambient
 
 import (
+	"cmp"
 	"net/netip"
 	"sort"
 	"testing"
@@ -22,6 +23,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 	"sigs.k8s.io/gateway-api/apis/v1beta1"
 
@@ -1598,8 +1600,53 @@ func TestServiceEntryWorkloads(t *testing.T) {
 		result []*workloadapi.Workload
 	}{
 		{
-			name:   "dns without endpoints",
-			inputs: []any{},
+			name: "dns without endpoints",
+			// This is kind of ugly, but we need to add the ServiceInfos to the inputs so that the ServiceEntryWorkloadBuilder can find them
+			// Otherwise, we consider the ServiceEntry to have been deduplicated and we won't generate workloads for it
+			inputs: []any{
+				model.ServiceInfo{
+					Service: &workloadapi.Service{
+						Name:      "name",
+						Namespace: "ns",
+						Hostname:  "a.example.com",
+						Ports: []*workloadapi.Port{{
+							ServicePort: 80,
+							TargetPort:  80,
+						}},
+					},
+					PortNames: map[int32]model.ServicePortName{
+						80: {PortName: "http"},
+					},
+					Source: model.TypedObject{
+						Kind: kind.ServiceEntry,
+						NamespacedName: types.NamespacedName{
+							Namespace: "ns",
+							Name:      "name",
+						},
+					},
+				},
+				model.ServiceInfo{
+					Service: &workloadapi.Service{
+						Name:      "name",
+						Namespace: "ns",
+						Hostname:  "b.example.com",
+						Ports: []*workloadapi.Port{{
+							ServicePort: 80,
+							TargetPort:  80,
+						}},
+					},
+					PortNames: map[int32]model.ServicePortName{
+						80: {PortName: "http"},
+					},
+					Source: model.TypedObject{
+						Kind: kind.ServiceEntry,
+						NamespacedName: types.NamespacedName{
+							Namespace: "ns",
+							Name:      "name",
+						},
+					},
+				},
+			},
 			se: &networkingclient.ServiceEntry{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "name",
@@ -1674,6 +1721,27 @@ func TestServiceEntryWorkloads(t *testing.T) {
 						},
 					},
 					TrafficType: constants.AllTraffic,
+				},
+				model.ServiceInfo{
+					Service: &workloadapi.Service{
+						Name:      "name",
+						Namespace: "ns",
+						Hostname:  "a.example.com",
+						Ports: []*workloadapi.Port{{
+							ServicePort: 80,
+							TargetPort:  80,
+						}},
+					},
+					PortNames: map[int32]model.ServicePortName{
+						80: {PortName: "http"},
+					},
+					Source: model.TypedObject{
+						Kind: kind.ServiceEntry,
+						NamespacedName: types.NamespacedName{
+							Namespace: "ns",
+							Name:      "name",
+						},
+					},
 				},
 			},
 			se: &networkingclient.ServiceEntry{
@@ -1805,10 +1873,14 @@ func TestServiceEntryWorkloads(t *testing.T) {
 				krttest.GetMockCollection[Waypoint](mock),
 				krttest.GetMockCollection[*v1.Namespace](mock),
 				krttest.GetMockCollection[*v1.Service](mock),
+				krttest.GetMockCollection[model.ServiceInfo](mock),
 			)
 			res := builder(krt.TestingDummyContext{}, tt.se)
 			wl := slices.Map(res, func(e model.WorkloadInfo) *workloadapi.Workload {
 				return e.Workload
+			})
+			slices.SortFunc(wl, func(a, b *workloadapi.Workload) int {
+				return cmp.Compare(a.Uid, b.Uid)
 			})
 			assert.Equal(t, wl, tt.result)
 		})
