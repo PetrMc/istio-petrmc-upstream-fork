@@ -16,7 +16,6 @@ import (
 	"istio.io/istio/pkg/spiffe"
 	"istio.io/istio/pkg/util/sets"
 	"istio.io/istio/pkg/workloadapi"
-	"istio.io/istio/platform/discovery/peering"
 )
 
 func (a *index) FederatedServicesCollection(
@@ -31,12 +30,13 @@ func (a *index) FederatedServicesCollection(
 	krt.Collection[krt.Named],
 ) {
 	globalServiceByWaypoint := krt.NewIndex(Services, "globalServiceByWaypoint", func(s model.ServiceInfo) []string {
-		if s.GlobalService() && s.Waypoint.ResourceName != "" {
+		if s.IsPeered() && s.Waypoint.ResourceName != "" {
 			return []string{s.Waypoint.ResourceName}
 		}
 		return nil
 	})
-	// check if the given service is a waypoint, and any of the services using it are global
+	// check if the given service is a waypoint, and any of the services using it are peered
+	// TODO rename this to "autoPeeredWayoint" - with the new "segment" scope, "global" has a more specific meaning
 	isGlobalWaypoint := func(ctx krt.HandlerContext, name, ns string) bool {
 		n := len(krt.Fetch(ctx, Services, krt.FilterIndex(globalServiceByWaypoint, ns+"/"+name)))
 		return n > 0
@@ -49,7 +49,7 @@ func (a *index) FederatedServicesCollection(
 		}
 
 		isGlobalWaypoint := isGlobalWaypoint(ctx, svc.Service.GetName(), svc.GetNamespace())
-		if !svc.GlobalService() && !isGlobalWaypoint {
+		if !svc.IsPeered() && !isGlobalWaypoint {
 			return nil
 		}
 
@@ -104,6 +104,11 @@ func (a *index) FederatedServicesCollection(
 			}
 		}
 
+		// Convert model.SoloServiceScope to workloadapi.ServiceScope
+		// Note: LOCAL services are filtered out earlier by the !svc.IsPeered() check,
+		// so they never reach this code. Only GLOBAL, SEGMENT, and GLOBAL_ONLY get here.
+		serviceScope := svc.SoloServiceScope.ToProto()
+
 		fs := &workloadapi.FederatedService{
 			Name:                s.Name,
 			Namespace:           s.Namespace,
@@ -114,7 +119,8 @@ func (a *index) FederatedServicesCollection(
 			TrafficDistribution: svc.TrafficDistribution.String(),
 			WaypointFor:         waypointFor,
 			ProtocolsByPort:     protocolsByPort,
-			Scope:               peering.ConvertScope(svc.SoloServiceScope),
+			Scope:               serviceScope,
+			Takeover:            svc.SoloServiceTakeover,
 		}
 		if s.Waypoint != nil && waypoint != nil {
 			fs.Waypoint = &workloadapi.RemoteWaypoint{

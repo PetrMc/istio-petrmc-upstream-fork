@@ -421,7 +421,8 @@ func getTLSModeFromWorkloadEntry(wle *networking.WorkloadEntry) string {
 		tlsMode = val
 	} else if wle.ServiceAccount != "" {
 		// SOLO peering; we cannot assume mTLS for peered WE like this
-		if !peering.HasGlobalLabel(wle.GetLabels()) {
+		// Check if this is a peer object: namespace is peering namespace and has parent service labels
+		if !peering.HasPeeringLabel(wle.Labels) {
 			tlsMode = model.IstioMutualTLSModeLabel
 		}
 	}

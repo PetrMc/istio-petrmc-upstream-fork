@@ -744,9 +744,9 @@ func workloadEntryWorkloadBuilder(
 			// if the system namespace label matches the segment of this service
 			segmentLocal := localSegmentName(ctx, clusterSegment) == serviceSegmentName
 			// use empty map for namespace labels to re-use the calculate scope function
-			scope := peering.CalculateScope(wle.GetLabels(), map[string]string{})
+			takeover := peering.ShouldTakeover(wle.GetLabels(), nil)
 
-			if scope == peering.ServiceScopeGlobalOnly && segmentLocal {
+			if takeover && segmentLocal {
 				// If we are taking over the Service, also attach to that
 				services = append(services, krt.Fetch(
 					ctx, workloadServices,
@@ -1302,7 +1302,7 @@ func serviceEntryWorkloadBuilder(
 		cluster := clusterGetter(ctx)
 		// here we don't care about the *service* waypoint (hence it is nil); we are only going to use a subset of the info in
 		// `allServiceInfos` (since we are building workloads here, not services).
-		allServiceInfos := serviceEntriesInfo(ctx, se, nil, nil, false, scope, networkGetter)
+		allServiceInfos := serviceEntriesInfo(ctx, se, nil, nil, false, scope, false, networkGetter)
 		if implicitEndpoints {
 			eps = slices.Map(allServiceInfos, func(si model.ServiceInfo) *networkingv1alpha3.WorkloadEntry {
 				return &networkingv1alpha3.WorkloadEntry{Address: si.Service.Hostname}

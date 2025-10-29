@@ -62,7 +62,7 @@ func (c *NetworkWatcher) mergedServicesForWorkload(workload *RemoteWorkload, seg
 		weName := fmt.Sprintf("autogen.%v.%v.%v", workload.ClusterId, svcNs, svcName)
 		if we := c.workloadEntries.Get(weName, PeeringNamespace); we != nil {
 			if scope, ok := we.Labels[ServiceScopeLabel]; ok {
-				weScope = scope
+				weScope = ServiceScope(scope)
 			}
 		}
 
@@ -70,8 +70,8 @@ func (c *NetworkWatcher) mergedServicesForWorkload(workload *RemoteWorkload, seg
 		if localService != nil {
 			ns := ptr.OrEmpty(c.namespaces.Get(localService.GetNamespace(), ""))
 			scope := CalculateScope(localService.GetLabels(), ns.GetLabels())
-			if !IsGlobal(scope) && !c.isGlobalWaypoint(localService) {
-				// It's not global, so ignore it
+			if !scope.IsPeered() && !c.isGlobalWaypoint(localService) {
+				// It's not peered, so ignore it
 				localService = nil
 			} else {
 				weScope = scope
@@ -94,7 +94,29 @@ func (c *NetworkWatcher) mergedServicesForWorkload(workload *RemoteWorkload, seg
 		// even though this isn't used in the selector, we need the permutations
 		// logic to build one for every local value of scope for the services this
 		// is a part of
-		labels[ServiceScopeLabel] = weScope
+		labels[ServiceScopeLabel] = string(weScope)
+
+		// Compute takeover
+		// it is used by ServiceEntry controller's workloadEntryHandler
+		// to determine whether to share the WE with the Kubernetes Service
+		var localSvcLabels, nsLabels, remoteLabels map[string]string
+
+		// Get labels from gateway WE (remote)
+		if we := c.workloadEntries.Get(weName, PeeringNamespace); we != nil {
+			remoteLabels = we.Labels
+		}
+
+		// Get labels from local service and namespace
+		if localService != nil {
+			localSvcLabels = localService.GetLabels()
+			ns := ptr.OrEmpty(c.namespaces.Get(localService.GetNamespace(), ""))
+			nsLabels = ns.GetLabels()
+		}
+
+		// Use shared function with proper priority: explicit label > global-only, local > ns > remote
+		if shouldTakeoverInternal(localSvcLabels, remoteLabels, nsLabels) {
+			labels[ServiceTakeoverLabel] = "true"
+		}
 
 		unmerged = append(unmerged, servicesForWorkload{
 			selector: labels,

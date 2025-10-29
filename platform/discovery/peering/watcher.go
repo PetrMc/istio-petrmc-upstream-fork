@@ -260,7 +260,7 @@ func New(
 		commonServiceHandler(name)
 	}, func(o controllers.Object) bool {
 		ns := ptr.OrEmpty(c.namespaces.Get(o.GetNamespace(), ""))
-		return IsGlobal(CalculateScope(o.GetLabels(), ns.GetLabels()))
+		return CalculateScope(o.GetLabels(), ns.GetLabels()).IsPeered()
 	}))
 	c.workloadEntries.AddEventHandler(controllers.FilteredObjectHandler(func(o controllers.Object) {
 		svc := o.GetLabels()[ParentServiceLabel]
@@ -782,10 +782,12 @@ const (
 	// This should only be set when the service exists in at least one cluster on the same network as the local cluster.
 	UseGlobalWaypointLabel = "solo.io/use-global-waypoint"
 
-	ServiceScopeLabel      = "solo.io/service-scope"
-	ServiceScopeGlobal     = "global"
-	ServiceScopeGlobalOnly = "global-only"
-	ServiceScopeCluster    = "cluster"
+	ServiceScopeLabel = "solo.io/service-scope"
+
+	// ServiceTakeoverLabel controls whether to override *.cluster.local addresses
+	// When set to "true", the mesh treats requests to the local service as if directed to its global address
+	// This behavior only applies within the boundary of a Segment
+	ServiceTakeoverLabel = "solo.io/service-takeover"
 
 	ServiceSubjectAltNamesAnnotation = "solo.io/subject-alt-names"
 	SegmentLabel                     = "admin.solo.io/segment"
@@ -807,6 +809,17 @@ const (
 	// Format: "80:HTTP,443:HTTPS,9090:GRPC"
 	ServiceProtocolsAnnotation = "solo.io/service-protocols"
 )
+
+// Aliases for backward compatibility - use model.SoloServiceScope* instead
+const (
+	ServiceScopeGlobal     = model.SoloServiceScopeGlobal
+	ServiceScopeSegment    = model.SoloServiceScopeSegment
+	ServiceScopeGlobalOnly = model.SoloServiceScopeGlobalOnly
+	ServiceScopeCluster    = model.SoloServiceScopeCluster
+)
+
+// ServiceScope is an alias for model.SoloServiceScope
+type ServiceScope = model.SoloServiceScope
 
 // serializeProtocolsByPort converts a map of port->protocol to annotation string format
 func serializeProtocolsByPort(protocolsByPort map[uint32]string) string {
@@ -839,39 +852,81 @@ func deserializeProtocolsByPort(annotation string) map[uint32]string {
 	return result
 }
 
-func HasGlobalLabel(labels map[string]string) bool {
-	v := labels[ServiceScopeLabel]
-	return IsGlobal(v)
-}
-
-func CalculateScope(svcl, nsl map[string]string) string {
-	if val, ok := svcl[ServiceScopeLabel]; ok {
-		return val
+// CalculateScope determines the service scope from service and namespace labels
+// Returns Cluster if the label is missing or explicitly set to "cluster" or "local" (deprecated)
+func CalculateScope(svcl, nsl map[string]string) model.SoloServiceScope {
+	// Check service label first
+	if svcl != nil {
+		if val, ok := svcl[ServiceScopeLabel]; ok {
+			if val == "" || val == "cluster" || val == "local" {
+				return model.SoloServiceScopeCluster
+			}
+			return model.SoloServiceScope(val)
+		}
 	}
 
-	if val, ok := nsl[ServiceScopeLabel]; ok {
-		return val
+	// Check namespace label second (only if provided)
+	if nsl != nil {
+		if val, ok := nsl[ServiceScopeLabel]; ok {
+			if val == "" || val == "cluster" || val == "local" {
+				return model.SoloServiceScopeCluster
+			}
+			return model.SoloServiceScope(val)
+		}
 	}
 
-	return ServiceScopeCluster
+	// Default to Cluster when no label is present
+	return model.SoloServiceScopeCluster
 }
 
-func IsGlobal(scope string) bool {
-	return scope == ServiceScopeGlobal || scope == ServiceScopeGlobalOnly
+// ShouldTakeover checks if the service should override *.cluster.local addresses
+// Returns true if either the segment-takeover label is set to "true" OR
+// the scope is global-only (backward compatibility)
+// The takeover label is only checked on service labels, but global-only can be inherited from namespace
+func ShouldTakeover(objectLabels, nsLabels map[string]string) bool {
+	return shouldTakeoverInternal(objectLabels, nil, nsLabels)
 }
 
-func ConvertScope(scope string) workloadapi.ServiceScope {
-	if scope == ServiceScopeGlobalOnly {
-		return workloadapi.ServiceScope_GLOBAL_ONLY
+func shouldTakeoverInternal(
+	localSvcLabels,
+	remoteLabels,
+	nsLabels map[string]string,
+) bool {
+	// can't takeover if it's not peered
+	localScope := CalculateScope(localSvcLabels, nsLabels)
+	remoteOnly := remoteLabels != nil && localSvcLabels == nil
+	peered := remoteOnly || localScope.IsPeered()
+	if !peered {
+		return false
 	}
-	return workloadapi.ServiceScope_GLOBAL
-}
 
-func ConvertScopeFromWorkloadAPI(scope workloadapi.ServiceScope) string {
-	if scope == workloadapi.ServiceScope_GLOBAL_ONLY {
-		return ServiceScopeGlobalOnly
+	// Priority 1: Check for explicit takeover label in priority order: local svc > ns > remote
+	// If ANY level explicitly sets the label (including "false"), honor it and don't check lower priority
+	for _, labels := range []map[string]string{localSvcLabels, nsLabels, remoteLabels} {
+		if labels != nil {
+			if takeover, ok := labels[ServiceTakeoverLabel]; ok {
+				// Explicit label set, honor it (even if "false") and don't check lower priority
+				return takeover == "true"
+			}
+		}
 	}
-	return ServiceScopeGlobal
+
+	// Priority 2: Check for global-only scope (backward compatibility)
+
+	// Check local/ns scope (already computed above)
+	if localScope == model.SoloServiceScopeGlobalOnly {
+		return true
+	}
+
+	// Check remote scope
+	if remoteOnly {
+		remoteScope := CalculateScope(remoteLabels, nil)
+		if remoteScope == model.SoloServiceScopeGlobalOnly {
+			return true
+		}
+	}
+
+	return false
 }
 
 var (
@@ -894,7 +949,14 @@ var (
 		"If enabled, clusters that have the same network name will be reached directly, skipping the gateway.").Get()
 )
 
+// HasPeeringLabel checks if an object is peered. We do not check the namespace like
+// in IsPeerObject because this may be called after fake out the namespace.
+func HasPeeringLabel(labels map[string]string) bool {
+	return CalculateScope(labels, map[string]string{}).IsPeered()
+}
+
 // IsPeerObject checks if an object is a peer object which should be logically considered a part of another namespace.
+// This must be called while the Config is still marked as being in the PeeringNamespace (its actual namespace).
 func IsPeerObject(c *config.Config) bool {
 	if c.Namespace != PeeringNamespace {
 		return false

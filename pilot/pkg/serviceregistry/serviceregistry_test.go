@@ -1515,7 +1515,7 @@ func TestWorkloadInstances(t *testing.T) {
 	t.Run("Service selects peering WorkloadEntry", func(t *testing.T) {
 		store, kube, fx := setupTest(t)
 		service := service.DeepCopy()
-		service.Labels = map[string]string{peering.ServiceScopeLabel: peering.ServiceScopeGlobalOnly}
+		service.Labels = map[string]string{peering.ServiceScopeLabel: string(peering.ServiceScopeGlobalOnly)}
 		makeService(t, kube, service)
 		workloadEntry := config.Config{
 			Meta: config.Meta{
@@ -1524,7 +1524,7 @@ func TestWorkloadInstances(t *testing.T) {
 				GroupVersionKind: gvk.WorkloadEntry,
 				Labels: map[string]string{
 					"app":                               "foo",
-					peering.ServiceScopeLabel:           peering.ServiceScopeGlobalOnly,
+					peering.ServiceScopeLabel:           string(peering.ServiceScopeGlobalOnly),
 					peering.ParentServiceLabel:          service.Name,
 					peering.ParentServiceNamespaceLabel: service.Namespace,
 					peering.SourceClusterLabel:          "c1",
@@ -1544,7 +1544,7 @@ func TestWorkloadInstances(t *testing.T) {
 		expectServiceEndpoints(t, fx, expectedSvc, 80, instances)
 
 		// Change the label, we should see it removed
-		workloadEntry.Labels[peering.ServiceScopeLabel] = peering.ServiceScopeGlobal
+		workloadEntry.Labels[peering.ServiceScopeLabel] = string(peering.ServiceScopeGlobal)
 		makeIstioObject(t, store, workloadEntry)
 		expectServiceEndpoints(t, fx, expectedSvc, 80, nil)
 	})

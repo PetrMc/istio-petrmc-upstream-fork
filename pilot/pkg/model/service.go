@@ -1227,11 +1227,16 @@ type ServiceInfo struct {
 	Scope    ServiceScope
 	Waypoint WaypointBindingStatus
 
-	// SoloServiceScope set by the label
-	SoloServiceScope string
-
-	// RemoteWaypoint marks this as having a waypoint - but on a remote cluster
+	// SoloServiceScope is the peering scope for this service (global, segment, or local)
+	SoloServiceScope SoloServiceScope
+	// SoloServiceTakeover indicates whether this service should override *.cluster.local addresses
+	SoloServiceTakeover bool
+	// RemoteWaypoint marks this as having a waypoint - but on a remote cluster.
+	// Used by SOLO peering to help us with skipping processing on local envoys
+	// when sending to a cross-network Service where we know there is a waypoint
+	// on the remote side.
 	RemoteWaypoint bool
+
 	// TrafficDistribution preserves the control plane value of TrafficDistribution (rather than the LoadBalancing which applies defaulting to Any)
 	TrafficDistribution *TrafficDistribution
 
@@ -1246,9 +1251,9 @@ type ServiceInfo struct {
 	HboneNodePort uint32
 }
 
-func (i ServiceInfo) GlobalService() bool {
-	// can't import peering here; would cause a cycle
-	return i.SoloServiceScope == "global" || i.SoloServiceScope == "global-only"
+// IsPeered returns true if the service is exported/peered
+func (i ServiceInfo) IsPeered() bool {
+	return i.SoloServiceScope.IsPeered()
 }
 
 func (i ServiceInfo) GetLabelSelector() map[string]string {
@@ -1376,7 +1381,8 @@ func (i ServiceInfo) Equals(other ServiceInfo) bool {
 		i.Scope == other.Scope &&
 		i.Waypoint.Equals(other.Waypoint) &&
 		i.SoloServiceScope == other.SoloServiceScope &&
-		i.RemoteWaypoint == other.RemoteWaypoint
+		i.RemoteWaypoint == other.RemoteWaypoint &&
+		i.SoloServiceTakeover == other.SoloServiceTakeover
 }
 
 func (i ServiceInfo) ResourceName() string {

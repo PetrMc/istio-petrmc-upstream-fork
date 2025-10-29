@@ -1,0 +1,20 @@
+apiVersion: release-notes/v2
+
+kind: feature
+
+area: traffic-management
+
+issue:
+  - https://github.com/solo-io/istio/issues/3250
+
+releaseNotes:
+- |
+  **Added** new `segment` value for `solo.io/service-scope` which only exports
+  the service to peered clusters on the same Segment.
+
+  **Added** new `solo.io/service-takeover` label to enable service takeover without
+  using `solo.io/service-scope=global-only`, so that takeover is possible while
+  only exposing the service to the Segment.
+
+  **Deprecated** `solo.io/service-scope=global-only` in favor of using
+  `solo.io/service-takeover` for service takeover use cases.

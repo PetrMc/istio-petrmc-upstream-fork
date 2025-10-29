@@ -252,7 +252,7 @@ func (s *Controller) workloadEntryHandler(old, curr config.Config, event model.E
 
 	wi := s.convertWorkloadEntryToWorkloadInstance(curr, s.Cluster())
 	peered := peering.WasPeerObject(&curr)
-	shouldShare := !peered || (peered && curr.Labels[peering.ServiceScopeLabel] == peering.ServiceScopeGlobalOnly)
+	shouldShare := !peered || peering.ShouldTakeover(curr.Labels, nil)
 	if wi != nil && !wi.DNSServiceEntryOnly {
 		handlerEvent := event
 		if peered && !shouldShare {

@@ -111,6 +111,9 @@ func (this *FederatedService) EqualVT(that *FederatedService) bool {
 	if this.Scope != that.Scope {
 		return false
 	}
+	if this.Takeover != that.Takeover {
+		return false
+	}
 	return string(this.unknownFields) == string(that.unknownFields)
 }
 
@@ -219,6 +222,16 @@ func (m *FederatedService) MarshalToSizedBufferVTStrict(dAtA []byte) (int, error
 	if m.unknownFields != nil {
 		i -= len(m.unknownFields)
 		copy(dAtA[i:], m.unknownFields)
+	}
+	if m.Takeover {
+		i--
+		if m.Takeover {
+			dAtA[i] = 1
+		} else {
+			dAtA[i] = 0
+		}
+		i--
+		dAtA[i] = 0x60
 	}
 	if m.Scope != 0 {
 		i = protohelpers.EncodeVarint(dAtA, i, uint64(m.Scope))
@@ -442,6 +455,9 @@ func (m *FederatedService) SizeVT() (n int) {
 	}
 	if m.Scope != 0 {
 		n += 1 + protohelpers.SizeOfVarint(uint64(m.Scope))
+	}
+	if m.Takeover {
+		n += 2
 	}
 	n += len(m.unknownFields)
 	return n

@@ -1470,7 +1470,7 @@ func TestWorkloadEntryWorkloads(t *testing.T) {
 					Namespace: peering.PeeringNamespace,
 					Labels: map[string]string{
 						"app":                               "echo",
-						peering.ServiceScopeLabel:           peering.ServiceScopeGlobalOnly,
+						peering.ServiceScopeLabel:           string(peering.ServiceScopeGlobalOnly),
 						peering.ParentServiceLabel:          "echo",
 						peering.ParentServiceNamespaceLabel: "default",
 						peering.SourceClusterLabel:          "c1",

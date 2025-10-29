@@ -22,7 +22,10 @@ option go_package="pkg/workloadapi";
 
 enum ServiceScope {
   GLOBAL = 0;
-  GLOBAL_ONLY = 1;
+  // GLOBAL_ONLY is deprecated. Use GLOBAL with takeover=true instead.
+  GLOBAL_ONLY = 1 [deprecated = true];
+  // SEGMENT indicates the service is visible only within its segment
+  SEGMENT = 2;
 }
 
 // Segment allows this cluster to tell peers its own segment and domain.
@@ -64,8 +67,12 @@ message FederatedService {
   string waypoint_for = 9;
   // ProtocolsByPort maps service port numbers to their protocols (e.g., 80 -> "HTTP", 443 -> "HTTPS")
   map<uint32, string> protocols_by_port = 10;
-  // ServiceScope indicates whether the service should do takeover.
+  // ServiceScope indicates the scope of this service (global, global_only, etc.)
   ServiceScope scope = 11;
+  // Takeover indicates whether this service should override the standard *.cluster.local addresses.
+  // When true, peered services will be accessible via the cluster.local domain.
+  // Deprecated: GLOBAL_ONLY scope (scope=GLOBAL_ONLY) implies takeover=true for backwards compatibility.
+  bool takeover = 12;
 }
 
 message RemoteWaypoint  {

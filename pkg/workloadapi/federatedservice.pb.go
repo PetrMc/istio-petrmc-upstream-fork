@@ -39,8 +39,13 @@ const (
 type ServiceScope int32
 
 const (
-	ServiceScope_GLOBAL      ServiceScope = 0
+	ServiceScope_GLOBAL ServiceScope = 0
+	// GLOBAL_ONLY is deprecated. Use GLOBAL with takeover=true instead.
+	//
+	// Deprecated: Marked as deprecated in workloadapi/federatedservice.proto.
 	ServiceScope_GLOBAL_ONLY ServiceScope = 1
+	// SEGMENT indicates the service is visible only within its segment
+	ServiceScope_SEGMENT ServiceScope = 2
 )
 
 // Enum value maps for ServiceScope.
@@ -48,10 +53,12 @@ var (
 	ServiceScope_name = map[int32]string{
 		0: "GLOBAL",
 		1: "GLOBAL_ONLY",
+		2: "SEGMENT",
 	}
 	ServiceScope_value = map[string]int32{
 		"GLOBAL":      0,
 		"GLOBAL_ONLY": 1,
+		"SEGMENT":     2,
 	}
 )
 
@@ -169,8 +176,12 @@ type FederatedService struct {
 	WaypointFor string `protobuf:"bytes,9,opt,name=waypoint_for,json=waypointFor,proto3" json:"waypoint_for,omitempty"`
 	// ProtocolsByPort maps service port numbers to their protocols (e.g., 80 -> "HTTP", 443 -> "HTTPS")
 	ProtocolsByPort map[uint32]string `protobuf:"bytes,10,rep,name=protocols_by_port,json=protocolsByPort,proto3" json:"protocols_by_port,omitempty" protobuf_key:"varint,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	// ServiceScope indicates whether the service should do takeover.
-	Scope         ServiceScope `protobuf:"varint,11,opt,name=scope,proto3,enum=istio.workload.ServiceScope" json:"scope,omitempty"`
+	// ServiceScope indicates the scope of this service (global, global_only, etc.)
+	Scope ServiceScope `protobuf:"varint,11,opt,name=scope,proto3,enum=istio.workload.ServiceScope" json:"scope,omitempty"`
+	// Takeover indicates whether this service should override the standard *.cluster.local addresses.
+	// When true, peered services will be accessible via the cluster.local domain.
+	// Deprecated: GLOBAL_ONLY scope (scope=GLOBAL_ONLY) implies takeover=true for backwards compatibility.
+	Takeover      bool `protobuf:"varint,12,opt,name=takeover,proto3" json:"takeover,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -282,6 +293,13 @@ func (x *FederatedService) GetScope() ServiceScope {
 	return ServiceScope_GLOBAL
 }
 
+func (x *FederatedService) GetTakeover() bool {
+	if x != nil {
+		return x.Takeover
+	}
+	return false
+}
+
 type RemoteWaypoint struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Name represents the name for the service.
@@ -345,7 +363,7 @@ const file_workloadapi_federatedservice_proto_rawDesc = "" +
 	"\"workloadapi/federatedservice.proto\x12\x0eistio.workload\x1a\x1egoogle/protobuf/wrappers.proto\x1a\x1aworkloadapi/workload.proto\"5\n" +
 	"\aSegment\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x16\n" +
-	"\x06domain\x18\x02 \x01(\tR\x06domain\"\xdf\x04\n" +
+	"\x06domain\x18\x02 \x01(\tR\x06domain\"\xfb\x04\n" +
 	"\x10FederatedService\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1c\n" +
 	"\tnamespace\x18\x02 \x01(\tR\tnamespace\x12\x1a\n" +
@@ -358,17 +376,19 @@ const file_workloadapi_federatedservice_proto_rawDesc = "" +
 	"\fwaypoint_for\x18\t \x01(\tR\vwaypointFor\x12a\n" +
 	"\x11protocols_by_port\x18\n" +
 	" \x03(\v25.istio.workload.FederatedService.ProtocolsByPortEntryR\x0fprotocolsByPort\x122\n" +
-	"\x05scope\x18\v \x01(\x0e2\x1c.istio.workload.ServiceScopeR\x05scope\x1aB\n" +
+	"\x05scope\x18\v \x01(\x0e2\x1c.istio.workload.ServiceScopeR\x05scope\x12\x1a\n" +
+	"\btakeover\x18\f \x01(\bR\btakeover\x1aB\n" +
 	"\x14ProtocolsByPortEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\rR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"B\n" +
 	"\x0eRemoteWaypoint\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1c\n" +
-	"\tnamespace\x18\x02 \x01(\tR\tnamespace*+\n" +
+	"\tnamespace\x18\x02 \x01(\tR\tnamespace*<\n" +
 	"\fServiceScope\x12\n" +
 	"\n" +
-	"\x06GLOBAL\x10\x00\x12\x0f\n" +
-	"\vGLOBAL_ONLY\x10\x01B\x11Z\x0fpkg/workloadapib\x06proto3"
+	"\x06GLOBAL\x10\x00\x12\x13\n" +
+	"\vGLOBAL_ONLY\x10\x01\x1a\x02\b\x01\x12\v\n" +
+	"\aSEGMENT\x10\x02B\x11Z\x0fpkg/workloadapib\x06proto3"
 
 var (
 	file_workloadapi_federatedservice_proto_rawDescOnce sync.Once

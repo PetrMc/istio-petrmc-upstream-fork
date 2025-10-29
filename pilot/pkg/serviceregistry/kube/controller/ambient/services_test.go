@@ -1085,7 +1085,7 @@ func TestServiceServices(t *testing.T) {
 					Name:      "name",
 					Namespace: "ns",
 					Labels: map[string]string{
-						peering.ServiceScopeLabel: peering.ServiceScopeGlobalOnly,
+						peering.ServiceScopeLabel: string(peering.ServiceScopeGlobalOnly),
 					},
 				},
 				Spec: v1.ServiceSpec{

@@ -32,7 +32,6 @@ import (
 	"istio.io/istio/pkg/cluster"
 	"istio.io/istio/pkg/config"
 	"istio.io/istio/pkg/config/constants"
-	"istio.io/istio/pkg/kube"
 	"istio.io/istio/pkg/kube/controllers"
 	"istio.io/istio/pkg/kube/kclient"
 	"istio.io/istio/pkg/kube/krt"
@@ -588,12 +587,6 @@ func workloadEntryChanged(desired *clientnetworking.WorkloadEntry, live *clientn
 	return proto.Equal(&desired.Spec, &live.Spec)
 }
 
-func GetSoloScope(client kube.Client, ns string, labels map[string]string) string {
-	namespace := ptr.OrEmpty(kclient.New[*corev1.Namespace](client).Get(ns, ""))
-
-	return CalculateScope(labels, namespace.GetLabels())
-}
-
 func (c *NetworkWatcher) reconcileGatewayWorkloadEntry(tn types.NamespacedName) error {
 	log := log.WithLabels("workloadentry", tn)
 
@@ -652,12 +645,30 @@ func (c *NetworkWatcher) reconcileGatewayWorkloadEntry(tn types.NamespacedName) 
 	if segmentName != c.GetLocalSegment() {
 		localService = nil // we are not in the same segment, ignore local service
 	}
-	weScope := ConvertScopeFromWorkloadAPI(fs.Service.Scope)
+
+	weScope := model.SoloServiceScopeFromProto(fs.Service.Scope)
+	if !weScope.IsPeered() {
+		// Not peered, remove
+		// This should NEVER happen, FederatedServices shouldn't be sending local scoped services
+		log.Warnf("federated service %v/%v is not peered, should not have received local scoped service, removing workload entry", ns, name)
+		return controllers.IgnoreNotFound(c.workloadEntries.Delete(weName, PeeringNamespace))
+	}
+	if weScope == model.SoloServiceScopeSegment && segmentName != c.GetLocalSegment() {
+		// Segment scoped, but not our segment, removed
+		log.Infof("federated service %v/%v is segment scoped for segment %q, not local segment %q, "+
+			"removing workload entry", ns, name, segmentName, c.GetLocalSegment())
+		return controllers.IgnoreNotFound(c.workloadEntries.Delete(weName, PeeringNamespace))
+	}
+
 	var localPorts []corev1.ServicePort
 	if localService != nil {
-		scope := GetSoloScope(c.client, localService.GetNamespace(), localService.GetLabels())
-		if !IsGlobal(scope) {
-			// It's not global, so ignore it
+		var nsLabels map[string]string
+		if ns := c.namespaces.Get(ns, ""); ns != nil {
+			nsLabels = ns.GetLabels()
+		}
+		scope := CalculateScope(localService.GetLabels(), nsLabels)
+		if !scope.IsPeered() {
+			// It's not peered, so ignore it
 			localService = nil
 		} else {
 			weScope = scope
@@ -674,7 +685,27 @@ func (c *NetworkWatcher) reconcileGatewayWorkloadEntry(tn types.NamespacedName) 
 	// Add our identification labels always. If there is no labels this will be used as the selector in the SE
 	labels[SegmentLabel] = segmentName
 	labels[ParentServiceLabel] = name
-	labels[ServiceScopeLabel] = weScope
+	labels[ServiceScopeLabel] = string(weScope)
+
+	// Compute takeover with proper priority: explicit label > global-only, local > ns > remote
+	var localSvcLabels, nsLabels, remoteLabels map[string]string
+
+	// Get remote takeover status from FederatedService
+	if fs.Service.Takeover {
+		remoteLabels = map[string]string{ServiceTakeoverLabel: "true"}
+	}
+
+	// Get labels from local service and namespace
+	if localService != nil {
+		localSvcLabels = localService.GetLabels()
+		nsObj := ptr.OrEmpty(kclient.New[*corev1.Namespace](c.client).Get(localService.GetNamespace(), ""))
+		nsLabels = nsObj.GetLabels()
+	}
+
+	// Use shared function with proper priority
+	if shouldTakeoverInternal(localSvcLabels, remoteLabels, nsLabels) {
+		labels[ServiceTakeoverLabel] = "true"
+	}
 	labels[ParentServiceNamespaceLabel] = ns
 	labels[SourceClusterLabel] = clusterID
 	// Indicate we support tunneling. This is for Envoy dataplanes mostly.
@@ -779,22 +810,23 @@ func (c *NetworkWatcher) reconcileServiceEntry(name types.NamespacedName) error 
 	// Check if local service exists and get its segment
 	localService := c.services.Get(serviceName, serviceNs)
 	localSegment := ""
-	locallyGlobalOnly := false
+	var nsLabels map[string]string
 	if localService != nil {
 		ns := ptr.OrEmpty(kclient.New[*corev1.Namespace](c.client).Get(serviceNs, ""))
-		scope := CalculateScope(localService.Labels, ns.GetLabels())
-		if IsGlobal(scope) || c.isGlobalWaypoint(localService) {
+		nsLabels = ns.GetLabels()
+		scope := CalculateScope(localService.Labels, nsLabels)
+		if scope.IsPeered() || c.isGlobalWaypoint(localService) {
 			localSegment = c.GetLocalSegment()
 			// Add local segment to the map even if no remote services exist for it
 			// Lets us decide whether to cleanup below
 			if _, exists := remoteServicesBySegment[localSegment]; !exists {
 				remoteServicesBySegment[localSegment] = []*clientnetworking.WorkloadEntry{}
 			}
-			locallyGlobalOnly = scope == ServiceScopeGlobalOnly
 		} else {
 			// Not a global service or waypoint, clear it
 			localService = nil
 			localSegment = ""
+			nsLabels = nil
 		}
 	}
 
@@ -804,15 +836,17 @@ func (c *NetworkWatcher) reconcileServiceEntry(name types.NamespacedName) error 
 		segmentLocal := segmentName == localSegment
 
 		var localServiceForSegment *corev1.Service
+		var nsLabelsForSegment map[string]string
 		if segmentLocal {
 			localServiceForSegment = localService
+			nsLabelsForSegment = nsLabels
 		}
 		if err := c.reconcileServiceEntryForSegment(
 			serviceName,
 			serviceNs,
 			segmentName,
 			localServiceForSegment,
-			segmentLocal && locallyGlobalOnly,
+			nsLabelsForSegment,
 			remoteServices,
 		); err != nil {
 			errs = append(errs, err)
@@ -856,7 +890,7 @@ func (c *NetworkWatcher) reconcileServiceEntryForSegment(
 	serviceNs,
 	segmentName string,
 	localService *corev1.Service,
-	locallyGlobalOnly bool,
+	nsLabels map[string]string,
 	remoteServices []*clientnetworking.WorkloadEntry,
 ) error {
 	log := log.WithLabels("segment", segmentName, "service", serviceName, "namespace", serviceNs)
@@ -885,35 +919,57 @@ func (c *NetworkWatcher) reconcileServiceEntryForSegment(
 		},
 	}
 
-	// localService and remoteServices are already filtered by the caller
-	// Check if any of the remote services are global-only
-	globalOnly := locallyGlobalOnly
-	if segmentName == c.GetLocalSegment() {
-		// we can only to takeover if this SE is for the local segment
+	// Compute takeover with proper priority: explicit label > global-only, local svc > ns > remote
+	takeover := false
+	if c.GetLocalSegment() == segmentName {
+		// We can only do takeover for our local segment
+		var localLabels map[string]string
+		if localService != nil {
+			localLabels = localService.GetLabels()
+		}
+		// Aggregate remote labels - check if ANY remote WE indicates takeover
+		remoteLabels := map[string]string{}
 		for _, remote := range remoteServices {
-			if remote.Labels[ServiceScopeLabel] == ServiceScopeGlobalOnly {
-				globalOnly = true
-				break
+			// Check for takeover label or global-only scope on any remote
+			if takeoverLabel, ok := remote.Labels[ServiceTakeoverLabel]; ok && takeoverLabel == "true" {
+				remoteLabels[ServiceTakeoverLabel] = "true"
+			}
+			if scope, ok := remote.Labels[ServiceScopeLabel]; ok && scope == string(model.SoloServiceScopeGlobalOnly) {
+				remoteLabels[ServiceScopeLabel] = scope
 			}
 		}
+		takeover = shouldTakeoverInternal(localLabels, remoteLabels, nsLabels)
 	}
 
-	if localService == nil && globalOnly {
-		// if the local service does not exist at all (regardless of it existing but not being global)
-		// and the FederatedService is global-only, add the standard k8s fqdn to the SE's hosts.
+	if localService == nil && takeover {
+		// Normally we rely on the local service to exist to program DNS for standard
+		// k8s hostnames, but if a takeover service is only on the remote side, we can put those hostnames
+		// into the hosts lists on the SE.
+		// TODO: until OSS https://github.com/istio/istio/pull/57782 merges, this case BREAKS when using
+		// Segments as when we transition SEs from the default segment to their autogen.segment.name.ns copies
+		// we will momentarily have overlapping hostnames which is something istiod does not recover from
+		// even after the duplicate is cleaned up! We have that specific test case currently skipped in ITs.
 		// We don't need to add the variants here, zTunnel DNS will handle that.
 		se.Spec.Hosts = append(se.Spec.Hosts,
 			fmt.Sprintf("%s.%s.svc.%s", serviceName, serviceNs, c.clusterDomain),
 		)
 	}
-
 	scope := ServiceScopeCluster
 	if localService != nil {
-		scope = GetSoloScope(c.client, localService.GetNamespace(), localService.GetLabels())
-		if !IsGlobal(scope) && !c.isGlobalWaypoint(localService) {
+		scope = CalculateScope(localService.Labels, nsLabels)
+		if !scope.IsPeered() && !c.isGlobalWaypoint(localService) {
 			// It's not global, so ignore it
 			localService = nil
 		}
+	}
+	// Note: When there's no local service, we keep scope as cluster.
+	// We don't inherit the remote's scope because that's for THEIR cluster, not ours.
+
+	if scope == model.SoloServiceScopeSegment && segmentName != c.GetLocalSegment() {
+		// Segment scopes, but the segment we're processing is not our local segment
+		// we need to delete the SE
+		log.Infof("service entry will be deleted (local service is segment scoped for segment %q, not %q)", c.GetLocalSegment(), segmentName)
+		return controllers.IgnoreNotFound(c.serviceEntries.Delete(se.Name, PeeringNamespace))
 	}
 
 	if localService == nil && len(remoteServices) == 0 {
@@ -927,7 +983,10 @@ func (c *NetworkWatcher) reconcileServiceEntryForSegment(
 	}
 	labels[ParentServiceLabel] = serviceName
 	labels[ParentServiceNamespaceLabel] = serviceNs
-	labels[ServiceScopeLabel] = scope
+	labels[ServiceScopeLabel] = string(scope)
+	if takeover {
+		labels[ServiceTakeoverLabel] = "true"
+	}
 	labels[SegmentLabel] = segmentName
 	se.Labels = labels
 

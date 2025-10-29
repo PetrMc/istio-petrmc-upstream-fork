@@ -62,7 +62,7 @@ func SetupApps(t resource.Context, apps *EchoDeployments, nsServiceScope bool) e
 		label.IoIstioDataplaneMode.Name: "ambient",
 	}
 	if nsServiceScope {
-		labels[peering.ServiceScopeLabel] = peering.ServiceScopeGlobal
+		labels[peering.ServiceScopeLabel] = string(peering.ServiceScopeGlobal)
 	}
 
 	apps.Namespace, err = namespace.New(t, namespace.Config{
@@ -97,7 +97,7 @@ func SetupApps(t resource.Context, apps *EchoDeployments, nsServiceScope bool) e
 
 	switch nsServiceScope {
 	case true:
-		lcl := peering.ServiceScopeCluster
+		lcl := string(peering.ServiceScopeCluster)
 		deployToAllClusters(ServiceLocal, ServiceSettings{Scope: lcl}, ServiceSettings{Scope: lcl})
 		deployToAllClusters(ServiceRemoteGlobal, ServiceSettings{Scope: lcl}, ServiceSettings{})
 		deployToAllClusters(ServiceLocalGlobal, ServiceSettings{}, ServiceSettings{Scope: lcl})
@@ -107,9 +107,11 @@ func SetupApps(t resource.Context, apps *EchoDeployments, nsServiceScope bool) e
 		deployToAllClusters(ServiceLocalWaypoint, ServiceSettings{Waypoint: true}, ServiceSettings{})
 		deployToAllClusters(ServiceRemoteWaypoint, ServiceSettings{}, ServiceSettings{Waypoint: true})
 		deployToAllClusters(ServiceAllWaypoint, ServiceSettings{Waypoint: true}, ServiceSettings{Waypoint: true})
-		deployToAllClusters(ServiceGlobalTakeover, ServiceSettings{Scope: peering.ServiceScopeGlobalOnly}, ServiceSettings{Scope: peering.ServiceScopeGlobalOnly})
+		deployToAllClusters(ServiceGlobalTakeover,
+			ServiceSettings{Scope: string(peering.ServiceScopeGlobalOnly)},
+			ServiceSettings{Scope: string(peering.ServiceScopeGlobalOnly)})
 	default:
-		gbl := peering.ServiceScopeGlobal
+		gbl := string(peering.ServiceScopeGlobal)
 		deployToAllClusters(ServiceLocal, ServiceSettings{}, ServiceSettings{})
 		deployToAllClusters(ServiceRemoteGlobal, ServiceSettings{}, ServiceSettings{Scope: gbl})
 		deployToAllClusters(ServiceLocalGlobal, ServiceSettings{Scope: gbl}, ServiceSettings{})
@@ -119,13 +121,15 @@ func SetupApps(t resource.Context, apps *EchoDeployments, nsServiceScope bool) e
 		deployToAllClusters(ServiceLocalWaypoint, ServiceSettings{Scope: gbl, Waypoint: true}, ServiceSettings{Scope: gbl})
 		deployToAllClusters(ServiceRemoteWaypoint, ServiceSettings{Scope: gbl}, ServiceSettings{Scope: gbl, Waypoint: true})
 		deployToAllClusters(ServiceAllWaypoint, ServiceSettings{Scope: gbl, Waypoint: true}, ServiceSettings{Scope: gbl, Waypoint: true})
-		deployToAllClusters(ServiceGlobalTakeover, ServiceSettings{Scope: peering.ServiceScopeGlobalOnly}, ServiceSettings{Scope: peering.ServiceScopeGlobalOnly})
+		deployToAllClusters(ServiceGlobalTakeover,
+			ServiceSettings{Scope: string(peering.ServiceScopeGlobalOnly)},
+			ServiceSettings{Scope: string(peering.ServiceScopeGlobalOnly)})
 	}
 
 	remoteBuilder.WithConfig(ServiceSettings{
 		Name:      ServiceRemoteOnlyTakeover,
 		Namespace: apps.Namespace,
-		Scope:     peering.ServiceScopeGlobalOnly,
+		Scope:     string(peering.ServiceScopeGlobalOnly),
 	}.ToConfig())
 
 	remoteNetworkBuilder := deployment.New(t).DeployServicesOnlyToCluster().WithClusters(
@@ -135,7 +139,7 @@ func SetupApps(t resource.Context, apps *EchoDeployments, nsServiceScope bool) e
 	remoteNetworkBuilder.WithConfig(ServiceSettings{
 		Name:      ServiceCrossNetworkOnlyWaypoint,
 		Namespace: apps.Namespace,
-		Scope:     peering.ServiceScopeGlobal,
+		Scope:     string(peering.ServiceScopeGlobal),
 		Waypoint:  true,
 		// HACK: right now, the way remote-waypoints are implemented will merge all of this same Waypoint service
 		// meaning we have waypoint instances in the flat-network that route to pods that only exist for this service

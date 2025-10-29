@@ -364,7 +364,7 @@ func TestPeering(t *testing.T) {
 
 					// local service has everything copied
 					label.IoIstioUseWaypoint.Name: "waypoint",
-					peering.ServiceScopeLabel:     peering.ServiceScopeGlobal,
+					peering.ServiceScopeLabel:     string(peering.ServiceScopeGlobal),
 
 					// NOTE: no other clusters have this service, so no remote-waypoint usage
 				},
@@ -384,7 +384,7 @@ func TestPeering(t *testing.T) {
 					peering.UseGlobalWaypointLabel: "waypoint.default.mesh.internal",
 					// we have a local service so we copy ALL labels
 					label.IoIstioUseWaypoint.Name: "waypoint",
-					peering.ServiceScopeLabel:     peering.ServiceScopeGlobal,
+					peering.ServiceScopeLabel:     string(peering.ServiceScopeGlobal),
 				},
 			},
 			// svc2
@@ -399,7 +399,7 @@ func TestPeering(t *testing.T) {
 					peering.SegmentLabel:                "default",
 					// svc2 doesn't exist on the network, skip proc but don't use network local waypoint instances
 					peering.RemoteWaypointLabel: "true",
-					peering.ServiceScopeLabel:   peering.ServiceScopeCluster,
+					peering.ServiceScopeLabel:   string(peering.ServiceScopeCluster),
 				},
 			},
 			// waypoint global mirror
@@ -408,7 +408,7 @@ func TestPeering(t *testing.T) {
 				Labels: map[string]string{
 					peering.ParentServiceLabel:          "waypoint",
 					peering.ParentServiceNamespaceLabel: "default",
-					peering.ServiceScopeLabel:           peering.ServiceScopeCluster,
+					peering.ServiceScopeLabel:           string(peering.ServiceScopeCluster),
 					peering.SegmentLabel:                "default",
 				},
 			},
@@ -789,10 +789,10 @@ func TestPeering(t *testing.T) {
 		// use default namespace since this is hardcoded for the
 		// service creation helper
 		c1.CreateNamespaceWithLabels("default", map[string]string{
-			peering.ServiceScopeLabel: peering.ServiceScopeGlobal,
+			peering.ServiceScopeLabel: string(peering.ServiceScopeGlobal),
 		})
 		c2.CreateNamespaceWithLabels("default", map[string]string{
-			peering.ServiceScopeLabel: peering.ServiceScopeGlobal,
+			peering.ServiceScopeLabel: string(peering.ServiceScopeGlobal),
 		})
 
 		// validate the namespace service-scope label change
@@ -803,7 +803,7 @@ func TestPeering(t *testing.T) {
 			"app":                               "svc1",
 			peering.SegmentLabel:                "default",
 			peering.ParentServiceLabel:          "svc1",
-			peering.ServiceScopeLabel:           peering.ServiceScopeGlobal,
+			peering.ServiceScopeLabel:           string(peering.ServiceScopeGlobal),
 			peering.ParentServiceNamespaceLabel: "default",
 			peering.SourceClusterLabel:          "c2",
 			model.TunnelLabel:                   model.TunnelHTTP,
@@ -813,8 +813,8 @@ func TestPeering(t *testing.T) {
 
 	t.Run("local service changes", func(t *testing.T) {
 		c1, c2 := setup(t)
-		c1.CreateServiceLabel("svc1", peering.ServiceScopeGlobal, "", ports1)
-		c2.CreateServiceLabel("svc1", peering.ServiceScopeGlobal, "", ports2)
+		c1.CreateServiceLabel("svc1", string(peering.ServiceScopeGlobal), "", ports1)
+		c2.CreateServiceLabel("svc1", string(peering.ServiceScopeGlobal), "", ports2)
 
 		AssertWE(c1, DesiredWE{Name: c2Svc1Name, Locality: c2.Locality()})
 		AssertWEPorts(c1, c2Svc1Name, map[string]uint32{"port-80": 80, "port-81": 81, "port-92": 92, "target-821": 82})
@@ -827,7 +827,7 @@ func TestPeering(t *testing.T) {
 		})
 		seLbls := map[string]string{
 			peering.ParentServiceLabel:          "svc1",
-			peering.ServiceScopeLabel:           peering.ServiceScopeGlobal,
+			peering.ServiceScopeLabel:           string(peering.ServiceScopeGlobal),
 			peering.ParentServiceNamespaceLabel: "default",
 			peering.SegmentLabel:                peering.DefaultSegmentName,
 		}
@@ -835,7 +835,7 @@ func TestPeering(t *testing.T) {
 		weLbls := map[string]string{
 			"app":                               "svc1",
 			peering.ParentServiceLabel:          "svc1",
-			peering.ServiceScopeLabel:           peering.ServiceScopeGlobal,
+			peering.ServiceScopeLabel:           string(peering.ServiceScopeGlobal),
 			peering.ParentServiceNamespaceLabel: "default",
 			peering.SourceClusterLabel:          "c2",
 			peering.SegmentLabel:                peering.DefaultSegmentName,
@@ -845,18 +845,22 @@ func TestPeering(t *testing.T) {
 		AssertWEPorts(c1, c2Svc1Name, map[string]uint32{"port-80": 80, "port-81": 81, "port-92": 92, "target-821": 82})
 
 		// Switch to GlobalOnly
-		c1.CreateServiceLabel("svc1", peering.ServiceScopeGlobalOnly, "", ports1)
-		seLbls[peering.ServiceScopeLabel] = peering.ServiceScopeGlobalOnly
+		c1.CreateServiceLabel("svc1", string(peering.ServiceScopeGlobalOnly), "", ports1)
+		seLbls[peering.ServiceScopeLabel] = string(peering.ServiceScopeGlobalOnly)
+		seLbls[peering.ServiceTakeoverLabel] = "true"
 		AssertSELabels(c1, defaultSvc1Name, seLbls)
-		weLbls[peering.ServiceScopeLabel] = peering.ServiceScopeGlobalOnly
+		weLbls[peering.ServiceScopeLabel] = string(peering.ServiceScopeGlobalOnly)
+		weLbls[peering.ServiceTakeoverLabel] = "true"
 		AssertWELabels(c1, c2Svc1Name, weLbls)
 
 		// Switch to Local
 		c1.CreateServiceLabel("svc1", "", "", ports1)
-		seLbls[peering.ServiceScopeLabel] = peering.ServiceScopeCluster
+		seLbls[peering.ServiceScopeLabel] = string(peering.ServiceScopeCluster)
+		delete(seLbls, peering.ServiceTakeoverLabel)
 		AssertSELabels(c1, defaultSvc1Name, seLbls)
 		delete(weLbls, "app")
-		weLbls[peering.ServiceScopeLabel] = peering.ServiceScopeGlobal
+		weLbls[peering.ServiceScopeLabel] = string(peering.ServiceScopeGlobal)
+		delete(weLbls, peering.ServiceTakeoverLabel)
 		AssertWELabels(c1, c2Svc1Name, weLbls)
 	})
 	t.Run("merge service ports", func(t *testing.T) {
@@ -1161,7 +1165,7 @@ func TestPeering(t *testing.T) {
 	t.Run("remote only global-only service with hostname generation", func(t *testing.T) {
 		c1, c2 := setup(t)
 		// c2 has a global-only service (no local service in c1)
-		c2.CreateServiceLabel("svc1", peering.ServiceScopeGlobalOnly, "", ports2)
+		c2.CreateServiceLabel("svc1", string(peering.ServiceScopeGlobalOnly), "", ports2)
 
 		// c1 should create a SE with k8s hostname variants since the service is global-only and doesn't exist locally
 		AssertWE(c1, DesiredWE{Name: c2Svc1Name, Locality: c2.Locality()})
@@ -2087,7 +2091,7 @@ func (c *Cluster) CreateNodePortGatewayService() {
 
 func (c *Cluster) CreateService(name string, global bool, ports []corev1.ServicePort) {
 	if global {
-		c.CreateServiceLabel(name, peering.ServiceScopeGlobal, "", ports)
+		c.CreateServiceLabel(name, string(peering.ServiceScopeGlobal), "", ports)
 	} else {
 		c.CreateServiceLabel(name, "", "", ports)
 	}
@@ -2095,7 +2099,7 @@ func (c *Cluster) CreateService(name string, global bool, ports []corev1.Service
 
 func (c *Cluster) CreateServiceWithWaypoint(name string, global bool, ports []corev1.ServicePort) {
 	if global {
-		c.CreateServiceLabel(name, peering.ServiceScopeGlobal, "waypoint", ports)
+		c.CreateServiceLabel(name, string(peering.ServiceScopeGlobal), "waypoint", ports)
 	} else {
 		c.CreateServiceLabel(name, "", "waypoint", ports)
 	}

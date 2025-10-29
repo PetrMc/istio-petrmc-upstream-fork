@@ -245,7 +245,9 @@ func serviceServiceBuilder(
 		}
 		waypointStatus.Error = wperr
 
-		soloScope := getServiceScope(ctx, namespaces, s)
+		ns := ptr.OrEmpty[v1.Namespace](ptr.Flatten(krt.FetchOne[*v1.Namespace](ctx, namespaces, krt.FilterKey(s.GetNamespace()))))
+		soloServiceScope := peering.CalculateScope(s.GetLabels(), ns.GetLabels())
+		takeover := peering.ShouldTakeover(s.GetLabels(), ns.GetLabels())
 		svc := constructService(
 			ctx,
 			s,
@@ -253,7 +255,7 @@ func serviceServiceBuilder(
 			serviceEntries,
 			clusterSegment,
 			domainSuffix,
-			soloScope,
+			ns.GetLabels(),
 			networkGetter,
 		)
 
@@ -283,7 +285,8 @@ func serviceServiceBuilder(
 			Waypoint:            waypointStatus,
 			Scope:               serviceScope,
 			TrafficDistribution: model.MaybeGetTrafficDistribution(s.Spec.TrafficDistribution, s.GetAnnotations()),
-			SoloServiceScope:    soloScope,
+			SoloServiceScope:    soloServiceScope,
+			SoloServiceTakeover: takeover,
 			HboneNodePort:       hboneNodePort,
 		}
 		if precompute {
@@ -382,13 +385,7 @@ func matchServiceScope(ctx krt.HandlerContext, meshCfg *MeshConfig, namespaces k
 	return model.Local
 }
 
-func getServiceScope(ctx krt.HandlerContext, namespaces krt.Collection[*v1.Namespace], s *v1.Service) string {
-	ns := ptr.OrEmpty[v1.Namespace](ptr.Flatten(krt.FetchOne[*v1.Namespace](ctx, namespaces, krt.FilterKey(s.GetNamespace()))))
-
-	return peering.CalculateScope(s.GetLabels(), ns.GetLabels())
-}
-
-func getServiceEntryScope(ctx krt.HandlerContext, namespaces krt.Collection[*v1.Namespace], se *networkingclient.ServiceEntry) string {
+func getServiceEntryScope(ctx krt.HandlerContext, namespaces krt.Collection[*v1.Namespace], se *networkingclient.ServiceEntry) peering.ServiceScope {
 	nn := se.Namespace
 	if pnn, ok := se.Labels[peering.ParentServiceNamespaceLabel]; ok {
 		nn = pnn
@@ -443,6 +440,14 @@ func (a *index) serviceEntryServiceBuilder(
 
 		scope := getServiceEntryScope(ctx, namespaces, s)
 
+		// Calculate takeover for ServiceEntry
+		nn := s.Namespace
+		if pnn, ok := s.Labels[peering.ParentServiceNamespaceLabel]; ok {
+			nn = pnn
+		}
+		ns := ptr.OrEmpty[v1.Namespace](ptr.Flatten(krt.FetchOne[*v1.Namespace](ctx, namespaces, krt.FilterKey(nn))))
+		takeover := peering.ShouldTakeover(s.GetLabels(), ns.GetLabels())
+
 		var waypoint *Waypoint
 		var waypointError *model.StatusMessage
 
@@ -460,7 +465,7 @@ func (a *index) serviceEntryServiceBuilder(
 		nwGetter := func(ctx krt.HandlerContext) network.ID {
 			return a.Network(ctx)
 		}
-		return serviceEntriesInfo(ctx, s, waypoint, waypointError, wasPeerObject, scope, nwGetter)
+		return serviceEntriesInfo(ctx, s, waypoint, waypointError, wasPeerObject, scope, takeover, nwGetter)
 	}
 }
 
@@ -470,7 +475,8 @@ func serviceEntriesInfo(
 	w *Waypoint,
 	wperr *model.StatusMessage,
 	wasPeerObject bool,
-	scope string,
+	scope peering.ServiceScope,
+	takeover bool,
 	networkGetter func(ctx krt.HandlerContext) network.ID,
 ) []model.ServiceInfo {
 	sel := model.NewSelector(s.Spec.GetWorkloadSelector().GetLabels())
@@ -511,8 +517,9 @@ func serviceEntriesInfo(
 			Waypoint:            waypoint,
 			TrafficDistribution: model.MaybeGetTrafficDistribution(nil, s.GetAnnotations()),
 
-			SoloServiceScope: scope,
-			RemoteWaypoint:   s.Labels[peering.RemoteWaypointLabel] != "",
+			SoloServiceScope:    scope,
+			SoloServiceTakeover: takeover,
+			RemoteWaypoint:      s.Labels[peering.RemoteWaypointLabel] != "",
 		})
 	})
 }
@@ -609,7 +616,7 @@ func constructService(
 	serviceEntries krt.Collection[*networkingclient.ServiceEntry],
 	clusterSegment krt.Singleton[*soloapi.Segment],
 	domainSuffix string,
-	scope string,
+	nsLabels map[string]string,
 	networkGetter func(krt.HandlerContext) network.ID,
 ) *workloadapi.Service {
 	ports := make([]*workloadapi.Port, 0, len(svc.Spec.Ports))
@@ -675,8 +682,8 @@ func constructService(
 	// only check the local serviceentries to gather SANs
 	// as remote SANs will be placed on the peered SE
 	var sans []string
-	if scope == peering.ServiceScopeGlobalOnly {
-		// global-only must be using the local segment
+	if peering.ShouldTakeover(svc.GetLabels(), nsLabels) {
+		// services with takeover enabled must be using the local segment
 		seName := peering.ServiceEntryName(svc.Name, svc.Namespace, localSegmentName(ctx, clusterSegment))
 		name := fmt.Sprintf("%s/%s", peering.PeeringNamespace, seName)
 		se := ptr.Flatten(krt.FetchOne(ctx, serviceEntries, krt.FilterKey(name)))

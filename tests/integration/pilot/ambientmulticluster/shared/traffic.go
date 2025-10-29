@@ -462,7 +462,7 @@ func RunAllTrafficTests(t framework.TestContext, apps *EchoDeployments) {
 	t.NewSubTest("namespace-service-scope_traffic-tests").Run(func(t framework.TestContext) {
 		// setting the scope via SetupApps only works on Creation, and we want it
 		// to unset after this subtest scope.
-		SetLabelForTest(t, apps.Namespace.Name(), peering.ServiceScopeLabel, peering.ServiceScopeGlobal)
+		SetLabelForTest(t, apps.Namespace.Name(), peering.ServiceScopeLabel, string(peering.ServiceScopeGlobal))
 
 		SetupApps(t, apps, true)
 		RunCase(t, "test-from-ztunnel", defaultDomain, TestFromZtunnel)
