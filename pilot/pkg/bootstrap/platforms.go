@@ -37,6 +37,9 @@ func (s *Server) initPeeringDiscovery(args *PilotArgs) {
 	if !licensing.CheckLicense(licensing.FeatureMultiCluster, features.EnablePeeringExplicitly) {
 		return
 	}
+	if !features.EnableK8SServiceSelectWorkloadEntries {
+		log.Error("peering discovery is incompatible with PILOT_ENABLE_K8S_SELECT_WORKLOAD_ENTRIES=false")
+	}
 	buildConfig := func(clientName string, peeringNodesOnly bool) *adsc.DeltaADSConfig {
 		return &adsc.DeltaADSConfig{
 			Config: adsc.Config{
