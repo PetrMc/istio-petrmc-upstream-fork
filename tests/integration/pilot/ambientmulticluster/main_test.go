@@ -101,9 +101,6 @@ values:
   ztunnel:
     env:
       SKIP_VALIDATE_TRUST_DOMAIN: "true"
-    platforms:
-      peering:
-        enabled: true
 `
 		}, cert.CreateCASecret)).
 		Setup(func(ctx resource.Context) error {
