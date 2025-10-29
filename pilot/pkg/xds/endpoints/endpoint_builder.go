@@ -340,10 +340,12 @@ func (b *EndpointBuilder) BuildClusterLoadAssignment(endpointIndex *model.Endpoi
 		return buildEmptyClusterLoadAssignment(b.clusterName)
 	}
 
+	// SOLO: && b.nodeType == model.Router was added to the below conditional to make the TestWaypointEndpoints unit test pass
+	// SOLO: the !isEastWestGateway portion of the check is not needed because solo EWGW is not envoy
 	// features.EnableIngressWaypointRouting only makes sense for ingress gateways and for E/W gateways
 	// we don't want this behavior, so additionally check that we are not generating endpoints for the
 	// E/W gateway.
-	if features.EnableIngressWaypointRouting && !isEastWestGateway(b.proxy) ||
+	if (features.EnableIngressWaypointRouting && b.nodeType == model.Router) ||
 		(features.EnableSidecarWaypointInterop && b.nodeType == model.SidecarProxy) {
 		if waypointEps, f := b.findServiceWaypoint(endpointIndex); f {
 			// endpoints are from waypoint service but the envoy endpoint is different envoy cluster
