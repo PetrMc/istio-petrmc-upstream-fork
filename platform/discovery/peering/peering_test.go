@@ -177,6 +177,92 @@ func TestPeering(t *testing.T) {
 		AssertSEPorts(c1, defaultSvc1Name, c1svc1Ports)
 	})
 
+	// test that when the service is on both clusters, and both clusters use the same waypoint, we use the global waypoint
+	t.Run("flat network waypoint (service label)", func(t *testing.T) {
+		c1 := NewCluster(t, "c1", "net1")
+		c2 := NewCluster(t, "c2", "net1")
+		c1.ConnectTo(c2)
+
+		// Deploy waypoint on both clusters
+		deployWaypoint(c1, c2)
+
+		// Both clusters have the service with waypoint label
+		c1.CreateServiceWithWaypoint("svc1", true, ports1)
+		c2.CreateServiceWithWaypoint("svc1", true, ports1)
+
+		seName := "autogen.default.svc1"
+		AssertSE(c1,
+			DesiredSE{Name: seName},
+			DesiredSE{Name: "autogen.default.waypoint"},
+		)
+
+		assert.EventuallyEqual(t, func() map[string]string {
+			se := c1.ServiceEntries.Get(seName, peering.PeeringNamespace)
+			if se == nil {
+				return nil
+			}
+			return map[string]string{
+				peering.RemoteWaypointLabel:    se.Labels[peering.RemoteWaypointLabel],
+				peering.UseGlobalWaypointLabel: se.Labels[peering.UseGlobalWaypointLabel],
+			}
+		}, map[string]string{
+			peering.RemoteWaypointLabel:    "true",
+			peering.UseGlobalWaypointLabel: "waypoint.default.mesh.internal",
+		})
+	})
+	t.Run("flat network waypoint (namespace label)", func(t *testing.T) {
+		c1 := NewCluster(t, "c1", "net1")
+		c2 := NewCluster(t, "c2", "net1")
+		c1.ConnectTo(c2)
+
+		// Deploy waypoint on both clusters
+		deployWaypoint(c1, c2)
+
+		// Create namespace with waypoint label on both clusters
+		c1.CreateNamespaceWithLabels("default", map[string]string{label.IoIstioUseWaypoint.Name: "waypoint"})
+		c2.CreateNamespaceWithLabels("default", map[string]string{label.IoIstioUseWaypoint.Name: "waypoint"})
+
+		// Both clusters have the service without waypoint label (inherits from namespace)
+		c1.CreateService("svc1", true, ports1)
+		c2.CreateService("svc1", true, ports1)
+
+		seName := "autogen.default.svc1"
+		AssertSE(c1, DesiredSE{Name: seName}, DesiredSE{Name: "autogen.default.waypoint"})
+
+		assert.EventuallyEqual(t, func() map[string]string {
+			se := c1.ServiceEntries.Get(seName, peering.PeeringNamespace)
+			if se == nil {
+				return nil
+			}
+			return map[string]string{
+				peering.RemoteWaypointLabel:    se.Labels[peering.RemoteWaypointLabel],
+				peering.UseGlobalWaypointLabel: se.Labels[peering.UseGlobalWaypointLabel],
+			}
+		}, map[string]string{
+			peering.RemoteWaypointLabel:    "true",
+			peering.UseGlobalWaypointLabel: "waypoint.default.mesh.internal",
+		})
+
+		// Now remove the waypoint label from the namespace on both clusters
+		c1.CreateNamespaceWithLabels("default", map[string]string{})
+		c2.CreateNamespaceWithLabels("default", map[string]string{})
+
+		// The service should no longer use the global waypoint
+		assert.EventuallyEqual(t, func() map[string]string {
+			se := c1.ServiceEntries.Get(seName, peering.PeeringNamespace)
+			if se == nil {
+				return nil
+			}
+			return map[string]string{
+				peering.RemoteWaypointLabel:    se.Labels[peering.RemoteWaypointLabel],
+				peering.UseGlobalWaypointLabel: se.Labels[peering.UseGlobalWaypointLabel],
+			}
+		}, map[string]string{
+			peering.RemoteWaypointLabel:    "",
+			peering.UseGlobalWaypointLabel: "",
+		})
+	})
+
 	// Verify remote-only service on a flat network uses the global waypoint
 	t.Run("remote only flat network waypoint", func(t *testing.T) {
 		c1 := NewCluster(t, "c1", "net1")
@@ -204,6 +290,7 @@ func TestPeering(t *testing.T) {
 			peering.UseGlobalWaypointLabel: "waypoint.default.mesh.internal",
 		})
 	})
+
 	t.Run("local exported", func(t *testing.T) {
 		c1, c2 := setup(t)
 		c1.CreateService("svc1", true, ports1)

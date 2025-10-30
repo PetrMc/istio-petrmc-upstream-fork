@@ -149,6 +149,10 @@ func CheckTraversedLocalWaypoint() echo.Checker {
 	return CheckEachTraversedWaypointIn(LocalCluster)
 }
 
+func CheckTraversedLocalNetworkWaypoints() echo.Checker {
+	return CheckAllTraversedWaypointIn(LocalCluster, RemoteFlatCluster)
+}
+
 func CheckTraversedRemoteNetworkWaypoint() echo.Checker {
 	return PerClusterChecker(map[string]echo.Checker{
 		RemoteNetworkCluster: CheckEachTraversedWaypointIn(RemoteNetworkCluster),

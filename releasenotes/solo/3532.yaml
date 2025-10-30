@@ -1,0 +1,19 @@
+apiVersion: release-notes/v2
+
+kind: bug-fix
+
+area: traffic-management
+
+releaseNotes:
+- |
+  **Fixed** for peering with a flat network, when `istio.io/use-waypoint` is
+  set on the Namespace (in the local cluster), with Services in both the local
+  and remote cluster(s), the Waypoint specified by the remote cluster
+  incorrectly took precedence over what was specified in the local cluster.
+
+  **Fixed** for peering with a flat network, when `istio.io/use-waypoint` is
+  NOT set on the the local cluster for a Service or Namespace, but remote
+  clusters do specify it, we would use no waypoint at all. Now, if the local
+  cluster doesn't specify anything, we will use information from the remote
+  cluster. To intentionally skip using remote waypoints from the local cluster,
+  set `istio.io/use-waypoint: none`.

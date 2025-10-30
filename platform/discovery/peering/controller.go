@@ -1052,17 +1052,25 @@ func (c *NetworkWatcher) reconcileServiceEntryForSegment(
 		// is separate from deciding to skip processing. We only do it if the service is at least partially
 		// network local. We're effectively overriding istio.io/use-waypoint here.
 		if haveLocalNet {
+			// Check if we have a valid hostname for global waypoint
 			remoteWaypointName, remoteWaypointNs, useRemote := ParseAutogenHostname(globalWaypointHost, globalWaypointDomain)
+			localWaypointName, localWaypointNs, explicitNone := c.waypointForService(localService)
+			localSpecifiesWaypoint := localWaypointName != "" || explicitNone
 
-			// local use-waypoint takes precedence
-			if useRemote && localService != nil {
-				localWaypointName := localService.GetLabels()[label.IoIstioUseWaypoint.Name]
-				localWaypointNs := ptr.NonEmptyOrDefault(localService.GetLabels()[label.IoIstioUseWaypointNamespace.Name], localService.Namespace)
-				if localWaypointName != "" && (localWaypointName != remoteWaypointName || localWaypointNs != remoteWaypointNs) {
+			// if we have local service, and it sets use-waypoint in any way, that takes precedence
+			if useRemote && localSpecifiesWaypoint {
+				if explicitNone {
+					// local service explicitly says "none", do not use the global waypoint
+					useRemote = false
+				} else if localWaypointName != remoteWaypointName || localWaypointNs != remoteWaypointNs {
+					// we have a local waypoint that is different than the remote one, do not use the global waypoint
 					useRemote = false
 				}
 			}
 
+			// Set the label to use the global copy of the waypoint.
+			// For flat network, use the implicitly peered copy of the waypoint.
+			// NOTE: RemoteWaypointLabel is slightly different!
 			if useRemote {
 				labels[UseGlobalWaypointLabel] = globalWaypointHost
 			}
@@ -1351,6 +1359,26 @@ func (c *NetworkWatcher) reconcileNodeWorkloadEntry(tn types.NamespacedName) err
 	}
 
 	return c.genericReconcileWorkloadEntries(wantEntries, weGroupLabel)
+}
+
+// waypointForService returns name and ns for the waypoint for this service, if any.
+// We first check the Service labels, then the Namespace labels
+func (c *NetworkWatcher) waypointForService(svc *corev1.Service) (name string, ns string, explicitNone bool) {
+	if svc == nil {
+		return "", "", false
+	}
+	name = svc.GetLabels()[label.IoIstioUseWaypoint.Name]
+	ns = ptr.NonEmptyOrDefault(svc.GetLabels()[label.IoIstioUseWaypointNamespace.Name], svc.Namespace)
+	if name == "" {
+		// check the namespace
+		namespace := ptr.OrEmpty(c.namespaces.Get(svc.GetNamespace(), ""))
+		name = namespace.GetLabels()[label.IoIstioUseWaypoint.Name]
+		ns = ptr.NonEmptyOrDefault(namespace.GetLabels()[label.IoIstioUseWaypointNamespace.Name], svc.Namespace)
+	}
+	if name == "none" {
+		return "", "", true
+	}
+	return name, ns, false
 }
 
 // computeTrafficDistribution attempts to find the value for networking.istio.io/traffic-distribution

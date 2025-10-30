@@ -244,16 +244,33 @@ func New(
 	}
 
 	c.namespaces = kclient.NewFiltered[*corev1.Namespace](client, kclient.Filter{})
-	c.namespaces.AddEventHandler(controllers.ObjectHandler(func(obj controllers.Object) {
-		// this namespace event handler reprocesses all services in a namespace if there is an
-		// update event. this allows handling service-scope namespace label changes
-		name := obj.GetName()
-		services := c.services.List(name, klabels.Everything())
-		for _, service := range services {
-			// common services handler locks so we don't lock here
-			commonServiceHandler(config.NamespacedName(service))
-		}
-	}))
+	c.namespaces.AddEventHandler(controllers.EventHandler[controllers.Object]{
+		AddFunc: func(obj controllers.Object) {
+			// When a namespace is added, reprocess all services in case they need waypoint
+			name := obj.GetName()
+			services := c.services.List(name, klabels.Everything())
+			for _, service := range services {
+				// common services handler locks so we don't lock here
+				commonServiceHandler(config.NamespacedName(service))
+			}
+		},
+		UpdateFunc: func(oldObj, newObj controllers.Object) {
+			// Only reprocess if waypoint or service-scope labels changed
+			if didLabelsChange(oldObj, newObj,
+				label.IoIstioUseWaypoint.Name,
+				label.IoIstioUseWaypointNamespace.Name,
+				ServiceScopeLabel,
+			) {
+				// Waypoint or service-scope label changed, reprocess all services in this namespace
+				name := newObj.GetName()
+				services := c.services.List(name, klabels.Everything())
+				for _, service := range services {
+					// common services handler locks so we don't lock here
+					commonServiceHandler(config.NamespacedName(service))
+				}
+			}
+		},
+	})
 
 	c.services.AddEventHandler(controllers.FilteredObjectHandler(func(o controllers.Object) {
 		name := config.NamespacedName(o)
@@ -1210,6 +1227,20 @@ func (c *NetworkWatcher) getClusterByGateway(gw types.NamespacedName) *peerClust
 		return nil
 	}
 	return cluster
+}
+
+// didLabelsChange checks if any of the specified label keys have different values between old and new objects.
+// Returns true if any label value changed, was added, or was removed.
+func didLabelsChange(old, curr controllers.Object, labelNames ...string) bool {
+	oldLabels := old.GetLabels()
+	newLabels := curr.GetLabels()
+
+	for _, labelName := range labelNames {
+		if oldLabels[labelName] != newLabels[labelName] {
+			return true
+		}
+	}
+	return false
 }
 
 // getSegmentForCluster returns the segment name for a given cluster ID
