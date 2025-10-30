@@ -19,4 +19,5 @@ spec:
           operator: DoesNotExist
     global:
       networkPolicy:
-        enabled: true
+        # SOLO: disable this or it breaks ambientmulticluster integration tests
+        enabled: false
