@@ -27,6 +27,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 
 	"istio.io/api/annotation"
+	"istio.io/api/label"
 	networkingv1alpha3 "istio.io/api/networking/v1alpha3"
 	networkingclient "istio.io/client-go/pkg/apis/networking/v1"
 	securityclient "istio.io/client-go/pkg/apis/security/v1"
@@ -80,10 +81,17 @@ func (a *index) WorkloadsCollection(
 ) krt.Collection[model.WorkloadInfo] {
 	WorkloadServicesNamespaceIndex := krt.NewNamespaceIndex(workloadServices)
 	EndpointSlicesByIPIndex := endpointSliceAddressIndex(endpointSlices)
-	// Workloads coming from nodes. There should be one workload for each node.
+	// Workloads coming from nodes. There should be one workload for each node that has an e/w gw pod running on it.
+	gwPods := krt.NewCollection(pods, func(ctx krt.HandlerContext, p *v1.Pod) **v1.Pod {
+		// filter for pods that have the e/w gw service selector label
+		if p.Labels[label.IoK8sNetworkingGatewayGatewayName.Name] != "" {
+			return ptr.Of(p)
+		}
+		return nil
+	}, opts.WithName("GatewayPods")...)
 	NodeWorkloads := krt.NewCollection(
 		k8sNodes,
-		a.nodeWorkloadBuilder(workloadServices),
+		a.nodeWorkloadBuilder(workloadServices, gwPods),
 		opts.WithName("NodeWorkloads")...,
 	)
 	// Workloads coming from pods. There should be one workload for each (running) Pod.
@@ -962,7 +970,10 @@ func getNodeAddresses(n *v1.Node) [][]byte {
 	return addresses
 }
 
-func (a *index) nodeWorkloadBuilder(workloadServices krt.Collection[model.ServiceInfo]) krt.TransformationSingle[*v1.Node, model.WorkloadInfo] {
+func (a *index) nodeWorkloadBuilder(
+	workloadServices krt.Collection[model.ServiceInfo],
+	gwPods krt.Collection[*v1.Pod],
+) krt.TransformationSingle[*v1.Node, model.WorkloadInfo] {
 	return func(ctx krt.HandlerContext, n *v1.Node) *model.WorkloadInfo {
 		// pull nodeport info
 		// TODO (conradhanson): fetchone panics if more than one item is found, handle differently?
@@ -970,6 +981,11 @@ func (a *index) nodeWorkloadBuilder(workloadServices krt.Collection[model.Servic
 			return a.(model.ServiceInfo).HboneNodePort != 0
 		}))
 		if nodeportServiceInfo == nil {
+			return nil
+		}
+		// check if the node has an e/w gw pod running on it
+		gwPodsOnNode := krt.Fetch(ctx, gwPods, krt.FilterGeneric(func(a any) bool { return a.(*v1.Pod).Spec.NodeName == n.Name }))
+		if len(gwPodsOnNode) == 0 {
 			return nil
 		}
 		ports := []*workloadapi.Port{

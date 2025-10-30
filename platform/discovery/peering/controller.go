@@ -1291,8 +1291,10 @@ func (c *NetworkWatcher) reconcileNodeWorkloadEntry(tn types.NamespacedName) err
 	// but if we don't, return an error so we requeue/reconcile again
 	if seParentServiceLabel == "" || seParentServiceNamespaceLabel == "" || seParentGatewayLabel == "" || seParentGatewayNamespaceLabel == "" {
 		return fmt.Errorf(
-			"failed to apply parent svc and parent gw labels on node WE %s; either no SE found or SE does not have necessary parent labels",
-			tn.String(),
+			"failed to apply required labels on node WE %s; "+
+				"either no SE found or SE missing required labels; "+
+				"ignore if nodeport peering is not enabled for cluster %s",
+			tn.String(), clusterID,
 		)
 	}
 

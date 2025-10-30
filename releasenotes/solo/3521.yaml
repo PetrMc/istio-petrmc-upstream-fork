@@ -1,0 +1,12 @@
+apiVersion: release-notes/v2
+
+kind: feature
+
+area: traffic-management
+
+issue:
+  - https://github.com/solo-io/istio/issues/3521
+
+releaseNotes:
+- |
+  **Added** filtering of nodes to only those where a e/w gw pod is provisioned to when peering via NodePort is enabled.

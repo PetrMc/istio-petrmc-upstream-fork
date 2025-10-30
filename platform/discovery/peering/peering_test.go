@@ -1589,10 +1589,11 @@ func TestPeering(t *testing.T) {
 			gwSEName         = fmt.Sprintf("autogen.peering.%v.%v", gwServiceAccount, c1.NetworkName)
 		)
 
-		c1.CreateNode(nodeName, nodeAddress)
-		c1.CreateNodePortGatewayService() // enables node workloads to be sent to peer
 		c1.CreateService("svc1", true, nil)
 		c1.CreatePod("svc1", "pod1", "2.3.4.5")
+		c1.CreateGatewayPodOnNode(nodeName)
+		c1.CreateNode(nodeName, nodeAddress)
+		c1.CreateNodePortGatewayService() // enables node workloads to be sent to peer
 		// when nodeport peering is enabled, we should have a gw-derived SE
 		AssertSE(c2,
 			DesiredSE{Name: gwSEName},
@@ -1652,6 +1653,7 @@ func TestPeering(t *testing.T) {
 		nodeName := "node1"
 		nodeAddress := "1.2.3.4"
 
+		c1.CreateGatewayPodOnNode(nodeName)
 		c1.CreateNode(nodeName, nodeAddress)
 		c1.CreateNodePortGatewayService() // enables node workloads to be sent to peer
 
@@ -1716,13 +1718,14 @@ func TestPeering(t *testing.T) {
 		})
 
 		// generate a node resource on c1
-		c1.CreateNode("node1", "1.2.3.4")
 		var (
 			nodeName        = "node1"
 			nodeAddress     = "1.2.3.4"
 			nodeAddressHash = fmt.Sprintf("%x", sha256.Sum256([]byte(nodeAddress)))[:8]
 			nodeWEName      = fmt.Sprintf("autogen.node.%v.%v.%v", c1.ClusterName, nodeName, nodeAddressHash)
 		)
+		c1.CreateGatewayPodOnNode(nodeName)
+		c1.CreateNode(nodeName, nodeAddress)
 		// node WE should be generated on c2
 		AssertWE(c2, DesiredWE{
 			Name:     nodeWEName,
@@ -2175,6 +2178,9 @@ func (c *Cluster) CreateNodePortGatewayService() {
 					NodePort:   32000,
 				},
 			},
+			Selector: map[string]string{
+				label.IoK8sNetworkingGatewayGatewayName.Name: "istio-eastwest",
+			},
 		},
 	})
 }
@@ -2290,7 +2296,7 @@ func (c *Cluster) CreateSidecarPod(serviceName string, podName string, podIP str
 
 func (c *Cluster) CreatePodWithLocality(serviceName, podName, podIP, region, zone string, ambient bool) {
 	var nodeName string
-	if region != "" || zone == "" {
+	if region != "" || zone != "" {
 		nodeName = podName + "-node"
 		clienttest.NewWriter[*corev1.Node](c.t, c.Kube).CreateOrUpdate(&corev1.Node{
 			ObjectMeta: metav1.ObjectMeta{
@@ -2331,6 +2337,37 @@ func (c *Cluster) CreatePodWithLocality(serviceName, podName, podIP, region, zon
 			PodIPs: []corev1.PodIP{
 				{
 					IP: podIP,
+				},
+			},
+			Phase: corev1.PodRunning,
+		},
+	})
+}
+
+func (c *Cluster) CreateGatewayPodOnNode(nodeName string) {
+	clienttest.NewWriter[*corev1.Pod](c.t, c.Kube).CreateOrUpdateStatus(&corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "istio-eastwest-123-456",
+			Namespace: "default",
+			Labels: map[string]string{
+				label.IoK8sNetworkingGatewayGatewayName.Name: "istio-eastwest",
+			},
+		},
+		Spec: corev1.PodSpec{
+			NodeName: nodeName,
+		},
+		Status: corev1.PodStatus{
+			Conditions: []corev1.PodCondition{
+				{
+					Type:               corev1.PodReady,
+					Status:             corev1.ConditionTrue,
+					LastTransitionTime: metav1.Now(),
+				},
+			},
+			PodIP: "9.8.7.6",
+			PodIPs: []corev1.PodIP{
+				{
+					IP: "9.8.7.6",
 				},
 			},
 			Phase: corev1.PodRunning,

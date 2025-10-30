@@ -32,6 +32,7 @@ import (
 	securityclient "istio.io/client-go/pkg/apis/security/v1"
 	"istio.io/istio/pilot/pkg/features"
 	"istio.io/istio/pilot/pkg/model"
+	labelutil "istio.io/istio/pilot/pkg/serviceregistry/util/label"
 	"istio.io/istio/pkg/config/constants"
 	"istio.io/istio/pkg/config/mesh"
 	"istio.io/istio/pkg/config/schema/kind"
@@ -1930,6 +1931,107 @@ func TestEndpointSliceWorkloads(t *testing.T) {
 				return e.Workload
 			})
 			assert.Equal(t, wl, tt.result)
+		})
+	}
+}
+
+func TestNodeportPeeringNodeWorkloads(t *testing.T) {
+	cases := []struct {
+		name   string
+		inputs []any
+		nodes  []*v1.Node
+		result *workloadapi.Workload
+	}{
+		{
+			name: "node with e/w gw pod",
+			inputs: []any{
+				// e/w gateway service
+				model.ServiceInfo{
+					Service: &workloadapi.Service{
+						Name:      "istio-eastwest",
+						Namespace: "istio-gateways",
+						Hostname:  "istio-eastwest.istio-gateways.svc.cluster.local",
+					},
+					HboneNodePort: uint32(32000),
+					LabelSelector: model.LabelSelector{Labels: map[string]string{label.IoK8sNetworkingGatewayGatewayName.Name: "istio-eastwest"}},
+				},
+				// e/w gateway pod
+				&v1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "istio-eastwest-123",
+						Namespace: "istio-gateways",
+						Labels:    map[string]string{label.IoK8sNetworkingGatewayGatewayName.Name: "istio-eastwest"},
+					},
+					Spec: v1.PodSpec{
+						NodeName: "node1",
+					},
+				},
+			},
+			nodes: []*v1.Node{
+				// e/w gw pod lives on this node
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "node1",
+						Labels: map[string]string{
+							v1.LabelTopologyRegion:         "region1",
+							v1.LabelTopologyZone:           "zone1",
+							labelutil.LabelTopologySubzone: "subzone1",
+						},
+					},
+					Status: v1.NodeStatus{
+						Addresses: []v1.NodeAddress{{Type: v1.NodeExternalIP, Address: "172.18.0.5"}},
+					},
+				},
+				// node without e/w gw pod
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "node2",
+						Labels: map[string]string{
+							v1.LabelTopologyRegion:         "region1",
+							v1.LabelTopologyZone:           "zone1",
+							labelutil.LabelTopologySubzone: "subzone1",
+						},
+					},
+					Status: v1.NodeStatus{
+						Addresses: []v1.NodeAddress{{Type: v1.NodeExternalIP, Address: "172.18.0.6"}},
+					},
+				},
+			},
+			result: &workloadapi.Workload{
+				Uid:       testC + "//Node/node1",
+				Name:      "node1",
+				Node:      "node1",
+				Addresses: [][]byte{netip.MustParseAddr("172.18.0.5").AsSlice()},
+				Locality: &workloadapi.Locality{
+					Region:  "region1",
+					Zone:    "zone1",
+					Subzone: "subzone1",
+				},
+				ServiceAccount: "istio-eastwest",
+				Services: map[string]*workloadapi.PortList{
+					"istio-gateways/istio-eastwest.istio-gateways.svc.cluster.local": {
+						Ports: []*workloadapi.Port{{
+							ServicePort: 32000,
+							TargetPort:  model.HBoneInboundListenPort,
+						}},
+					},
+				},
+			},
+		},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			mock := krttest.NewMock(t, tt.inputs)
+			a := newAmbientUnitTest(t)
+			services := krttest.GetMockCollection[model.ServiceInfo](mock)
+			gwPods := krttest.GetMockCollection[*v1.Pod](mock)
+			builder := a.nodeWorkloadBuilder(services, gwPods)
+			// should build a workload for the node with the e/w gw pod
+			result := builder(krt.TestingDummyContext{}, tt.nodes[0])
+			assert.Equal(t, result.Workload, tt.result)
+			// should not build a workload for the node without the e/w gw pod
+			result = builder(krt.TestingDummyContext{}, tt.nodes[1])
+			assert.Equal(t, result, nil)
 		})
 	}
 }
