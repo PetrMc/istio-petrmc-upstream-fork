@@ -1,0 +1,11 @@
+apiVersion: release-notes/v2
+
+kind: feature
+
+area: istioctl
+
+releaseNotes:
+- |
+  **Added** additional checks to `istioctl multicluster check`:
+  - Find stale endpoints from remote clusters that point to Pods that no longer exist.
+  - Check that there environment variables on istiod don't conflict with multicluster functionality.

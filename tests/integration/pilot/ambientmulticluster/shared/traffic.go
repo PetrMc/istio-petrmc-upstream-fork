@@ -56,6 +56,7 @@ func hitAllClusters(t framework.TestContext) echo.Checker {
 
 var (
 	hitLocalCluster         = check.Cluster(LocalCluster)
+	hitRemoteFlatCluster    = check.Cluster(RemoteFlatCluster)
 	hitRemoteNetworkCluster = check.Cluster(RemoteNetworkCluster)
 )
 
@@ -144,6 +145,7 @@ func TestFromZtunnel(t TrafficContext) {
 	// After that, they will go to all backends
 	call(ServiceRemoteWaypoint, check.And(check.OK(), WaypointLocalNetworkToAll))
 
+	call(ServiceRemoteFlatOnlyWaypoint, check.And(check.OK(), hitRemoteFlatCluster, CheckTraversedLocalNetworkWaypoints()))
 	call(ServiceCrossNetworkOnlyWaypoint, check.And(check.OK(), hitRemoteNetworkCluster, CheckTraversedRemoteNetworkWaypoint()))
 
 	// Calls should always go to the local waypoint -- they should always skip the remote waypoint

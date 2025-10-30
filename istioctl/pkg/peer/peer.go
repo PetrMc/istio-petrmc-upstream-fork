@@ -54,7 +54,7 @@ func fetchNetwork(istioNamespace string, kc kube.CLIClient) (networkid.ID, error
 	return networkid.ID(network), nil
 }
 
-func fetchCluster(istioNamespace string, kc kube.CLIClient, revision string) (cluster.ID, error) {
+func fetchIstiodEnvs(istioNamespace string, kc kube.CLIClient, revision string) (map[string]string, error) {
 	ls := "app=istiod"
 	if revision != "" {
 		ls += label.IoIstioRev.Name + "=" + revision
@@ -63,26 +63,40 @@ func fetchCluster(istioNamespace string, kc kube.CLIClient, revision string) (cl
 		LabelSelector: ls,
 	})
 	if err != nil {
-		return "", err
+		return nil, err
 	}
+	if len(istiodDeployment.Items) == 0 {
+		return nil, fmt.Errorf("no istiod deployment found in namespace %q with revision %q", istioNamespace, revision)
+	}
+
+	envVars := make(map[string]string)
 	for _, deployment := range istiodDeployment.Items {
 		for _, c := range deployment.Spec.Template.Spec.Containers {
 			if c.Name != "discovery" {
 				continue
 			}
 			for _, env := range c.Env {
-				if env.Name == "CLUSTER_ID" {
-					if env.Value == "Kubernetes" {
-						// Do not let them use the default name, else we would likely end up with duplicates
-						continue
-					}
-					return cluster.ID(env.Value), nil
-				}
+				envVars[env.Name] = env.Value
 			}
 		}
 	}
+	return envVars, nil
+}
 
-	return "", fmt.Errorf("no cluster found")
+func fetchCluster(istioNamespace string, kc kube.CLIClient, revision string) (cluster.ID, error) {
+	envVars, err := fetchIstiodEnvs(istioNamespace, kc, revision)
+	if err != nil {
+		return "", err
+	}
+	clusterID, ok := envVars["CLUSTER_ID"]
+	if ok {
+		if clusterID == "Kubernetes" {
+			// Do not let them use the default name, else we would likely end up with duplicates
+			return "", fmt.Errorf("istiod CLUSTER_ID is set to the default value 'Kubernetes', please set it to a unique name")
+		}
+		return cluster.ID(clusterID), nil
+	}
+	return "", fmt.Errorf("istiod CLUSTER_ID environment variable not found")
 }
 
 func fetchTrustDomain(kc kube.CLIClient, istioNamespace string, revision string) (string, error) {

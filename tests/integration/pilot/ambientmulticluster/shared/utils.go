@@ -77,6 +77,9 @@ func SetupApps(t resource.Context, apps *EchoDeployments, nsServiceScope bool) e
 	localBuilder := deployment.New(t).DeployServicesOnlyToCluster().WithClusters(
 		t.Clusters().GetByName(LocalCluster),
 	)
+	remoteFlatBuilder := deployment.New(t).DeployServicesOnlyToCluster().WithClusters(
+		t.Clusters().GetByName(RemoteFlatCluster),
+	)
 	remoteBuilder := deployment.New(t).DeployServicesOnlyToCluster().WithClusters(
 		t.Clusters().GetByName(RemoteFlatCluster),
 		t.Clusters().GetByName(RemoteNetworkCluster),
@@ -126,6 +129,13 @@ func SetupApps(t resource.Context, apps *EchoDeployments, nsServiceScope bool) e
 			ServiceSettings{Scope: string(peering.ServiceScopeGlobalOnly)})
 	}
 
+	remoteFlatBuilder.WithConfig(ServiceSettings{
+		Name:      ServiceRemoteFlatOnlyWaypoint,
+		Namespace: apps.Namespace,
+		Scope:     string(peering.ServiceScopeGlobal),
+		Waypoint:  true,
+	}.ToConfig())
+
 	remoteBuilder.WithConfig(ServiceSettings{
 		Name:      ServiceRemoteOnlyTakeover,
 		Namespace: apps.Namespace,
@@ -153,12 +163,16 @@ func SetupApps(t resource.Context, apps *EchoDeployments, nsServiceScope bool) e
 	if err != nil {
 		return err
 	}
-	scopes.Framework.Infof("deploying to remote clusters...")
+	scopes.Framework.Infof("deploying to all remote clusters...")
 	if _, err := remoteBuilder.Build(); err != nil {
 		return err
 	}
-	scopes.Framework.Infof("deploying to remote network cluster...")
+	scopes.Framework.Infof("deploying to remote cross-network cluster...")
 	if _, err := remoteNetworkBuilder.Build(); err != nil {
+		return err
+	}
+	scopes.Framework.Infof("deploying to remote flat-network cluster...")
+	if _, err := remoteFlatBuilder.Build(); err != nil {
 		return err
 	}
 	apps.LocalApp = match.ServiceName(echo.NamespacedName{Name: ServiceLocal, Namespace: apps.Namespace}).GetMatches(localApps)
@@ -174,7 +188,13 @@ func SetupApps(t resource.Context, apps *EchoDeployments, nsServiceScope bool) e
 			return err
 		}
 
-		for _, svc := range []string{ServiceLocalWaypoint, ServiceRemoteWaypoint, ServiceCrossNetworkOnlyWaypoint, ServiceAllWaypoint} {
+		for _, svc := range []string{
+			ServiceLocalWaypoint,
+			ServiceRemoteWaypoint,
+			ServiceCrossNetworkOnlyWaypoint,
+			ServiceAllWaypoint,
+			ServiceRemoteFlatOnlyWaypoint,
+		} {
 
 			err := t.ConfigKube(c).Eval(
 				apps.Namespace.Name(),
@@ -182,7 +202,7 @@ func SetupApps(t resource.Context, apps *EchoDeployments, nsServiceScope bool) e
 					"service":   svc,
 					"cluster":   c.Name(),
 					"namespace": apps.Namespace.Name(),
-					"segment":   "default", // TODO test segments
+					"segment":   "default",
 				},
 				`apiVersion: gateway.networking.k8s.io/v1beta1
 kind: HTTPRoute
@@ -275,7 +295,13 @@ func SetupHTTPRoutesForSegment(t resource.Context, namespace namespace.Instance,
 	}
 
 	for _, c := range targetClusters {
-		for _, svc := range []string{ServiceLocalWaypoint, ServiceRemoteWaypoint, ServiceCrossNetworkOnlyWaypoint, ServiceAllWaypoint} {
+		for _, svc := range []string{
+			ServiceLocalWaypoint,
+			ServiceRemoteWaypoint,
+			ServiceCrossNetworkOnlyWaypoint,
+			ServiceAllWaypoint,
+			ServiceRemoteFlatOnlyWaypoint,
+		} {
 			err := t.ConfigKube(c).Eval(
 				namespace.Name(),
 				map[string]string{
@@ -334,6 +360,9 @@ const (
 	ServiceLocalWaypoint = "local-waypoint"
 	// ServiceRemoteWaypoint is a service that has a waypoint remotely
 	ServiceRemoteWaypoint = "remote-waypoint"
+	// ServiceRemoteFlatOnlyWaypoint is a service that has a waypoint in the remote flat network cluster and does not exist
+	// in either of the local network or cross-network clusters.
+	ServiceRemoteFlatOnlyWaypoint = "remote-flat-only-waypoint"
 	// ServiceCrossNetworkOnlyWaypoint is a service that has a waypoint in the cross-network cluster and does not exist
 	// in either of the flat network or local network clusters.
 	ServiceCrossNetworkOnlyWaypoint = "cross-net-only-waypoint"
