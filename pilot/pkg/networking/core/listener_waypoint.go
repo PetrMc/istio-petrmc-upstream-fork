@@ -684,12 +684,15 @@ func buildConnectForwarder(push *model.PushContext, proxy *model.Proxy, class is
 			xdsfilters.OriginalDestination,
 		},
 		FilterChains: []*listener.FilterChain{{
-			Filters: []*listener.Filter{{
-				Name: wellknown.TCPProxy,
-				ConfigType: &listener.Filter_TypedConfig{
-					TypedConfig: protoconv.MessageToAny(tcpProxy),
+			Filters: []*listener.Filter{
+				xdsfilters.ConnectDestintationFilter,
+				{
+					Name: wellknown.TCPProxy,
+					ConfigType: &listener.Filter_TypedConfig{
+						TypedConfig: protoconv.MessageToAny(tcpProxy),
+					},
 				},
-			}},
+			},
 		}},
 	}
 	accessLogBuilder.setListenerAccessLog(push, proxy, l, class)
