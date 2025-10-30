@@ -192,7 +192,7 @@ func TestPeering(t *testing.T) {
 
 		seName := "autogen.default.svc1"
 		AssertSE(c1,
-			DesiredSE{Name: seName},
+			DesiredSE{Name: seName, ServiceAccounts: []string{"spiffe://cluster.local/ns/default/sa/waypoint"}},
 			DesiredSE{Name: "autogen.default.waypoint"},
 		)
 
@@ -227,7 +227,10 @@ func TestPeering(t *testing.T) {
 		c2.CreateService("svc1", true, ports1)
 
 		seName := "autogen.default.svc1"
-		AssertSE(c1, DesiredSE{Name: seName}, DesiredSE{Name: "autogen.default.waypoint"})
+		AssertSE(c1,
+			DesiredSE{Name: seName, ServiceAccounts: []string{"spiffe://cluster.local/ns/default/sa/waypoint"}},
+			DesiredSE{Name: "autogen.default.waypoint", ServiceAccounts: []string{"spiffe://cluster.local/ns/default/sa/waypoint"}},
+		)
 
 		assert.EventuallyEqual(t, func() map[string]string {
 			se := c1.ServiceEntries.Get(seName, peering.PeeringNamespace)
