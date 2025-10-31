@@ -132,7 +132,7 @@ func (a *index) WorkloadsCollection(
 	// also be generating `workloadapi.Service` definitions in the `ServicesCollection` logic.
 	ServiceEntryWorkloads := krt.NewManyCollection(
 		serviceEntries,
-		a.serviceEntryWorkloadBuilder(meshConfig, authorizationPolicies, peerAuths, waypoints, namespaces, services),
+		a.serviceEntryWorkloadBuilder(meshConfig, authorizationPolicies, peerAuths, waypoints, namespaces, services, workloadServices),
 		opts.WithName("ServiceEntryWorkloads")...,
 	)
 	// Workloads coming from endpointSlices. These are for *manually added* endpoints. Typically, Kubernetes will insert each pod
@@ -273,6 +273,7 @@ func MergedGlobalWorkloadsCollection(
 			localWaypoints,
 			localCluster.Namespaces(),
 			localCluster.Services(),
+			localWorkloadServices,
 			localClusterGetter,
 			localNetworkGetter,
 			globalNetworks.NetworkGateways,
@@ -561,6 +562,7 @@ func MergedGlobalWorkloadsCollection(
 					waypoints,
 					namespaces,
 					c.Services(),
+					globalWorkloadServices,
 					func(ctx krt.HandlerContext) cluster.ID {
 						return c.ID
 					},
@@ -1294,17 +1296,22 @@ func serviceEntryWorkloadBuilder(
 	waypoints krt.Collection[Waypoint],
 	namespaces krt.Collection[*v1.Namespace],
 	services krt.Collection[*v1.Service],
+	workloadServices krt.Collection[model.ServiceInfo],
 	clusterGetter func(krt.HandlerContext) cluster.ID,
 	networkGetter func(krt.HandlerContext) network.ID,
 	networkGateways krt.Collection[NetworkGateway],
 	gatewaysByNetwork krt.Index[network.ID, NetworkGateway],
 	flags FeatureFlags,
 ) krt.TransformationMulti[*networkingclient.ServiceEntry, model.WorkloadInfo] {
+	serviceEntryInfosByNamespaceAndName := krt.NewIndex(workloadServices, "serviceEntryInfosByNamespaceAndName", func(si model.ServiceInfo) []string {
+		if si.Source.Kind != kind.ServiceEntry {
+			return nil
+		}
+		return []string{si.Source.NamespacedName.Namespace + "/" + si.Source.NamespacedName.Name}
+	})
 	return func(ctx krt.HandlerContext, se *networkingclient.ServiceEntry) []model.WorkloadInfo {
 		se, _ = convertSENamespace(se) // TODO: do we need it?
 		eps := se.Spec.Endpoints
-
-		scope := getServiceEntryScope(ctx, namespaces, se)
 
 		// If we have a DNS service, endpoints are not required
 		implicitEndpoints := len(eps) == 0 &&
@@ -1317,10 +1324,16 @@ func serviceEntryWorkloadBuilder(
 		nw := networkGetter(ctx)
 		cluster := clusterGetter(ctx)
 		// here we don't care about the *service* waypoint (hence it is nil); we are only going to use a subset of the info in
-		// `allServiceInfos` (since we are building workloads here, not services).
-		allServiceInfos := serviceEntriesInfo(ctx, se, nil, nil, false, scope, false, networkGetter)
+		// `allServices` (since we are building workloads here, not services).
+		allServices := krt.Fetch(ctx, workloadServices, krt.FilterIndex(serviceEntryInfosByNamespaceAndName, se.Namespace+"/"+se.Name))
+		if len(allServices) == 0 {
+			// This ServiceEntry was pruned entirely by deduplication in the WorkloadServices collection, it's endpoints should not be sent to the data plane.
+			// TODO: Once we write deduplication results to ServiceEntry status, we should consider lowering this to Debug to reduce noise in the logs. For now, we warn.
+			log.Warnf("ServiceEntry %s/%s was pruned by deduplication. Endpoints from this ServiceEntry will not be sent to the data plane.", se.Namespace, se.Name)
+			return nil
+		}
 		if implicitEndpoints {
-			eps = slices.Map(allServiceInfos, func(si model.ServiceInfo) *networkingv1alpha3.WorkloadEntry {
+			eps = slices.Map(allServices, func(si model.ServiceInfo) *networkingv1alpha3.WorkloadEntry {
 				return &networkingv1alpha3.WorkloadEntry{Address: si.Service.Hostname}
 			})
 		}
@@ -1332,12 +1345,12 @@ func serviceEntryWorkloadBuilder(
 		meshCfg := krt.FetchOne(ctx, meshConfig.AsCollection())
 
 		for i, wle := range eps {
-			serviceInfos := allServiceInfos
+			serviceInfos := allServices
 			if implicitEndpoints {
 				// For implicit endpoints, we generate each one from the hostname it was from.
 				// Otherwise, use all.
 				// [i] is safe here since we these are constructed to mirror each other
-				serviceInfos = []model.ServiceInfo{allServiceInfos[i]}
+				serviceInfos = []model.ServiceInfo{allServices[i]}
 			}
 
 			policies := buildWorkloadPolicies(ctx, authorizationPolicies, peerAuths, meshCfg, se.Labels, se.Namespace)
@@ -1408,6 +1421,7 @@ func (a *index) serviceEntryWorkloadBuilder(
 	waypoints krt.Collection[Waypoint],
 	namespaces krt.Collection[*v1.Namespace],
 	services krt.Collection[*v1.Service],
+	workloadServices krt.Collection[model.ServiceInfo],
 ) krt.TransformationMulti[*networkingclient.ServiceEntry, model.WorkloadInfo] {
 	return serviceEntryWorkloadBuilder(
 		meshConfig,
@@ -1416,6 +1430,7 @@ func (a *index) serviceEntryWorkloadBuilder(
 		waypoints,
 		namespaces,
 		services,
+		workloadServices,
 		func(ctx krt.HandlerContext) cluster.ID {
 			return a.ClusterID
 		},

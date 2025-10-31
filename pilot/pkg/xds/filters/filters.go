@@ -79,6 +79,10 @@ const (
 
 	// This is the :authority or Hostname for tunneling config (outbound)
 	ConnectDestinationFilterStateKey = "io.istio.connect_destination"
+	// RequestSourceFilterStateKey is a filter state key where we store the value of x-istio-source header
+	// for incoming HBONE connections. This header when set to waypoint indicates that request has been processed
+	// by a waypoint already and therfore L7 policies have been applied already and we should skip them.
+	RequestSourceFilterStateKey = "io.istio.source"
 )
 
 // Define static filters to be reused across the codebase. This avoids duplicate marshaling/unmarshaling
@@ -242,6 +246,40 @@ var (
 						},
 					},
 				}),
+		},
+	}
+
+	// This filter is used to capture value of istio-l7-policies-applied header from the HBONE connect request in the filter state.
+	// This header in multi-network ambient mode indicates whether L7 policies have been applied already to the
+	// request. For example, if the request went from ztunnel to waypoint and then to E/W gateway, then waypoint would have already
+	// applied L7 policies to the request, so E/W gateway should not send the request to waypoint to avoid applying the L7 policies
+	// again. On the other hand, if ztunnel directly sent the request to the E/W gateway, then the request still needs L7 policies
+	// to be applied and so has to be routed to the waypoint if the service has one.
+	RequestSourceFilter = &hcm.HttpFilter{
+		Name: "request_source",
+		ConfigType: &hcm.HttpFilter_TypedConfig{
+			TypedConfig: protoconv.MessageToAny(&sfs.Config{
+				OnRequestHeaders: []*sfsvalue.FilterStateValue{
+					{
+						Key: &sfsvalue.FilterStateValue_ObjectKey{
+							ObjectKey: RequestSourceFilterStateKey,
+						},
+						Value: &sfsvalue.FilterStateValue_FormatString{
+							FormatString: &core.SubstitutionFormatString{
+								Format: &core.SubstitutionFormatString_TextFormatSource{
+									TextFormatSource: &core.DataSource{
+										Specifier: &core.DataSource_InlineString{
+											InlineString: "%REQ(x-istio-source)%",
+										},
+									},
+								},
+							},
+						},
+						FactoryKey:         "envoy.string",
+						SharedWithUpstream: sfsvalue.FilterStateValue_ONCE,
+					},
+				},
+			}),
 		},
 	}
 

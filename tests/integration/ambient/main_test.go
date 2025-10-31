@@ -64,6 +64,8 @@ values:
       # used by solo_mtls_originate_test.go
       PERMIT_CROSS_NAMESPACE_RESOURCE_ACCESS: "solo-mtls-originate-namespace/egress-gateway"
       # END SOLO
+      # Note: support is alpha and env var is tightly scoped
+      ENABLE_WILDCARD_HOST_SERVICE_ENTRIES_FOR_TLS: "true"
   cni:
     # The CNI repair feature is disabled for these tests because this is a controlled environment,
     # and it is important to catch issues that might otherwise be automatically fixed.
@@ -191,9 +193,7 @@ func TestMain(m *testing.M) {
 				cfg.DeployEastWestGW = true
 				cfg.DeployGatewayAPI = true
 				cfg.ControlPlaneValues = ambientMultiNetworkControlPlaneValues
-				// TODO: Remove once we're actually ready to test the multi-cluster
-				// features
-				cfg.SkipDeployCrossClusterSecrets = true
+				cfg.SkipDeployCrossClusterSecrets = false
 			}
 		}, cert.CreateCASecretAlt)).
 		Setup(func(t resource.Context) error {
