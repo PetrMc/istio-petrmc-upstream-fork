@@ -116,7 +116,6 @@ func (a *index) ServicesCollection(
 		)...,
 	)
 
-	// the fix
 	WorkloadServices := krt.JoinWithMergeCollection(
 		[]krt.Collection[model.ServiceInfo]{
 			ServicesInfo,
@@ -141,16 +140,7 @@ func (a *index) ServicesCollection(
 				multicluster.ClusterKRTMetadataKey: clusterID,
 			},
 		))...)
-	// WorkloadServices := krt.JoinCollection(
-	// 	[]krt.Collection[model.ServiceInfo]{
-	// 		ServicesInfo,
-	// 		DedupedServiceEntriesInfo,
-	// 	},
-	// 	append(opts.WithName("WorkloadServices"), krt.WithMetadata(
-	// 		krt.Metadata{
-	// 			multicluster.ClusterKRTMetadataKey: clusterID,
-	// 		},
-	// 	))...)
+
 	return WorkloadServices
 }
 
