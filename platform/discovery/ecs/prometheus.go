@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"net"
 	"net/http"
-	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	klabels "k8s.io/apimachinery/pkg/labels"
@@ -73,13 +72,16 @@ func (c *PrometheusBridge) Serve(w http.ResponseWriter, req *http.Request) {
 		labels := map[string]string{
 			"__meta_ecs_service": w.GetLabels()[ServiceLabel],
 		}
-		_, cluster, namespace, arn, err := ParseResourceName(w.Annotations[ResourceAnnotation])
+
+		_, _, arn, err := ParseResourceName(w.Annotations[ResourceAnnotation])
 		if err == nil {
-			labels["__meta_ecs_arn"] = arn
-			labels["__meta_ecs_cluster"] = cluster
-			labels["__meta_ecs_namespace"] = namespace
-			sp := strings.Split(arn, "/")
-			labels["__meta_ecs_task"] = sp[len(sp)-1]
+			labels["__meta_ecs_arn"] = arn.String()
+			_, cluster, identifier, err := ParseARNResource(arn.Resource)
+			if err == nil {
+				labels["__meta_ecs_namespace"] = w.Namespace
+				labels["__meta_ecs_cluster"] = cluster
+				labels["__meta_ecs_task"] = identifier
+			}
 		}
 		g := TargetGroup{
 			// Assume hardcoded 15020 for ztunnel metrics.

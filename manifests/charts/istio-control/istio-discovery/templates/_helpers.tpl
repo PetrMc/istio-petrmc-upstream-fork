@@ -21,3 +21,7 @@
   .Values.telemetry.enabled .Values.telemetry.v2.enabled .Values.telemetry.v2.stackdriver.enabled
 }}
 {{- end }}
+
+{{ define "ecs-accounts" }}
+{{- range . }}{{(printf "%s,%s," .domain .role ) }}{{- end }}
+{{- end }}

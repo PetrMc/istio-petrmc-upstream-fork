@@ -6,18 +6,19 @@ package ecs
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/aws/arn"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials/stscreds"
 	"github.com/aws/aws-sdk-go-v2/service/ecs"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
-	"go.uber.org/atomic"
+	"golang.org/x/time/rate"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	klabels "k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
@@ -30,42 +31,69 @@ import (
 	"istio.io/istio/pkg/kube/kclient"
 	istiolog "istio.io/istio/pkg/log"
 	"istio.io/istio/pkg/network"
-	"istio.io/istio/pkg/ptr"
+	"istio.io/istio/pkg/slices"
 )
 
 var log = istiolog.RegisterScope("ecs", "Ambient ECS")
 
 var (
-	EcsClusters = func() []string {
-		v := env.Register("ECS_CLUSTERS", "", "Names of ECS clusters to monitor for discovery (comma-separated list)").Get()
-		if len(v) > 0 {
-			return strings.Split(v, ",")
+	// TODO: this UX is pretty clunky, need to consider a CRD for this (and other platforms?)
+	ECSAccounts = func() []ecsAccount {
+		v := env.Register("ECS_ACCOUNTS", "", "key/value list of domains to AWS Role ARNs to assume when discovering ECS clusters").Get()
+		if len(v) == 0 {
+			return []ecsAccount{}
 		}
-		return []string{}
+		segs := strings.Split(v, ",")
+		if len(segs)%2 != 0 {
+			log.Fatal("invalid ECS_ACCOUNTS formatting (must be of form 'domain1,role1,domain2,role2...)")
+		}
+		accounts := make([]ecsAccount, len(segs)/2)
+		for i := 0; i < len(segs)-1; i += 2 {
+			accounts[i/2] = ecsAccount{
+				domain: segs[i],
+				role:   segs[i+1],
+			}
+		}
+		log.Infof("configured ecs accounts: %v", accounts)
+		return accounts
 	}()
-	EcsRole        = env.Register("ECS_ROLE", "", "AWS IAM role to assume when making requests via the client").Get()
-	EcsMaxInterval = env.Register("ECS_DISCOVERY_MAX_INTERVAL", time.Minute*2, "Max interval between ECS polls").Get()
-	EcsMinInterval = env.Register("ECS_DISCOVERY_MIN_INTERVAL", time.Second*5, "Min interval between ECS polls").Get()
+	// AWS normal limit is 50 per account, so defaulting to half that to be safe
+	ECSRateLimit = env.Register("ECS_DISCOVERY_RATE_LIMIT", rate.Limit(25),
+		"Rate limit in requests per second for polling ECS API (applied per role/account)").Get()
+	// AWS normal limit is 20 per account, so defaulting to half that to be safe
+	ECSBurstLimit = env.Register("ECS_DISCOVERY_BURST_LIMIT", 10,
+		"Burst limit for polling ECS API (applied per role/account)").Get()
 )
 
 type ECSDiscovery struct {
-	clusters map[string]ECSClusterDiscovery
-
-	lookupNetwork LookupNetwork
+	accounts   map[string]*ecsAccountDiscovery
+	kubeClient kube.Client
 }
 
-type ECSClusterDiscovery struct {
-	client         ECSClient
-	ecsClusterName string
+type ecsAccountDiscovery struct {
+	account       ecsAccount
+	client        ECSClient
+	lookupNetwork LookupNetwork
 
-	poller *DynamicPoller
+	// map of cluster ARN to discovered ECS resources
+	clusters map[arn.ARN]*ecsClusterDiscovery
 
 	workloadEntries kclient.Client[*clientnetworking.WorkloadEntry]
 	serviceEntries  kclient.Client[*clientnetworking.ServiceEntry]
 	queue           controllers.Queue
+}
 
+type ecsClusterDiscovery struct {
+	cancel context.CancelFunc
+	// mutex to enable safe concurrent Snapshot/Store calls
+	mu sync.RWMutex
 	// map of resource name to workload/service
-	snapshot *atomic.Pointer[map[string]EcsDiscovered]
+	snapshot map[string]EcsDiscovered
+}
+
+type ecsAccount struct {
+	domain string
+	role   string
 }
 
 type (
@@ -73,105 +101,203 @@ type (
 )
 
 func NewECS(client kube.Client, lookupNetwork LookupNetwork) *ECSDiscovery {
-	// Load the Shared AWS Configuration (~/.aws/config)
-	cfg, err := config.LoadDefaultConfig(context.TODO())
-	if EcsRole != "" {
-		stsclient := sts.NewFromConfig(cfg)
-		cfg, err = config.LoadDefaultConfig(
-			context.TODO(),
+	baseConfig, err := config.LoadDefaultConfig(context.TODO())
+	if err != nil {
+		log.Fatalf("failed to load default ECS config: %v", err)
+	}
+
+	// create clients for each configured role
+	d := &ECSDiscovery{
+		accounts:   map[string]*ecsAccountDiscovery{},
+		kubeClient: client,
+	}
+	for _, account := range ECSAccounts {
+		log.Debugf("creating client for role %s", account.role)
+
+		// configure role assumption
+		optFns := []func(*config.LoadOptions) error{
 			config.WithCredentialsProvider(aws.NewCredentialsCache(
 				stscreds.NewAssumeRoleProvider(
-					stsclient,
-					EcsRole,
+					sts.NewFromConfig(baseConfig),
+					account.role,
 				),
 			)),
-		)
-	}
-	if err != nil {
-		log.Fatalf("failed to initialize ECS client: %v", err)
-	}
-
-	return newECS(client, ecs.NewFromConfig(cfg), NewDynamicPoller(EcsMinInterval, EcsMaxInterval), lookupNetwork)
-}
-
-func newECS(kubeClient kube.Client, ecsClient ECSClient, poller *DynamicPoller, lookupNetwork LookupNetwork) *ECSDiscovery {
-	c := &ECSDiscovery{
-		clusters:      map[string]ECSClusterDiscovery{},
-		lookupNetwork: lookupNetwork,
-	}
-	log.Infof("registering ecs clusters: %v", EcsClusters)
-	for _, clusterName := range EcsClusters {
-		c.clusters[clusterName] = ECSClusterDiscovery{
-			client:         ecsClient,
-			ecsClusterName: clusterName,
-			queue: controllers.NewQueue(fmt.Sprintf("ecs-%s", clusterName),
-				controllers.WithReconciler(c.Reconcile),
-				controllers.WithMaxAttempts(25)),
-			snapshot:        atomic.NewPointer(ptr.Of(map[string]EcsDiscovered{})),
-			poller:          poller,
-			serviceEntries:  kclient.New[*clientnetworking.ServiceEntry](kubeClient),
-			workloadEntries: kclient.New[*clientnetworking.WorkloadEntry](kubeClient),
 		}
+
+		// "default" is a special case to preserve the legacy way of using the base istiod IAM role
+		// instead of assuming a different role
+		if account.role == "default" {
+			optFns = []func(*config.LoadOptions) error{}
+		}
+
+		cfg, err := config.LoadDefaultConfig(
+			context.TODO(),
+			optFns...,
+		)
+		if err != nil {
+			log.Fatalf("failed to load AWS client config for role %s: %v", account.role, err)
+		}
+
+		r := ecsAccountDiscovery{
+			account: account,
+			client: &ecsClient{
+				client:  ecs.NewFromConfig(cfg),
+				limiter: rate.NewLimiter(ECSRateLimit, ECSBurstLimit),
+			},
+			lookupNetwork:   lookupNetwork,
+			clusters:        map[arn.ARN]*ecsClusterDiscovery{},
+			serviceEntries:  kclient.New[*clientnetworking.ServiceEntry](client),
+			workloadEntries: kclient.New[*clientnetworking.WorkloadEntry](client),
+		}
+		// multiple accounts could have the same domain so use role for uniqueness
+		r.queue = controllers.NewQueue(fmt.Sprintf("ecs-%s", account.role),
+			controllers.WithReconciler(r.Reconcile),
+			controllers.WithMaxAttempts(25))
+		d.accounts[account.role] = &r
 	}
 
-	return c
+	return d
 }
 
-func (d *ECSClusterDiscovery) Snapshot() map[string]EcsDiscovered {
-	return *d.snapshot.Load()
+// Snapshot retrieves the current Snapshot of the cluster state. Safe to call concurrently.
+func (a *ecsAccountDiscovery) Snapshot(cluster string) map[string]EcsDiscovered {
+	clusterARN, err := arn.Parse(cluster)
+	if err != nil {
+		log.Errorf("failed to parse cluster ARN %s: %v", cluster, err)
+	}
+
+	c, found := a.clusters[clusterARN]
+	if !found {
+		return map[string]EcsDiscovered{}
+	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.snapshot
 }
 
-func (d *ECSDiscovery) Reconcile(raw types.NamespacedName) error {
-	switch raw.Namespace {
-	case "workload":
-		return d.reconcileWorkloadEntry(raw.Name)
+// Store saves the current snapshot of the cluster state. Safe to call concurrently.
+func (a *ecsAccountDiscovery) Store(cluster arn.ARN, state map[string]EcsDiscovered) {
+	c, found := a.clusters[cluster]
+	if !found {
+		log.Errorf("cluster not found: %s", cluster)
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.snapshot = state
+}
+
+// name.Namespace = ARN of the cluster
+// name.Name = internal resource name
+func (a *ecsAccountDiscovery) Reconcile(name types.NamespacedName) error {
+	resourceType, _, _, err := ParseResourceName(name.Name)
+	if err != nil {
+		return err
+	}
+	switch resourceType {
+	case "task":
+		return a.reconcileWorkloadEntry(name)
 	case "service":
-		return d.reconcileServiceEntry(raw.Name)
+		return a.reconcileServiceEntry(name)
 	}
 	return nil
 }
 
 func (d *ECSDiscovery) Run(stop <-chan struct{}) {
 	var wg sync.WaitGroup
-	for _, c := range d.clusters {
+	for _, a := range d.accounts {
+		kube.WaitForCacheSync(a.account.role, stop, a.serviceEntries.HasSynced, a.workloadEntries.HasSynced)
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			kube.WaitForCacheSync(c.ecsClusterName, stop, c.serviceEntries.HasSynced, c.workloadEntries.HasSynced)
-			log.Infof("starting discovery for cluster %s", c.ecsClusterName)
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
-			go c.PollDiscovery(ctx)
-			c.queue.Run(stop)
-			controllers.ShutdownAll(c.serviceEntries, c.workloadEntries)
+			go a.PollClusterDiscovery(stop)
+			a.queue.Run(stop)
+			controllers.ShutdownAll(a.serviceEntries, a.workloadEntries)
 		}()
 	}
 	wg.Wait()
 }
 
-// PollDiscovery runs a loop collecting and reconciling service discovery information from ECS.
-func (d *ECSClusterDiscovery) PollDiscovery(ctx context.Context) {
+func (a *ecsAccountDiscovery) PollClusterDiscovery(stop <-chan struct{}) {
+	var wg sync.WaitGroup
 	for {
-		changesFound := false
-		state, err := d.Discovery(ctx)
+		select {
+		case <-stop:
+			log.Infof("stopping ecs discovery for role: %v", a.account.role)
+			wg.Wait()
+			return
+		default:
+			discoveredClusters, err := a.DiscoverClusters(context.TODO())
+			if err != nil {
+				// probably a network/rate limit error: log and try again
+				log.Warnf("failed to discover clusters: %v", err)
+				continue
+			}
+
+			// stop discovery for removed clusters
+			if len(discoveredClusters) < len(a.clusters) {
+				for existingCluster, c := range a.clusters {
+					if slices.Contains(discoveredClusters, existingCluster) {
+						continue
+					}
+					// shutdown background discovery
+					c.cancel()
+					delete(a.clusters, existingCluster)
+				}
+			}
+
+			for _, discoveredCluster := range discoveredClusters {
+				_, found := a.clusters[discoveredCluster]
+				if found {
+					// discovery for cluster is already running, nothing to do
+					continue
+				}
+
+				// start discovery for cluster
+				ctx, cancel := context.WithCancel(context.Background())
+				a.clusters[discoveredCluster] = &ecsClusterDiscovery{
+					mu:       sync.RWMutex{},
+					cancel:   cancel,
+					snapshot: map[string]EcsDiscovered{},
+				}
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					a.PollDiscovery(ctx, discoveredCluster)
+				}()
+			}
+		}
+	}
+}
+
+// PollDiscovery runs a loop collecting and reconciling service discovery information from ECS.
+func (a *ecsAccountDiscovery) PollDiscovery(ctx context.Context, cluster arn.ARN) {
+	log.Infof("starting discovery for cluster %s", cluster)
+	for {
+		if ctx.Err() != nil {
+			// We are done
+			log.Infof("shutting down discovery for cluster %s", cluster)
+			// trigger diff with empty state to cleanup all removed resources
+			a.HandleDiff(cluster, []EcsDiscovered{})
+			return
+		}
+
+		state, err := a.DiscoverResources(ctx, cluster)
 		if err != nil {
-			log.Warnf("failed to run discovery: %v", err)
+			if !errors.Is(err, context.Canceled) {
+				log.Warnf("failed to run discovery: %v", err)
+			}
 		} else {
 			log.Debugf("discovered %v resources", len(state))
-			changesFound = d.HandleDiff(state)
-		}
-		if !d.poller.Wait(ctx, changesFound) {
-			// We are done
-			return
+			a.HandleDiff(cluster, state)
 		}
 	}
 }
 
 // HandleDiff reconciles the current state based on a new snapshot. It returns if there were any changes
-func (d *ECSClusterDiscovery) HandleDiff(state []EcsDiscovered) bool {
-	changes := false
+func (a *ecsAccountDiscovery) HandleDiff(cluster arn.ARN, state []EcsDiscovered) {
 	nextState := map[string]EcsDiscovered{}
-	lastSnapshot := d.Snapshot()
+	lastSnapshot := a.Snapshot(cluster.String())
 	var toAdd []types.NamespacedName
 	for _, r := range state {
 		rn := r.ResourceName()
@@ -180,75 +306,42 @@ func (d *ECSClusterDiscovery) HandleDiff(state []EcsDiscovered) bool {
 			// No changes to this object, skip
 			continue
 		}
-		changes = true
 		// Object is changed, prepare to enqueue it (but need to wait until we store the nextState as the snapshot)
 		toAdd = append(toAdd, types.NamespacedName{
 			Name:      r.ResourceName(),
-			Namespace: r.Type(),
+			Namespace: cluster.String(),
 		})
 	}
-	d.snapshot.Store(&nextState)
+	a.Store(cluster, nextState)
 	for _, r := range toAdd {
-		d.queue.Add(r)
+		a.queue.Add(r)
 	}
-	for _, o := range d.serviceEntries.List(metav1.NamespaceAll, ServiceSelector) {
-		// skip objects from different ecs cluster
-		if _, cluster, _, _, _ := ParseResourceName(o.Annotations[ResourceAnnotation]); cluster != d.ecsClusterName {
-			continue
-		}
-		if _, f := nextState[o.Annotations[ResourceAnnotation]]; !f {
-			// Object exists in cluster but not in ECS anymore... trigger a deletion
-			d.queue.Add(types.NamespacedName{
-				Name:      o.Annotations[ResourceAnnotation],
-				Namespace: "service",
-			})
-			changes = true
-		}
+
+	// trigger deletion for removed ECS resources
+	for _, o := range a.serviceEntries.List(metav1.NamespaceAll, ServiceSelector) {
+		a.filterEntries(cluster, nextState, o)
 	}
-	for _, o := range d.workloadEntries.List(metav1.NamespaceAll, ServiceSelector) {
-		// skip objects from different ecs cluster
-		if _, cluster, _, _, _ := ParseResourceName(o.Annotations[ResourceAnnotation]); cluster != d.ecsClusterName {
-			continue
-		}
-		if _, f := nextState[o.Annotations[ResourceAnnotation]]; !f {
-			// Object exists in cluster but not in ECS anymore... trigger a deletion
-			d.queue.Add(types.NamespacedName{
-				Name:      o.Annotations[ResourceAnnotation],
-				Namespace: "workload",
-			})
-			changes = true
-		}
+	for _, o := range a.workloadEntries.List(metav1.NamespaceAll, ServiceSelector) {
+		a.filterEntries(cluster, nextState, o)
 	}
-	return changes
 }
 
-var serviceLabelSelector = func() klabels.Selector {
-	sel, _ := klabels.Parse(ServiceLabel)
-	return sel
-}()
-
-func (d *ECSClusterDiscovery) HasSynced() bool {
-	return d.queue.HasSynced()
-}
-
-// MarkIncomingXDS marks that we established an XDS connection from the specified task ARN.
-// This is used to trigger an on-demand sync when we don't yet know about the task, to speed up reconciliation.
-// TODO: this has a fundamental flaw: it only works if the thing running the ECS syncer is the same as the instance connected over XDS.
-func (d *ECSDiscovery) MarkIncomingXDS(clusterName string, arn string) {
-	cluster, known := d.clusters[clusterName]
-	if !known {
-		log.Warnf("got connection from ECS cluster %v, watching %v (task %v)", cluster, EcsClusters, arn)
+// filterEntries will delete objects which no longer exist in ECS
+func (a *ecsAccountDiscovery) filterEntries(cluster arn.ARN, nextState map[string]EcsDiscovered, o controllers.Object) {
+	// don't delete objects discovered by different roles or in different clusters
+	if a.account.role != o.GetAnnotations()[DiscoveredByAnnotation] || strings.SplitN(cluster.Resource, "/", 2)[1] != o.GetAnnotations()[ClusterAnnotation] {
 		return
 	}
-	allEcsWorkloadEntries := cluster.workloadEntries.List(metav1.NamespaceAll, serviceLabelSelector)
-	for _, we := range allEcsWorkloadEntries {
-		if we.Annotations[ARNAnnotation] == arn {
-			// Found it: no action needed
-			return
-		}
+	if _, found := nextState[o.GetAnnotations()[ResourceAnnotation]]; !found {
+		a.queue.Add(types.NamespacedName{
+			Name:      o.GetAnnotations()[ResourceAnnotation],
+			Namespace: cluster.String(),
+		})
 	}
-	log.Infof("ECS Task %q connected, triggering a sync", arn)
-	cluster.poller.TriggerNow()
+}
+
+func (a *ecsAccountDiscovery) HasSynced() bool {
+	return a.queue.HasSynced()
 }
 
 var ServiceSelector = func() klabels.Selector {

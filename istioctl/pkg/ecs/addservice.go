@@ -75,6 +75,7 @@ func ListRolesCmd(ctx cli.Context) *cobra.Command {
 
 func AddServiceCmd(ctx cli.Context, cluster string) *cobra.Command {
 	var (
+		profile        string
 		external       bool
 		serviceAccount string
 		platform       string
@@ -84,9 +85,11 @@ func AddServiceCmd(ctx cli.Context, cluster string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "add-service",
 		Short: "Enroll an ECS Service onto the mesh",
-		Example: `  # Enroll the 'demo' service in the 'my-ecs-cluster' cluster into the mesh. It will be associated with the 'hello-world' Kubernetes namespace.
-  # Once enrolled, it can be reached at 'demo.hello-world.local'.
-  istioctl ecs add-service demo --cluster my-ecs-cluster --namespace hello-world
+		Example: `  Enroll the 'demo' service in the 'my-ecs-cluster' cluster into the mesh.
+  Once enrolled, it can be reached at 'demo.my-ecs-cluster.<domain>' where <domain> is the domain
+  associated with the AWS account as registered with istiod.
+
+  istioctl ecs add-service demo --cluster my-ecs-cluster
 `,
 		Args: func(cmd *cobra.Command, args []string) error {
 			if len(args) != 1 {
@@ -102,14 +105,14 @@ func AddServiceCmd(ctx cli.Context, cluster string) *cobra.Command {
 			service := args[0]
 			namespace := ctx.Namespace()
 			if namespace == "" {
-				namespace = cluster
+				namespace = "istio-system"
 			}
 
 			kc, err := ctx.CLIClient()
 			if err != nil {
 				return fmt.Errorf("failed to create Kubernetes client: %v", err)
 			}
-			ec, awsRegion, err := buildECSClient(c)
+			ec, awsRegion, err := buildECSClient(c, profile)
 			if err != nil {
 				return err
 			}
@@ -173,6 +176,7 @@ func AddServiceCmd(ctx cli.Context, cluster string) *cobra.Command {
 			return nil
 		},
 	}
+	cmd.PersistentFlags().StringVar(&profile, "profile", profile, "The AWS profile to use if using a shared config.")
 	cmd.PersistentFlags().BoolVar(&external, "external", external, "The workload is external to the network")
 	cmd.PersistentFlags().StringVarP(&serviceAccount, "service-account", "s", "default", "The service account the workload will run as.")
 	cmd.PersistentFlags().StringVarP(&platform, "platform", "p", bootstrap.PlatformECS, "The runtime platform we want to use. Valid options: [ecs, ecs-ec2]")
@@ -278,13 +282,13 @@ func updateService(
 			Value: ptr.Of(serviceAccount),
 		},
 		{
-			Key:   ptr.Of(ecsplatform.ServiceNamespaceTag),
+			Key:   ptr.Of(ecsplatform.NamespaceTag),
 			Value: ptr.Of(namespace),
 		},
 	}
 	if hostname != "" {
 		tags = append(tags, ecstypes.Tag{
-			Key:   ptr.Of(ecsplatform.ServiceHostnameTag),
+			Key:   ptr.Of(ecsplatform.HostnameTag),
 			Value: ptr.Of(hostname),
 		})
 	}
@@ -351,9 +355,9 @@ func taskDefinitionForService(ec *ecs.Client, current ecstypes.Service) (*ecs.De
 	return td, nil
 }
 
-func buildECSClient(c *cobra.Command) (*ecs.Client, string, error) {
+func buildECSClient(c *cobra.Command, profile string) (*ecs.Client, string, error) {
 	// Load the Shared AWS Configuration (~/.aws/config)
-	cfg, err := config.LoadDefaultConfig(c.Context())
+	cfg, err := config.LoadDefaultConfig(c.Context(), config.WithSharedConfigProfile(profile))
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to initialize ECS client: %v", err)
 	}

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 
 	"istio.io/api/annotation"
 	networking "istio.io/api/networking/v1alpha3"
@@ -20,121 +21,106 @@ import (
 	"istio.io/istio/pkg/ptr"
 )
 
-func (d *ECSDiscovery) reconcileWorkloadEntry(name string) error {
-	_, clusterName, ns, resourceName, err := ParseResourceName(name)
+func (a *ecsAccountDiscovery) reconcileWorkloadEntry(nn types.NamespacedName) error {
+	log := log.WithLabels("workload", nn.Name)
+
+	// parse internal name and create WorkloadEntry name
+	resourceType, ns, arn, err := ParseResourceName(nn.Name)
 	if err != nil {
 		return err
 	}
-	log := log.WithLabels("workload", name)
+	_, cluster, identifier, err := ParseARNResource(arn.Resource)
+	if err != nil {
+		return err
+	}
+	workloadEntryName := fmt.Sprintf("ecs-%s-%s-%s-%s-%s", resourceType, arn.AccountID, arn.Region, cluster, identifier)
 
-	cluster, ok := d.clusters[clusterName]
-	if !ok {
-		return fmt.Errorf("cluster %s not found for workload %s", clusterName, name)
+	// find task in snapshot, delete WE if not found
+	snap, found := a.Snapshot(nn.Namespace)[nn.Name]
+	if !found {
+		log.Infof("task no longer present, deleting WorkloadEntry")
+		return controllers.IgnoreNotFound(a.workloadEntries.Delete(workloadEntryName, ns))
 	}
 
-	segments := strings.Split(resourceName, "/")
-	uid := segments[len(segments)-1]
-	groupName := segments[0]
-	arn := strings.Join(segments[1:], "/")
-	workloadEntryName := fmt.Sprintf("ecs-%s-%s", groupName, uid)
-
-	snap := cluster.Snapshot()
-
-	ecswl, f := snap[name]
-	if !f {
-		log.Infof("workload deleted")
-		return controllers.IgnoreNotFound(cluster.workloadEntries.Delete(workloadEntryName, ns))
-	}
-	wl := *ecswl.Workload
-
-	var svc *EcsService
-	if wl.HasService() {
-		ecsvc, f := snap[fmt.Sprintf("service/%s/%s/%s", clusterName, ns, groupName)]
-		if !f && wl.HasService() {
-			log.Infof("service %q for workload not found", groupName)
-			return controllers.IgnoreNotFound(cluster.workloadEntries.Delete(workloadEntryName, ns))
-		}
-		svc = ecsvc.Service
-	}
-
+	// found snapshot, need to update
 	log.Infof("workload updating")
 
-	labels := maps.Clone(wl.Tags.Passthrough)
+	// set labels
+	labels := maps.Clone(snap.Tags.Passthrough)
 	if labels == nil {
 		labels = make(map[string]string)
 	}
-	// Fetch the SA from the service.
-	// TODO: should we do wl.Tags and fallback to svc.Tags?
-	var sa string
-	if svc != nil {
-		sa = svc.Tags.ServiceAccount
-		labels[ServiceLabel] = groupName
-	} else {
-		// We use this as a lookup label to identify it as an ECS thing, so set it even when empty
-		labels[ServiceLabel] = ""
-	}
+	sa := ptr.NonEmptyOrDefault(snap.Tags.ServiceAccount, "default")
+	labels[HostnameLabel] = snap.Hostname()
+	labels[ServiceLabel] = snap.ServiceName()
 	// Default a sane workload name, to avoid the UID becoming the name (which ends up in metrics)
-	if _, f := labels["service.istio.io/workload-name"]; !f {
-		labels["service.istio.io/workload-name"] = groupName
+	if _, f := labels[WorkloadNameLabel]; !f {
+		labels[WorkloadNameLabel] = snap.ServiceName()
 	}
 
-	network := d.lookupNetwork(wl.Address.String(), labels)
+	network := a.lookupNetwork(snap.Task.Address.String(), labels)
 
 	wle := &clientnetworking.WorkloadEntry{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      workloadEntryName,
-			Namespace: ns,
+			Namespace: snap.Namespace(),
 			Labels:    labels,
 			Annotations: map[string]string{
-				ResourceAnnotation: name,
-				ARNAnnotation:      arn,
+				ARNAnnotation:          snap.ARN,
+				ResourceAnnotation:     nn.Name,
+				DiscoveredByAnnotation: a.account.role,
+				ClusterAnnotation:      snap.Cluster,
 			},
 		},
 		Spec: networking.WorkloadEntry{
-			Address:        wl.Address.String(),
+			Address:        snap.Task.Address.String(),
 			ServiceAccount: sa,
-			Locality:       translateLocality(wl.Zone),
+			Locality:       translateLocality(snap.Task.Zone),
 			Network:        network.String(),
 		},
 	}
-	if wl.Mesh {
+	if snap.Task.Mesh {
 		wle.Annotations[annotation.AmbientRedirection.Name] = constants.AmbientRedirectionEnabled
 	}
 
-	_, cerr := createOrUpdate(cluster.workloadEntries, wle)
+	_, cerr := createOrUpdate(a.workloadEntries, wle)
 	return cerr
 }
 
-func (d *ECSDiscovery) reconcileServiceEntry(name string) error {
-	log := log.WithLabels("service", name)
-	_, clusterName, ns, serviceName, err := ParseResourceName(name)
+func (a *ecsAccountDiscovery) reconcileServiceEntry(nn types.NamespacedName) error {
+	log := log.WithLabels("service", nn)
+
+	// parse internal name and create ServiceEntry name
+	resourceType, ns, arn, err := ParseResourceName(nn.Name)
 	if err != nil {
 		return err
 	}
+	_, cluster, identifier, err := ParseARNResource(arn.Resource)
+	if err != nil {
+		return err
+	}
+	serviceEntryName := fmt.Sprintf("ecs-%s-%s-%s-%s-%s", resourceType, arn.AccountID, arn.Region, cluster, identifier)
 
-	cluster, ok := d.clusters[clusterName]
-	if !ok {
-		return fmt.Errorf("cluster %s not found", clusterName)
+	// find service in snapshot, delete SE if not found
+	snap, found := a.Snapshot(nn.Namespace)[nn.Name]
+	if !found {
+		log.Infof("service no longer present, deleting ServiceEntry")
+		return controllers.IgnoreNotFound(a.serviceEntries.Delete(serviceEntryName, ns))
 	}
 
-	snap := cluster.Snapshot()
-	serviceEntryName := fmt.Sprintf("ecs-%s", serviceName)
-	ecso, f := snap[name]
-	if !f {
-		log.Infof("service no longer present, deleting")
-		// TODO: namespace may differ!
-		return controllers.IgnoreNotFound(cluster.serviceEntries.Delete(serviceEntryName, ns))
-	}
-	log.Infof("service updated")
-	service := ecso.Service
-	labels := maps.Clone(service.Tags.Passthrough)
+	// found snapshot, need to update
+	log.Infof("service updating")
+
+	// set labels
+	labels := maps.Clone(snap.Tags.Passthrough)
 	if labels == nil {
 		labels = make(map[string]string)
 	}
-	labels[ServiceLabel] = service.Name
+	labels[ServiceLabel] = snap.Service.Name
 
+	// set ports
 	ports := []*networking.ServicePort{}
-	for i, port := range service.Tags.Ports {
+	for i, port := range snap.Tags.Ports {
 		ports = append(ports, &networking.ServicePort{
 			Number:     uint32(port.ServicePort),
 			Protocol:   port.Protocol,
@@ -146,22 +132,26 @@ func (d *ECSDiscovery) reconcileServiceEntry(name string) error {
 		ports = defaultPorts
 	}
 
+	// build SE
 	se := &clientnetworking.ServiceEntry{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      serviceEntryName,
-			Namespace: ns,
+			Namespace: snap.Namespace(),
 			Labels:    labels,
 			Annotations: map[string]string{
-				ResourceAnnotation: name,
+				ARNAnnotation:          snap.ARN,
+				ResourceAnnotation:     nn.Name,
+				DiscoveredByAnnotation: a.account.role,
+				ClusterAnnotation:      snap.Cluster,
 			},
 		},
 		Spec: networking.ServiceEntry{
 			Hosts: []string{
-				ptr.NonEmptyOrDefault(service.Tags.Hostname, fmt.Sprintf("%s.%s.local", service.Name, clusterName)),
+				snap.Hostname(),
 			},
 			WorkloadSelector: &networking.WorkloadSelector{
 				Labels: map[string]string{
-					ServiceLabel: service.Name,
+					HostnameLabel: snap.Hostname(),
 				},
 			},
 			Ports:      ports,
@@ -169,7 +159,7 @@ func (d *ECSDiscovery) reconcileServiceEntry(name string) error {
 		},
 	}
 
-	_, cerr := createOrUpdate(cluster.serviceEntries, se)
+	_, cerr := createOrUpdate(a.serviceEntries, se)
 	return cerr
 }
 

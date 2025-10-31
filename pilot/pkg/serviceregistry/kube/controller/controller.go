@@ -342,7 +342,7 @@ func NewController(kubeClient kubelib.Client, options Options) *Controller {
 		c.reloadMeshNetworks()
 	}
 
-	if len(ecs.EcsClusters) > 0 {
+	if len(ecs.ECSAccounts) > 0 {
 		if licensing.CheckLicense(licensing.FeatureECS, true) {
 			c.ECS = ecs.NewECS(kubeClient, c.Network)
 		}

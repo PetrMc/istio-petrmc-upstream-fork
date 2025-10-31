@@ -1,0 +1,13 @@
+apiVersion: release-notes/v2
+
+kind: feature
+
+area: traffic-management
+
+issue:
+  - https://github.com/solo-io/istio/issues/3483
+
+releaseNotes:
+- |
+  **Added** cross-account support to ECS platform discovery.
+  

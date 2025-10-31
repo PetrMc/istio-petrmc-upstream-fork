@@ -588,8 +588,13 @@ _internal_defaults_do_not_set:
   # SOLO
   platforms:
     ecs:
-      # If set to a comma-separated list of ECS cluster names, ECS service discovery will be enabled for those clusters.
-      clusters: ""
+      # If set, Istiod will automatically discover ECS resources for the given accounts.
+      accounts:
+        # For example:
+        # - role: arn:aws:iam::1111111111:role/istiod
+        #   domain: example1.acme
+        # - role: arn:aws:iam::2222222222:role/istiod
+        #   domain: example2.acme
     peering:
       # If set, Istiod will automatically peer with discovered Gateways for service discovery.
       enabled: false
