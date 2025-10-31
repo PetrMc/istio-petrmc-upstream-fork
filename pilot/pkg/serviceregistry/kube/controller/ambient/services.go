@@ -42,6 +42,7 @@ import (
 	configkube "istio.io/istio/pkg/config/kube"
 	"istio.io/istio/pkg/config/protocol"
 	"istio.io/istio/pkg/config/schema/gvk"
+	"istio.io/istio/pkg/config/schema/kind"
 	"istio.io/istio/pkg/config/schema/kubetypes"
 	"istio.io/istio/pkg/kube/controllers"
 	"istio.io/istio/pkg/kube/krt"
@@ -114,16 +115,42 @@ func (a *index) ServicesCollection(
 			}),
 		)...,
 	)
-	WorkloadServices := krt.JoinCollection(
+
+	// the fix
+	WorkloadServices := krt.JoinWithMergeCollection(
 		[]krt.Collection[model.ServiceInfo]{
 			ServicesInfo,
 			DedupedServiceEntriesInfo,
+		},
+		// We still need to always prefer service here.
+		// There is an intermediate state where we had a ServiceEntry, then the
+		// Service was added and now we have a conflict before the
+		// DedupedServiceEntriesInfo gets reprocessed and removes the SE based
+		// ServiceInfo.
+		func(conflicting []model.ServiceInfo) *model.ServiceInfo {
+			for _, c := range conflicting {
+				if c.Source.Kind == kind.Service {
+					return &c
+				}
+			}
+
+			return &conflicting[0]
 		},
 		append(opts.WithName("WorkloadServices"), krt.WithMetadata(
 			krt.Metadata{
 				multicluster.ClusterKRTMetadataKey: clusterID,
 			},
 		))...)
+	// WorkloadServices := krt.JoinCollection(
+	// 	[]krt.Collection[model.ServiceInfo]{
+	// 		ServicesInfo,
+	// 		DedupedServiceEntriesInfo,
+	// 	},
+	// 	append(opts.WithName("WorkloadServices"), krt.WithMetadata(
+	// 		krt.Metadata{
+	// 			multicluster.ClusterKRTMetadataKey: clusterID,
+	// 		},
+	// 	))...)
 	return WorkloadServices
 }
 

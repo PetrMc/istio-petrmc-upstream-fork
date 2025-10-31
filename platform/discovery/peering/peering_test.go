@@ -1272,6 +1272,48 @@ func TestPeering(t *testing.T) {
 		})
 	})
 
+	t.Run("both global-only services", func(t *testing.T) {
+		c1, c2 := setup(t)
+		c1.ConnectTo(c1)
+		c2.ConnectTo(c1)
+
+		// Step 1: Create global-only service in c2
+		c2.CreateServiceLabel("svc1", string(peering.ServiceScopeGlobalOnly), "", ports2)
+
+		// c1 should see SE/WE from c2's global-only service
+		AssertWE(c1, DesiredWE{Name: c2Svc1Name, Locality: c2.Locality()})
+		AssertSE(c1, DesiredSE{Name: defaultSvc1Name})
+		AssertSEHosts(c1, defaultSvc1Name, []string{
+			"svc1.default.mesh.internal",     // federated service hostname
+			"svc1.default.svc.cluster.local", // kubernetes standard FQDN
+		})
+
+		// c2 should have SE but no WE (not connecting back to c1)
+		AssertWE(c2)
+		AssertSE(c2, DesiredSE{Name: defaultSvc1Name})
+		AssertSEHosts(c2, defaultSvc1Name, []string{
+			"svc1.default.mesh.internal", // federated service hostname
+		})
+
+		// Step 2: Create the same global-only service in c1
+		c1.CreateServiceLabel("svc1", string(peering.ServiceScopeGlobalOnly), "", ports1)
+
+		// c1 should still see WE from c2 and SE with its own local service
+		AssertWE(c1, DesiredWE{Name: c2Svc1Name, Locality: c2.Locality()})
+		AssertSE(c1, DesiredSE{Name: defaultSvc1Name})
+		// c1 now has the local service, so it should only have the mesh.internal hostname
+		AssertSEHosts(c1, defaultSvc1Name, []string{
+			"svc1.default.mesh.internal", // federated service hostname
+		})
+
+		// c2 should still have SE and now also WE from c1
+		AssertWE(c2, DesiredWE{Name: c1Svc1Name, Locality: c1.Locality()})
+		AssertSE(c2, DesiredSE{Name: defaultSvc1Name})
+		AssertSEHosts(c2, defaultSvc1Name, []string{
+			"svc1.default.mesh.internal", // federated service hostname
+		})
+	})
+
 	t.Run("segment validation", func(t *testing.T) {
 		// create two clusters
 		c1 := NewCluster(t, "c1", "c1")
