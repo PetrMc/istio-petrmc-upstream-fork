@@ -88,6 +88,9 @@ func (s *peerCluster) IsConnected() bool {
 }
 
 func (s *peerCluster) GetSegmentInfo() *workloadapi.Segment {
+	if s == nil {
+		return nil
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.segmentInfo
@@ -101,7 +104,7 @@ func newPeerCluster(
 	queue controllers.Queue,
 	serviceHandler func(o krt.Event[RemoteFederatedService]),
 	workloadHandler func(o krt.Event[RemoteWorkload]),
-	statusUpdateFunc func(),
+	statusUpdateFunc func(segments string),
 ) *peerCluster {
 	networkName := gateway.Network.String()
 	stop := make(chan struct{})
@@ -244,27 +247,26 @@ func newPeerCluster(
 		}
 		switch event {
 		case adsc.EventAdd:
-			changed := false
-			wasNil := c.segmentInfo == nil
-			if wasNil || !proto.Equal(c.segmentInfo, val) {
-				changed = true
-			}
+			// process the actual update
+			oldSegment := c.segmentInfo.GetName()
+			changed := !proto.Equal(c.segmentInfo, val)
 			c.segmentInfo = val
 
-			// Mark segment as resolved on first receipt
-			if wasNil {
-				select {
-				case <-c.segmentResolved:
-					// Already closed
-				default:
-					close(c.segmentResolved)
-					log.Infof("received segment info from cluster %s: segment=%s, domain=%s",
-						c.clusterID, val.GetName(), val.GetDomain())
-				}
+			select {
+			case <-c.segmentResolved:
+				// Already closed
+			default:
+				close(c.segmentResolved)
+				log.Infof("received initial segment info from cluster %s: segment=%s, domain=%s",
+					c.clusterID, val.GetName(), val.GetDomain())
 			}
 
 			// Queue a Cluster event for reconciliation
 			if changed {
+				if oldSegment != "" && oldSegment != val.GetName() {
+					statusUpdateFunc(oldSegment)
+				}
+				statusUpdateFunc(val.GetName())
 				c.queue.Add(typedNamespace{
 					NamespacedName: types.NamespacedName{Name: c.clusterID.String()},
 					kind:           Cluster,
@@ -293,11 +295,11 @@ func newPeerCluster(
 		switch event {
 		case adsc.Connected:
 			c.connected.Store(true)
-			statusUpdateFunc()
+			statusUpdateFunc("")
 		case adsc.Disconnected:
 			// only update status on repeated disconnected event to avoid transient disconnects
 			if !c.connected.Load() {
-				statusUpdateFunc()
+				statusUpdateFunc("")
 			}
 			c.connected.Store(false)
 		}
@@ -332,7 +334,7 @@ func newPeerCluster(
 
 		log.Infof("cluster %s sync complete", c.clusterID)
 		c.synced.Store(true)
-		statusUpdateFunc()
+		statusUpdateFunc(c.GetSegmentInfo().GetName())
 		c.federatedServices.Register(serviceHandler)
 		c.workloads.Register(workloadHandler)
 		// Trigger a sync to cleanup any stale resources

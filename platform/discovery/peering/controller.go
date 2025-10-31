@@ -41,6 +41,7 @@ import (
 	"istio.io/istio/pkg/slices"
 	"istio.io/istio/pkg/util/sets"
 	"istio.io/istio/pkg/workloadapi"
+	soloapi "istio.io/istio/soloapi/v1alpha1"
 )
 
 type Kind int
@@ -53,6 +54,7 @@ const (
 	ServiceEntry
 	GatewayServiceEntry
 	NodeWorkloadEntry
+	Segment
 )
 
 func (k Kind) String() string {
@@ -71,6 +73,8 @@ func (k Kind) String() string {
 		return "GatewayServiceEntry"
 	case NodeWorkloadEntry:
 		return "NodeWorkloadEntry"
+	case Segment:
+		return "Segment"
 	}
 	return "Unknown"
 }
@@ -284,8 +288,11 @@ func (c *NetworkWatcher) reconcileGateway(name types.NamespacedName) error {
 		func(o krt.Event[RemoteWorkload]) {
 			c.remoteWorkloadHandler(o.Latest())
 		},
-		func() {
+		func(segment string) {
 			c.enqueueStatusUpdate(name)
+			if segment != "" {
+				c.enqueueSegmentStatusUpdate(segment)
+			}
 		},
 	)
 	c.remoteClusters[peer.Cluster] = peerCluster
@@ -1434,6 +1441,8 @@ func (c *NetworkWatcher) ReconcileStatus(raw any) error {
 	switch key.kind {
 	case Gateway:
 		return c.reconcileGatewayStatus(key.NamespacedName)
+	case Segment:
+		return c.reconcileSegmentStatus(key.Name)
 	default:
 		log.Errorf("unknown resource kind: %v", key.kind)
 	}
@@ -1634,6 +1643,219 @@ func (c *NetworkWatcher) enqueueStatusUpdate(name types.NamespacedName) {
 	})
 }
 
+func (c *NetworkWatcher) enqueueSegmentStatusUpdate(segmentName string) {
+	// Never update status for the implicit default segment, it won't exist in the cluster
+	if segmentName == DefaultSegmentName || segmentName == "" {
+		return
+	}
+	c.statusQueue.Add(typedNamespace{
+		NamespacedName: types.NamespacedName{Name: segmentName},
+		kind:           Segment,
+	})
+}
+
+// statusEqual compares two SegmentStatus objects for equality, ignoring LastTransitionTime fields
+func statusEqual(a, b soloapi.SegmentStatus) bool {
+	// Create copies and strip transition times
+	aCopy := a
+	bCopy := b
+
+	// Strip LastTransitionTime from conditions
+	for i := range aCopy.Conditions {
+		aCopy.Conditions[i].LastTransitionTime = metav1.Time{}
+	}
+	for i := range bCopy.Conditions {
+		bCopy.Conditions[i].LastTransitionTime = metav1.Time{}
+	}
+
+	// Strip LastTransitionTime from peers
+	for i := range aCopy.Peers {
+		aCopy.Peers[i].LastTransitionTime = metav1.Time{}
+	}
+	for i := range bCopy.Peers {
+		bCopy.Peers[i].LastTransitionTime = metav1.Time{}
+	}
+
+	return reflect.DeepEqual(aCopy, bCopy)
+}
+
+func (c *NetworkWatcher) reconcileSegmentStatus(segmentName string) error {
+	log := log.WithLabels("segment status", segmentName)
+
+	// Never update status for the implicit default segment (no CR exists)
+	if segmentName == DefaultSegmentName {
+		log.Debugf("skipping status update for implicit default segment")
+		return nil
+	}
+
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	// Get the segment resource
+	// This must be done with the lock to avoid test flakes due to
+	// https://github.com/kubernetes/kubernetes/issues/107319
+	segment := c.segments.Get(segmentName, PeeringNamespace)
+	if segment == nil {
+		log.Debugf("segment %s not found, skipping status update", segmentName)
+		return nil
+	}
+
+	// Check if this segment is active locally
+	localSegmentName := DefaultSegmentName
+	if c.localSegment != nil {
+		localSegmentName = c.localSegment.GetName()
+	}
+	isLocalSegment := localSegmentName == segmentName
+
+	// Collect all peer clusters using this segment
+	var peerStatuses []soloapi.PeerStatus
+	var connectedCount, rejectedCount int32
+
+	// Build a map of existing peer statuses for quick lookup
+	existingPeers := make(map[string]soloapi.PeerStatus)
+	for _, p := range segment.Status.Peers {
+		existingPeers[p.ClusterName] = p
+	}
+
+	for clusterID, pc := range c.remoteClusters {
+		segmentInfo := pc.GetSegmentInfo()
+		if segmentInfo == nil {
+			continue // peer hasn't sent segment info yet, don't modify status for it
+		}
+
+		peerSegmentName := ptr.NonEmptyOrDefault(segmentInfo.GetName(), DefaultSegmentName)
+
+		// Determine status first to decide which segment this peer belongs to
+		connected := true
+		synced := pc.HasSynced()
+		accepted := c.validatePeerSegment(clusterID, segmentInfo)
+
+		var status string
+		var reason string
+
+		if !connected {
+			status = "Disconnected"
+		} else if !synced {
+			status = "Connecting"
+		} else if !accepted {
+			status = "Rejected"
+			reason = "HostnameMismatch"
+		} else {
+			status = "Connected"
+		}
+
+		// Decide which segment this peer should appear under:
+		// - If rejected (validation failed), appear under the local segment if this is the local segment
+		// - Otherwise, only appear under the segment they declared
+		shouldAppearHere := false
+		if status == "Rejected" && isLocalSegment {
+			// Rejected peers appear under the local cluster's segment
+			shouldAppearHere = true
+		} else if peerSegmentName == segmentName {
+			// Non-rejected peers appear under their declared segment
+			shouldAppearHere = true
+		}
+
+		if !shouldAppearHere {
+			continue
+		}
+
+		// Update counts
+		switch status {
+		case "Rejected":
+			rejectedCount++
+		case "Connected":
+			connectedCount++
+		}
+
+		// Preserve LastTransitionTime if status hasn't changed for this peer
+		lastTransitionTime := metav1.Now()
+		if existingPeer, found := existingPeers[clusterID.String()]; found {
+			if existingPeer.Status == status && existingPeer.Reason == reason && existingPeer.Hostname == segmentInfo.GetDomain() {
+				lastTransitionTime = existingPeer.LastTransitionTime
+			}
+		}
+
+		peerStatuses = append(peerStatuses, soloapi.PeerStatus{
+			ClusterName:        clusterID.String(),
+			Hostname:           segmentInfo.GetDomain(),
+			Status:             status,
+			Reason:             reason,
+			LastTransitionTime: lastTransitionTime,
+		})
+	}
+
+	// Sort peer statuses by cluster name for consistent output
+	slices.SortBy(peerStatuses, func(p soloapi.PeerStatus) string {
+		return p.ClusterName
+	})
+
+	// Build conditions
+	var conditions []metav1.Condition
+	// Find existing "Local" condition to preserve LastTransitionTime if status hasn't changed
+	var existingLocalCondition *metav1.Condition
+	for i := range segment.Status.Conditions {
+		if segment.Status.Conditions[i].Type == "Local" {
+			existingLocalCondition = &segment.Status.Conditions[i]
+			break
+		}
+	}
+
+	localConditionStatus := metav1.ConditionFalse
+	localConditionReason := "NotLocal"
+	localConditionMessage := "This segment is not used by the local cluster"
+	if isLocalSegment {
+		localConditionStatus = metav1.ConditionTrue
+		localConditionReason = "LocalCluster"
+		localConditionMessage = "This segment is used by the local cluster"
+	}
+
+	lastTransitionTime := metav1.Now()
+	if existingLocalCondition != nil && existingLocalCondition.Status == localConditionStatus {
+		// Status hasn't changed, preserve the LastTransitionTime
+		lastTransitionTime = existingLocalCondition.LastTransitionTime
+	}
+
+	conditions = append(conditions, metav1.Condition{
+		Type:               "Local",
+		Status:             localConditionStatus,
+		LastTransitionTime: lastTransitionTime,
+		Reason:             localConditionReason,
+		Message:            localConditionMessage,
+	})
+
+	// Build new status
+	newStatus := soloapi.SegmentStatus{
+		Conditions:     conditions,
+		Peers:          peerStatuses,
+		ConnectedPeers: connectedCount,
+		RejectedPeers:  rejectedCount,
+	}
+
+	// Check if status has actually changed (ignoring LastTransitionTime in peer statuses)
+	statusChanged := !statusEqual(segment.Status, newStatus)
+	if !statusChanged {
+		log.Debugf("segment status unchanged, skipping update")
+		return nil
+	}
+
+	// Update the segment status
+	segment = segment.DeepCopy()
+	segment.Status = newStatus
+
+	_, err := c.segments.UpdateStatus(segment)
+	if err != nil {
+		if kerrors.IsNotFound(err) {
+			return nil
+		}
+		log.Errorf("failed to update segment status: %v", err)
+		return err
+	}
+	log.Infof("updated segment status: connected=%d, rejected=%d", connectedCount, rejectedCount)
+
+	return nil
+}
+
 // getSegmentDomain returns the domain for the given segment
 func (c *NetworkWatcher) getSegmentDomain(segmentName string) (string, error) {
 	if segmentName == DefaultSegmentName {
@@ -1654,4 +1876,13 @@ func (c *NetworkWatcher) getSegmentDomain(segmentName string) (string, error) {
 	}
 
 	return segment.Spec.Domain, nil
+}
+
+// LockForTest should only be used in tests, and only used to workaround
+// otherwise very difficult to workaround issues, such as:
+// https://github.com/kubernetes/kubernetes/issues/107319
+func (c *NetworkWatcher) LockForTest(action func()) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	action()
 }

@@ -24,6 +24,18 @@ spec:
       jsonPath: .spec.domain
       name: Domain
       type: string
+    - description: Whether the segment is used by the local cluster
+      jsonPath: .status.conditions[?(@.type=='Local')].status
+      name: Local
+      type: string
+    - description: Number of connected peers
+      jsonPath: .status.connectedPeers
+      name: Connected
+      type: integer
+    - description: Number of rejected peers
+      jsonPath: .status.rejectedPeers
+      name: Rejected
+      type: integer
     - description: Server time when this object was created.
       jsonPath: .metadata.creationTimestamp
       name: Age
@@ -125,6 +137,42 @@ spec:
                   - type
                   type: object
                 type: array
+              connectedPeers:
+                description: ConnectedPeers is the count of peers with Status=Connected
+                format: int32
+                type: integer
+              peers:
+                description: Peers lists all peer clusters that have declared this
+                  segment
+                items:
+                  description: PeerStatus describes the observed status of a peer
+                    cluster using this segment
+                  properties:
+                    clusterName:
+                      description: ClusterName is the name of the peer cluster
+                      type: string
+                    hostname:
+                      description: Hostname is the domain the peer is using for this
+                        segment
+                      type: string
+                    lastTransitionTime:
+                      description: LastTransitionTime is when the status last changed
+                      format: date-time
+                      type: string
+                    reason:
+                      description: Reason explains why the peer is in the current
+                        status (e.g., HostnameMismatch)
+                      type: string
+                    status:
+                      description: Status indicates the peer's connection status (Connected,
+                        Rejected, etc)
+                      type: string
+                  type: object
+                type: array
+              rejectedPeers:
+                description: RejectedPeers is the count of peers with Status=Rejected
+                format: int32
+                type: integer
             type: object
         type: object
     served: true

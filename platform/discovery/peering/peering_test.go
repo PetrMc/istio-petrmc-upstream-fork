@@ -46,6 +46,7 @@ import (
 	"istio.io/istio/pkg/config/mesh/meshwatcher"
 	"istio.io/istio/pkg/config/schema/gvk"
 	"istio.io/istio/pkg/kube"
+	"istio.io/istio/pkg/kube/kclient"
 	"istio.io/istio/pkg/kube/kclient/clienttest"
 	"istio.io/istio/pkg/log"
 	"istio.io/istio/pkg/ptr"
@@ -1337,24 +1338,8 @@ func TestPeering(t *testing.T) {
 		c2 := NewCluster(t, "c2", "c2")
 
 		// create just the _local_ segment CRs for each cluster
-		c1FooSegment := &soloapi.Segment{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "foo",
-				Namespace: "istio-system",
-			},
-			Spec: soloapi.SegmentSpec{
-				Domain: "foo.internal",
-			},
-		}
-		c2BarSegment := &soloapi.Segment{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "bar",
-				Namespace: "istio-system",
-			},
-			Spec: soloapi.SegmentSpec{
-				Domain: "bar.internal",
-			},
-		}
+		c1FooSegment := makeSegment("foo", "foo.internal")
+		c2BarSegment := makeSegment("bar", "bar.internal")
 
 		// tell c1 to use foo segment
 		clienttest.NewWriter[*soloapi.Segment](c1.t, c1.Kube).CreateOrUpdate(c1FooSegment)
@@ -1378,6 +1363,10 @@ func TestPeering(t *testing.T) {
 		c1.CreateService("svc1", true, ports1)
 		c2.CreateService("svc2", true, ports2)
 
+		// Clusters should report their own segment as used
+		AssertSegmentStatus(c1, DesiredSegmentStatus{SegmentName: "foo", IsLocal: true})
+		AssertSegmentStatus(c2, DesiredSegmentStatus{SegmentName: "bar", IsLocal: true})
+
 		t.Run("missing remote segment", func(t *testing.T) {
 			// connect clusters
 			c1.ConnectTo(c2)
@@ -1385,6 +1374,7 @@ func TestPeering(t *testing.T) {
 			time.Sleep(time.Second) // TODO avoid sleep, but we don't want to check too soon and get a false negative
 			AssertWE(c1)
 			AssertWE(c2)
+			// TODO should we write status on the Gateway about "we rejected this cluster b/c we don't know about its segment"?
 		})
 
 		t.Run("segment created", func(t *testing.T) {
@@ -1395,28 +1385,18 @@ func TestPeering(t *testing.T) {
 			// c1 should see c2's svc2, c2 should see c1's svc1
 			AssertWE(c1, DesiredWE{Name: "autogen.c2.default.svc2", Locality: c2.Locality()})
 			AssertWE(c2, DesiredWE{Name: "autogen.c1.default.svc1", Locality: c1.Locality()})
+
+			// We should the status on the segment we just wrote, indicating we have clusters using it
+			AssertSegmentStatus(c1, DesiredSegmentStatus{SegmentName: "bar", IsLocal: false, ConnectedPeers: 1})
+			AssertSegmentPeerStatus(c1, "bar", "c2", "Connected", "")
+			AssertSegmentStatus(c2, DesiredSegmentStatus{SegmentName: "foo", IsLocal: false, ConnectedPeers: 1})
+			AssertSegmentPeerStatus(c2, "foo", "c1", "Connected", "")
 		})
 
 		t.Run("segment domain mismatch", func(t *testing.T) {
 			// Now break the segments by changing domains
-			c1BarSegmentInvalid := &soloapi.Segment{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "bar",
-					Namespace: "istio-system",
-				},
-				Spec: soloapi.SegmentSpec{
-					Domain: "invalid-c2.com",
-				},
-			}
-			c2FooSegmentInvalid := &soloapi.Segment{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "foo",
-					Namespace: "istio-system",
-				},
-				Spec: soloapi.SegmentSpec{
-					Domain: "invalid-c1.com",
-				},
-			}
+			c1BarSegmentInvalid := makeSegment("bar", "invalid-c2.com")
+			c2FooSegmentInvalid := makeSegment("foo", "invalid-c1.com")
 
 			clienttest.NewWriter[*soloapi.Segment](c1.t, c1.Kube).CreateOrUpdate(c1BarSegmentInvalid)
 			clienttest.NewWriter[*soloapi.Segment](c2.t, c2.Kube).CreateOrUpdate(c2FooSegmentInvalid)
@@ -1424,6 +1404,12 @@ func TestPeering(t *testing.T) {
 			// Resources should be cleaned up
 			AssertWE(c1)
 			AssertWE(c2)
+
+			// Check segment status - peers should be rejected due to hostname mismatch
+			AssertSegmentStatus(c1, DesiredSegmentStatus{SegmentName: "bar", IsLocal: false, RejectedPeers: 1})
+			AssertSegmentPeerStatus(c1, "bar", "c2", "Rejected", "HostnameMismatch")
+			AssertSegmentStatus(c2, DesiredSegmentStatus{SegmentName: "foo", IsLocal: false, RejectedPeers: 1})
+			AssertSegmentPeerStatus(c2, "foo", "c1", "Rejected", "HostnameMismatch")
 		})
 
 		t.Run("segments repaired", func(t *testing.T) {
@@ -1434,6 +1420,12 @@ func TestPeering(t *testing.T) {
 			// c1 should see c2's svc2, c2 should see c1's svc1
 			AssertWE(c1, DesiredWE{Name: "autogen.c2.default.svc2", Locality: c2.Locality()})
 			AssertWE(c2, DesiredWE{Name: "autogen.c1.default.svc1", Locality: c1.Locality()})
+
+			// Check segment status - peers should be connected again
+			AssertSegmentStatus(c1, DesiredSegmentStatus{SegmentName: "bar", IsLocal: false, ConnectedPeers: 1})
+			AssertSegmentPeerStatus(c1, "bar", "c2", "Connected", "")
+			AssertSegmentStatus(c2, DesiredSegmentStatus{SegmentName: "foo", IsLocal: false, ConnectedPeers: 1})
+			AssertSegmentPeerStatus(c2, "foo", "c1", "Connected", "")
 		})
 	})
 
@@ -1444,15 +1436,7 @@ func TestPeering(t *testing.T) {
 		c2 := newCluster(t, nil, test.NewStop(t), false, "c2", "c2", false)
 
 		// c1 is setup with segment info
-		c1FooSegment := &soloapi.Segment{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "foo",
-				Namespace: "istio-system",
-			},
-			Spec: soloapi.SegmentSpec{
-				Domain: "foo.internal",
-			},
-		}
+		c1FooSegment := makeSegment("foo", "foo.internal")
 		clienttest.NewWriter[*soloapi.Segment](c1.t, c1.Kube).CreateOrUpdate(c1FooSegment)
 		c1.UseSegment("foo")
 
@@ -1474,6 +1458,9 @@ func TestPeering(t *testing.T) {
 		// we still get a WE and "default segment" SE for the remote cluster
 		AssertWE(c1, DesiredWE{Name: c2Svc2Name, Locality: c2.Locality()})
 		AssertSE(c1, DesiredSE{Name: "autogen.foo.default.svc1"}, DesiredSE{Name: defaultSvc2Name})
+
+		// c1's foo segment should have 0 peers (c2 is on default segment, not foo)
+		AssertSegmentStatus(c1, DesiredSegmentStatus{SegmentName: "foo", IsLocal: true, ConnectedPeers: 0})
 	})
 
 	t.Run("segment overrides domain suffix", func(t *testing.T) {
@@ -1482,25 +1469,8 @@ func TestPeering(t *testing.T) {
 		c2 := NewCluster(t, "c2", "c2")
 		c1.ConnectTo(c2)
 		c2.ConnectTo(c1)
-
-		c1FooSegment := &soloapi.Segment{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "foo",
-				Namespace: "istio-system",
-			},
-			Spec: soloapi.SegmentSpec{
-				Domain: "foo.internal",
-			},
-		}
-		c2BarSegment := &soloapi.Segment{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "bar",
-				Namespace: "istio-system",
-			},
-			Spec: soloapi.SegmentSpec{
-				Domain: "bar.internal",
-			},
-		}
+		c1FooSegment := makeSegment("foo", "foo.internal")
+		c2BarSegment := makeSegment("bar", "bar.internal")
 
 		// apply both segments to both clusters
 		for _, cls := range []*Cluster{c1, c2} {
@@ -1600,6 +1570,12 @@ func TestPeering(t *testing.T) {
 			return nil
 		}, retry.Timeout(3*time.Second))
 
+		// Segment status indicates each cluster is using its local segment
+		AssertSegmentStatus(c1, DesiredSegmentStatus{SegmentName: "foo", IsLocal: true})
+		AssertSegmentStatus(c1, DesiredSegmentStatus{SegmentName: "bar", IsLocal: false, ConnectedPeers: 1})
+		AssertSegmentStatus(c2, DesiredSegmentStatus{SegmentName: "bar", IsLocal: true})
+		AssertSegmentStatus(c2, DesiredSegmentStatus{SegmentName: "foo", IsLocal: false, ConnectedPeers: 1})
+
 		// each cluster should see the other cluster's service with the correct domain suffix
 		AssertSE(
 			c1,
@@ -1612,11 +1588,17 @@ func TestPeering(t *testing.T) {
 			DesiredSE{Name: "autogen.foo.default.svc1", Hostname: "svc1.default.foo.internal"},
 		)
 
-		c1FooSegment.Spec.Domain = "new-foo.internal"
-		c2BarSegment.Spec.Domain = "new-bar.internal"
+		c1FooSegment = makeSegment("foo", "new-foo.internal")
+		c2BarSegment = makeSegment("bar", "new-bar.internal")
 		for _, cls := range []*Cluster{c1, c2} {
-			clienttest.NewWriter[*soloapi.Segment](cls.t, cls.Kube).CreateOrUpdate(c1FooSegment)
-			clienttest.NewWriter[*soloapi.Segment](cls.t, cls.Kube).CreateOrUpdate(c2BarSegment)
+			// we use LockForTest here because it's possible for the Segment status writer
+			// to read the Segment value, then we write here, then the status writer writes back an old value.
+			// UpdateStatus does not write the Spec in a real client, but the fake client is broken:
+			// https://github.com/kubernetes/kubernetes/issues/107319
+			cls.Peering.LockForTest(func() {
+				clienttest.NewWriter[*soloapi.Segment](cls.t, cls.Kube).CreateOrUpdate(c1FooSegment)
+				clienttest.NewWriter[*soloapi.Segment](cls.t, cls.Kube).CreateOrUpdate(c2BarSegment)
+			})
 		}
 
 		AssertSE(
@@ -1629,6 +1611,20 @@ func TestPeering(t *testing.T) {
 			DesiredSE{Name: "autogen.bar.default.svc2", Hostname: "svc2.default.new-bar.internal"},
 			DesiredSE{Name: "autogen.foo.default.svc1", Hostname: "svc1.default.new-foo.internal"},
 		)
+
+		// Status settles on no rejections after domain changes
+		AssertSegmentStatus(c2, DesiredSegmentStatus{SegmentName: "foo", IsLocal: false, ConnectedPeers: 1})
+
+		// Cluster 2 moves to the foo segment
+		c2.UseSegment("foo")
+
+		// Status shows "foo" as local, with a peer for both clusters
+		AssertSegmentStatus(c1, DesiredSegmentStatus{SegmentName: "foo", IsLocal: true, ConnectedPeers: 1})
+		AssertSegmentStatus(c2, DesiredSegmentStatus{SegmentName: "foo", IsLocal: true, ConnectedPeers: 1})
+
+		// Status shows "bar" as unused with 0 peers for both clusters
+		AssertSegmentStatus(c1, DesiredSegmentStatus{SegmentName: "bar", IsLocal: false, ConnectedPeers: 0})
+		AssertSegmentStatus(c2, DesiredSegmentStatus{SegmentName: "bar", IsLocal: false, ConnectedPeers: 0})
 	})
 
 	t.Run("nodeport peering", func(t *testing.T) {
@@ -3188,4 +3184,99 @@ func waitForSegmentInfoSync(t test.Failer, clusters ...*Cluster) {
 		}
 		return nil
 	}, retry.Timeout(3*time.Second))
+}
+
+// DesiredSegmentStatus describes expected status for a Segment
+type DesiredSegmentStatus struct {
+	SegmentName    string
+	IsLocal        bool
+	ConnectedPeers int32
+	RejectedPeers  int32
+	// Optional: specific peer statuses to check
+	Peers []DesiredPeerStatus
+}
+
+type DesiredPeerStatus struct {
+	ClusterName string
+	Hostname    string
+	Status      string
+	Reason      string
+}
+
+func AssertSegmentStatus(c *Cluster, desired DesiredSegmentStatus) {
+	c.t.Helper()
+	fetch := func() DesiredSegmentStatus {
+		seg := kclient.New[*soloapi.Segment](c.Kube).Get(desired.SegmentName, "istio-system")
+		if seg == nil {
+			return DesiredSegmentStatus{}
+		}
+
+		// Extract Local condition
+		var isLocal bool
+		for _, cond := range seg.Status.Conditions {
+			if cond.Type == "Local" {
+				isLocal = cond.Status == metav1.ConditionTrue
+				break
+			}
+		}
+
+		// Extract peer statuses if specified
+		var peers []DesiredPeerStatus
+		if len(desired.Peers) > 0 {
+			for _, p := range seg.Status.Peers {
+				peers = append(peers, DesiredPeerStatus{
+					ClusterName: p.ClusterName,
+					Hostname:    p.Hostname,
+					Status:      p.Status,
+					Reason:      p.Reason,
+				})
+			}
+		}
+
+		return DesiredSegmentStatus{
+			SegmentName:    desired.SegmentName,
+			IsLocal:        isLocal,
+			ConnectedPeers: seg.Status.ConnectedPeers,
+			RejectedPeers:  seg.Status.RejectedPeers,
+			Peers:          peers,
+		}
+	}
+	assert.EventuallyEqual(c.t, fetch, desired)
+}
+
+func AssertSegmentPeerStatus(c *Cluster, segmentName, clusterName, expectedStatus, expectedReason string) {
+	c.t.Helper()
+	fetch := func() string {
+		seg := kclient.New[*soloapi.Segment](c.Kube).Get(segmentName, "istio-system")
+		if seg == nil {
+			return "segment not found"
+		}
+		for _, p := range seg.Status.Peers {
+			if p.ClusterName == clusterName {
+				status := p.Status
+				if expectedReason != "" && p.Reason != "" {
+					status += ":" + p.Reason
+				}
+				return status
+			}
+		}
+		return "peer not found"
+	}
+	expected := expectedStatus
+	if expectedReason != "" {
+		expected += ":" + expectedReason
+	}
+	assert.EventuallyEqual(c.t, fetch, expected)
+}
+
+func makeSegment(name, domain string) *soloapi.Segment {
+	return &soloapi.Segment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: "istio-system",
+		},
+		Spec: soloapi.SegmentSpec{
+			Domain: domain,
+		},
+	}
 }

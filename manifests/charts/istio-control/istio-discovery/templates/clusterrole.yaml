@@ -179,6 +179,9 @@ rules:
   - apiGroups: ["admin.solo.io"]
     resources: ["segments"]
     verbs: ["get", "watch", "list"]
+  - apiGroups: ["admin.solo.io"]
+    resources: ["segments/status"]
+    verbs: ["get", "watch", "list", "update", "patch"]
 
   # Needed for multicluster secret reading, possibly ingress certs in the future
   - apiGroups: [""]

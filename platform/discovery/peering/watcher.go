@@ -41,7 +41,6 @@ import (
 	"istio.io/istio/pkg/kube/controllers"
 	"istio.io/istio/pkg/kube/kclient"
 	"istio.io/istio/pkg/kube/krt"
-	"istio.io/istio/pkg/kube/kubetypes"
 	istiolog "istio.io/istio/pkg/log"
 	"istio.io/istio/pkg/maps"
 	networkid "istio.io/istio/pkg/network"
@@ -65,7 +64,7 @@ type NetworkWatcher struct {
 	workloadEntryServiceIndex kclient.Index[types.NamespacedName, *clientnetworking.WorkloadEntry]
 	serviceEntries            kclient.Client[*clientnetworking.ServiceEntry]
 	services                  kclient.Client[*corev1.Service]
-	segments                  kclient.Informer[*soloapi.Segment]
+	segments                  kclient.Client[*soloapi.Segment]
 	sd                        model.ServiceDiscovery
 	remoteWaypointSync        krt.Syncer
 
@@ -146,10 +145,9 @@ func New(
 		})
 	c.services = kclient.New[*corev1.Service](client)
 
-	c.segments = kclient.NewDelayedInformer[*soloapi.Segment](
+	c.segments = kclient.NewFilteredDelayed[*soloapi.Segment](
 		client,
 		gvr.Segment,
-		kubetypes.StandardInformer,
 		kclient.Filter{Namespace: systemNamespace},
 	)
 
@@ -317,7 +315,7 @@ func New(
 	}
 
 	// must be called with the NetworkWatcher locked
-	updateLocalSegment := func(segmentName string, segmentResource *soloapi.Segment) bool {
+	updateLocalSegment := func(segmentName string, segmentResource *soloapi.Segment) (string, string, bool) {
 		var oldSegmentName string
 		var oldSegmentDomain string
 		if c.localSegment != nil {
@@ -344,7 +342,7 @@ func New(
 		c.localSegment = segmentResource
 
 		if oldSegmentName == newSegmentName && oldSegmentDomain == newSegmentDomain {
-			return false
+			return oldSegmentName, oldSegmentName, false
 		}
 
 		// Update the segment
@@ -359,7 +357,8 @@ func New(
 			})
 		}
 
-		return true // segment changed, need to reprocess services
+		// segment changed, need to reprocess services, status
+		return newSegmentName, oldSegmentName, true
 	}
 
 	// watch local changes to global settings from systemNamespace (network, segment)
@@ -368,8 +367,12 @@ func New(
 			return
 		}
 
-		segmentChange := false
+		var (
+			segmentChange          bool
+			newSegment, oldSegment string
+		)
 
+		// mutex protected section
 		func() {
 			c.mu.Lock()
 			defer c.mu.Unlock()
@@ -395,13 +398,17 @@ func New(
 			if segmentLabel != "" && segmentLabel != DefaultSegmentName {
 				segmentResource = c.segments.Get(segmentLabel, PeeringNamespace)
 			}
-			segmentChange = updateLocalSegment(o.GetLabels()[SegmentLabel], segmentResource)
+			newSegment, oldSegment, segmentChange = updateLocalSegment(o.GetLabels()[SegmentLabel], segmentResource)
 		}()
 
 		// our segment changed - if a service only exists locally we need to requeue local services
 		if segmentChange {
 			log.Info("local segment label changed, reprocessing local services")
 			reprocessLocalServices()
+			c.enqueueSegmentStatusUpdate(newSegment)
+			if oldSegment != newSegment {
+				c.enqueueSegmentStatusUpdate(oldSegment)
+			}
 		}
 	}))
 
@@ -410,27 +417,26 @@ func New(
 		if o.GetNamespace() != systemNamespace {
 			return // not relevant
 		}
-		deleted := c.segments.Get(o.GetName(), o.GetNamespace()) == nil
+
 		localSegmentChanged := false
 
 		func() {
 			c.mu.Lock()
 			defer c.mu.Unlock()
 
-			// Check if the namespace label matches this segment
-			// This prevents race conditions where the segment resource is created before the namespace is labeled
-			ns := c.namespaces.Get(systemNamespace, "")
-			if ns == nil {
+			segmentResource := c.segments.Get(o.GetName(), o.GetNamespace())
+			if segmentResource != nil {
+				log.Infof("stevenctl: segment resource event in %s: %s %s", c.localCluster, o.GetName(), segmentResource.Spec.Domain)
+			}
+
+			// Detect whether the segment used by this local cluster changed.
+			if ns := c.namespaces.Get(systemNamespace, ""); ns != nil {
+				localSegmentLabel := ns.GetLabels()[SegmentLabel]
+				if localSegmentLabel == o.GetName() {
+					_, _, localSegmentChanged = updateLocalSegment(o.GetName(), segmentResource)
+				}
+			} else {
 				log.Errorf("system namespace not found: %s", systemNamespace)
-				return
-			}
-			localSegmentLabel := ns.GetLabels()[SegmentLabel]
-			var segmentResource *soloapi.Segment
-			if !deleted {
-				segmentResource = c.segments.Get(o.GetName(), o.GetNamespace())
-			}
-			if localSegmentLabel == o.GetName() {
-				localSegmentChanged = updateLocalSegment(o.GetName(), segmentResource)
 			}
 
 			// When a local copy of any Segment changes, we need to re-validate all
@@ -450,10 +456,14 @@ func New(
 				})
 			}
 		}()
+
 		if localSegmentChanged {
-			log.Info("local segment resource changed, reprocessing local services")
+			log.Info("segment resource used by the local cluster changed, reprocessing local services")
 			reprocessLocalServices()
 		}
+
+		// the domain changing on the local copy of any Segment may make peered clusters valid/invalid
+		c.enqueueSegmentStatusUpdate(o.GetName())
 	}))
 
 	return c
@@ -1109,6 +1119,15 @@ func (c *NetworkWatcher) getClusterByID(cid cluster.ID) *peerCluster {
 		return nil
 	}
 	return cluster
+}
+
+// GetPeerSegmentInfo returns the segment info received from a peer cluster, or nil if not available
+func (c *NetworkWatcher) GetPeerSegmentInfo(cid cluster.ID) *workloadapi.Segment {
+	pc := c.getClusterByID(cid)
+	if pc == nil {
+		return nil
+	}
+	return pc.GetSegmentInfo()
 }
 
 func (c *NetworkWatcher) getClusterByGateway(gw types.NamespacedName) *peerCluster {
