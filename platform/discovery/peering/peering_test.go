@@ -703,12 +703,12 @@ func TestPeering(t *testing.T) {
 		c1k := kube.NewFakeClient()
 		initialStop := make(chan struct{})
 		// Peering will stop when we trigger it, kube client will run for as long as the test
-		c1 := newCluster(t, c1k, initialStop, false, "c1", "c1", true)
+		c1 := newCluster(t, c1k, initialStop, false, "c1", "flat-net", true)
 		fullStop := test.NewStop(t)
 		c1k.RunAndWait(fullStop)
 
 		// Initial run as normal
-		c2 := NewCluster(t, "c2", "c2")
+		c2 := NewCluster(t, "c2", "flat-net")
 		c1.ConnectTo(c2)
 
 		c1ports2 := []corev1.ServicePort{
@@ -750,15 +750,23 @@ func TestPeering(t *testing.T) {
 		c1.CreateService("svc3", true, c1ports3)
 		c2.CreateService("svc1", true, ports2)
 		c2.CreateService("svc2", true, c2ports2)
+		// create WEs with specific SAs to validate they get aggregated on the SE
 		c2.CreateWorkload("svc1", "we1", "sa-1", nil)
 		c2.CreateWorkload("svc1", "we2", "sa-1", nil)
 		c2.CreateWorkload("svc1", "we3", "sa-2", nil)
+		// create a Pod to test flat-network peering
+		c2.CreatePod("svc1", "pod1", "1.2.3.4")
 
 		// we have pointers for the 2 services that exist remotely
 		AssertWE(
 			c1,
 			DesiredWE{Name: c2Svc1Name, Locality: c2.Locality()},
 			DesiredWE{Name: c2Svc2Name, Locality: c2.Locality()},
+			DesiredWE{
+				Name:     "autogenflat.c2.default.pod1.f2396f15c5c2",
+				Address:  "1.2.3.4",
+				Locality: c2.Locality(),
+			},
 		)
 		AssertWEPorts(c1, c2Svc1Name, map[string]uint32{"port-80": 80, "port-81": 81, "port-92": 92, "target-821": 82})
 		AssertWEPorts(c1, c2Svc2Name, map[string]uint32{"port-2002": 2002})
@@ -793,6 +801,11 @@ func TestPeering(t *testing.T) {
 			c1,
 			DesiredWE{Name: c2Svc1Name, Locality: c2.Locality()},
 			DesiredWE{Name: "autogen.c2.default.svc2", Locality: c2.Locality()},
+			DesiredWE{
+				Name:     "autogenflat.c2.default.pod1.f2396f15c5c2",
+				Address:  "1.2.3.4",
+				Locality: c2.Locality(),
+			},
 		)
 		AssertWEPorts(c1, c2Svc1Name, map[string]uint32{"port-80": 80, "port-81": 81, "port-92": 92, "target-821": 82})
 		AssertWEPorts(c1, c2Svc2Name, map[string]uint32{"port-2002": 2002})
@@ -817,6 +830,7 @@ func TestPeering(t *testing.T) {
 		c2.DeleteService("svc2")
 		c2.CreateService("svc3", true, c2ports3)
 		c2.DeleteWorkload("we3")
+		c2.DeletePod("pod1")
 
 		// Reconnect... we should see the changes
 		c1.Outage.setOutage(false)

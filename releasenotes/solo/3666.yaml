@@ -1,0 +1,15 @@
+apiVersion: release-notes/v2
+
+kind: bug-fix
+
+area: traffic-management
+
+issue:
+  - https://github.com/solo-io/istio/issues/3542
+
+releaseNotes:
+- |
+  **Fixed** flat-network peering cleaning up stale endpoints from remote clusters.
+  **Fixed** a rare issue where peered service ports or other settings would get stuck
+  in an incorrect state when the Service is created both locally and in a peered cluster
+  in nearly identical timeframe.

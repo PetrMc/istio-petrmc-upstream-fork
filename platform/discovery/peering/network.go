@@ -38,10 +38,11 @@ type peerCluster struct {
 	stop        chan struct{}
 	stopped     bool
 
-	federatedServices krt.StaticCollection[RemoteFederatedService]
-	workloads         krt.StaticCollection[RemoteWorkload]
-	segmentInfo       *workloadapi.Segment
-	segmentResolved   chan struct{}
+	federatedServices  krt.StaticCollection[RemoteFederatedService]
+	workloads          krt.StaticCollection[RemoteWorkload]
+	workloadsByService krt.Index[string, RemoteWorkload]
+	segmentInfo        *workloadapi.Segment
+	segmentResolved    chan struct{}
 
 	synced    *atomic.Bool
 	connected *atomic.Bool
@@ -110,6 +111,13 @@ func newPeerCluster(
 		opts.WithName("RemoteFederatedService/"+gateway.Cluster.String())...)
 	workloadCollection := krt.NewStaticCollection[RemoteWorkload](nil, nil,
 		opts.WithName("RemoteWorkload/"+gateway.Cluster.String())...)
+	workloadsByService := krt.NewIndex(workloadCollection, gateway.Cluster.String()+"/RemoteWorkloadByService", func(o RemoteWorkload) []string {
+		hosts := make([]string, 0, len(o.GetServices()))
+		for host := range o.GetServices() {
+			hosts = append(hosts, host)
+		}
+		return hosts
+	})
 
 	mode := "gateway"
 	if EnableFlatNetworks && gateway.Network == localNetwork {
@@ -121,16 +129,17 @@ func newPeerCluster(
 	c := &peerCluster{
 		localNetwork: localNetwork,
 
-		clusterID:         gateway.Cluster,
-		networkName:       gateway.Network,
-		stop:              stop,
-		queue:             queue,
-		federatedServices: svcCollection,
-		workloads:         workloadCollection,
-		synced:            atomic.NewBool(false),
-		connected:         atomic.NewBool(false),
-		locality:          gateway.Locality,
-		segmentResolved:   make(chan struct{}),
+		clusterID:          gateway.Cluster,
+		networkName:        gateway.Network,
+		stop:               stop,
+		queue:              queue,
+		federatedServices:  svcCollection,
+		workloads:          workloadCollection,
+		workloadsByService: workloadsByService,
+		synced:             atomic.NewBool(false),
+		connected:          atomic.NewBool(false),
+		locality:           gateway.Locality,
+		segmentResolved:    make(chan struct{}),
 	}
 
 	federatedServiceAdscHandler := adsc.Register(func(

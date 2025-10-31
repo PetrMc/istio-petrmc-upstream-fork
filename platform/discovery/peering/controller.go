@@ -30,7 +30,6 @@ import (
 	clientnetworking "istio.io/client-go/pkg/apis/networking/v1"
 	"istio.io/istio/pilot/pkg/model"
 	"istio.io/istio/pkg/cluster"
-	"istio.io/istio/pkg/config"
 	"istio.io/istio/pkg/config/constants"
 	"istio.io/istio/pkg/kube/controllers"
 	"istio.io/istio/pkg/kube/kclient"
@@ -280,34 +279,10 @@ func (c *NetworkWatcher) reconcileGateway(name types.NamespacedName) error {
 		c.debugger,
 		c.queue,
 		func(o krt.Event[RemoteFederatedService]) {
-			obj := o.Latest()
-			c.queue.Add(typedNamespace{
-				NamespacedName: types.NamespacedName{
-					Namespace: obj.Cluster,
-					Name:      config.NamespacedName(obj.Service).String(),
-				},
-				kind: WorkloadEntry,
-			})
+			c.remoteServiceHandler(o.Latest())
 		},
 		func(o krt.Event[RemoteWorkload]) {
-			obj := o.Latest()
-			if strings.Contains(obj.Workload.GetUid(), "Node/") {
-				c.queue.Add(typedNamespace{
-					NamespacedName: types.NamespacedName{
-						Namespace: obj.Cluster,
-						Name:      obj.ResourceName(),
-					},
-					kind: NodeWorkloadEntry,
-				})
-				return
-			}
-			c.queue.Add(typedNamespace{
-				NamespacedName: types.NamespacedName{
-					Namespace: obj.Cluster,
-					Name:      obj.ResourceName(),
-				},
-				kind: FlatWorkloadEntry,
-			})
+			c.remoteWorkloadHandler(o.Latest())
 		},
 		func() {
 			c.enqueueStatusUpdate(name)
@@ -327,39 +302,29 @@ func (c *NetworkWatcher) reconcileClusterSync(cid string) {
 	currentWorkloadEntries := c.workloadEntries.List(PeeringNamespace, klabels.SelectorFromSet(map[string]string{
 		SourceClusterLabel: cid,
 	}))
-
-	seen := sets.New[types.NamespacedName]()
 	for _, w := range currentWorkloadEntries {
-		nn := types.NamespacedName{
-			Namespace: cid,
-			Name:      w.Labels[ParentServiceNamespaceLabel] + "/" + w.Labels[ParentServiceLabel],
-		}
-		// Enqueue it; if it no longer exists it will be removed
-		c.queue.Add(typedNamespace{
-			NamespacedName: nn,
-			kind:           WorkloadEntry,
-		})
-		seen.Insert(nn)
+		c.workloadEntryChangedHandler(w)
 	}
 
-	// also queue federatedServices to handle workloadEntries we didn't create before this Cluster event
+	// also queue via XDS info
 	pc := c.getClusterByID(cluster.ID(cid))
 	if pc == nil {
+		log.Debugf("cluster %s removed before resyncing was processed", cid)
 		return
 	}
-
 	for _, fs := range pc.federatedServices.List() {
 		nn := types.NamespacedName{
 			Namespace: cid,
 			Name:      fs.Service.Namespace + "/" + fs.Service.Name,
 		}
-		if seen.Contains(nn) {
-			continue
-		}
 		c.queue.Add(typedNamespace{
 			NamespacedName: nn,
 			kind:           WorkloadEntry,
 		})
+	}
+
+	for _, fw := range pc.workloads.List() {
+		c.remoteWorkloadHandler(fw)
 	}
 }
 
@@ -640,7 +605,6 @@ func (c *NetworkWatcher) reconcileGatewayWorkloadEntry(tn types.NamespacedName) 
 	if fs.Service.WaypointFor != "" && networkName != c.GetLocalNetwork() {
 		return controllers.IgnoreNotFound(c.workloadEntries.Delete(weName, PeeringNamespace))
 	}
-
 	localService := c.services.Get(name, ns)
 	if segmentName != c.GetLocalSegment() {
 		localService = nil // we are not in the same segment, ignore local service
@@ -671,6 +635,7 @@ func (c *NetworkWatcher) reconcileGatewayWorkloadEntry(tn types.NamespacedName) 
 			// It's not peered, so ignore it
 			localService = nil
 		} else {
+			// if we have a local and global service, use its scope over what we got from the federated service
 			weScope = scope
 			// If the local service exists, the SE is going to set the label selectors to the service's so we can select the Pod
 			// We need to include those
