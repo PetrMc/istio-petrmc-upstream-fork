@@ -10,7 +10,6 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/aws/aws-sdk-go-v2/aws/arn"
 	"github.com/aws/aws-sdk-go-v2/service/ecs/types"
 	"golang.org/x/time/rate"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -771,7 +770,7 @@ func newTestECS(fk kube.Client, roles []*ecsAccountDiscovery) *ECSDiscovery {
 	ads := make(map[string]*ecsAccountDiscovery)
 	for _, ad := range roles {
 		ad.lookupNetwork = networkIDCallback
-		ad.clusters = map[arn.ARN]*ecsClusterDiscovery{}
+		ad.clusters = sync.Map{}
 		ad.serviceEntries = kclient.New[*clientnetworking.ServiceEntry](fk)
 		ad.workloadEntries = kclient.New[*clientnetworking.WorkloadEntry](fk)
 		ad.queue = controllers.NewQueue(fmt.Sprintf("ecs-%s", ad.account.role),

@@ -75,8 +75,8 @@ type ecsAccountDiscovery struct {
 	client        ECSClient
 	lookupNetwork LookupNetwork
 
-	// map of cluster ARN to discovered ECS resources
-	clusters map[arn.ARN]*ecsClusterDiscovery
+	// map of cluster ARN to discovered ECS resources: map[arn.ARN]ecsClusterDiscovery
+	clusters sync.Map
 
 	workloadEntries kclient.Client[*clientnetworking.WorkloadEntry]
 	serviceEntries  kclient.Client[*clientnetworking.ServiceEntry]
@@ -85,8 +85,6 @@ type ecsAccountDiscovery struct {
 
 type ecsClusterDiscovery struct {
 	cancel context.CancelFunc
-	// mutex to enable safe concurrent Snapshot/Store calls
-	mu sync.RWMutex
 	// map of resource name to workload/service
 	snapshot map[string]EcsDiscovered
 }
@@ -145,7 +143,7 @@ func NewECS(client kube.Client, lookupNetwork LookupNetwork) *ECSDiscovery {
 				limiter: rate.NewLimiter(ECSRateLimit, ECSBurstLimit),
 			},
 			lookupNetwork:   lookupNetwork,
-			clusters:        map[arn.ARN]*ecsClusterDiscovery{},
+			clusters:        sync.Map{},
 			serviceEntries:  kclient.New[*clientnetworking.ServiceEntry](client),
 			workloadEntries: kclient.New[*clientnetworking.WorkloadEntry](client),
 		}
@@ -166,25 +164,23 @@ func (a *ecsAccountDiscovery) Snapshot(cluster string) map[string]EcsDiscovered 
 		log.Errorf("failed to parse cluster ARN %s: %v", cluster, err)
 	}
 
-	c, found := a.clusters[clusterARN]
+	v, found := a.clusters.Load(clusterARN)
 	if !found {
 		return map[string]EcsDiscovered{}
 	}
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return c.snapshot
+	return v.(ecsClusterDiscovery).snapshot
 }
 
 // Store saves the current snapshot of the cluster state. Safe to call concurrently.
 func (a *ecsAccountDiscovery) Store(cluster arn.ARN, state map[string]EcsDiscovered) {
-	c, found := a.clusters[cluster]
+	v, found := a.clusters.Load(cluster)
 	if !found {
 		log.Errorf("cluster not found: %s", cluster)
 		return
 	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	c := v.(ecsClusterDiscovery)
 	c.snapshot = state
+	a.clusters.Store(cluster, c)
 }
 
 // name.Namespace = ARN of the cluster
@@ -234,20 +230,8 @@ func (a *ecsAccountDiscovery) PollClusterDiscovery(stop <-chan struct{}) {
 				continue
 			}
 
-			// stop discovery for removed clusters
-			if len(discoveredClusters) < len(a.clusters) {
-				for existingCluster, c := range a.clusters {
-					if slices.Contains(discoveredClusters, existingCluster) {
-						continue
-					}
-					// shutdown background discovery
-					c.cancel()
-					delete(a.clusters, existingCluster)
-				}
-			}
-
 			for _, discoveredCluster := range discoveredClusters {
-				_, found := a.clusters[discoveredCluster]
+				_, found := a.clusters.Load(discoveredCluster)
 				if found {
 					// discovery for cluster is already running, nothing to do
 					continue
@@ -255,17 +239,28 @@ func (a *ecsAccountDiscovery) PollClusterDiscovery(stop <-chan struct{}) {
 
 				// start discovery for cluster
 				ctx, cancel := context.WithCancel(context.Background())
-				a.clusters[discoveredCluster] = &ecsClusterDiscovery{
-					mu:       sync.RWMutex{},
+				a.clusters.Store(discoveredCluster, ecsClusterDiscovery{
 					cancel:   cancel,
 					snapshot: map[string]EcsDiscovered{},
-				}
+				})
 				wg.Add(1)
 				go func() {
 					defer wg.Done()
 					a.PollDiscovery(ctx, discoveredCluster)
 				}()
 			}
+
+			// stop discovery for removed clusters
+			a.clusters.Range(func(key, value any) bool {
+				existingCluster := key.(arn.ARN)
+				if !slices.Contains(discoveredClusters, existingCluster) {
+					c := value.(ecsClusterDiscovery)
+					// shutdown background discovery
+					c.cancel()
+					a.clusters.Delete(existingCluster)
+				}
+				return true
+			})
 		}
 	}
 }
