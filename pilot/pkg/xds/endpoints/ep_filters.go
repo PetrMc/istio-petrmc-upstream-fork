@@ -198,6 +198,33 @@ func (b *EndpointBuilder) selectNetworkGateways(nw network.ID, c cluster.ID) []m
 		// No match for network+cluster, just match the network.
 		gws = b.gateways().GatewaysForNetwork(nw)
 	}
+
+	// If we operate in ambient multi-network mode skip gateways that don't have HBONE port
+	if features.EnableAmbientMultiNetwork && isWaypointProxy(b.proxy) {
+		var ambientGws []model.NetworkGateway
+		for _, gw := range gws {
+			if gw.HBONEPort == 0 {
+				continue
+			}
+			ambientGws = append(ambientGws, gw)
+		}
+		return ambientGws
+	}
+
+	// Sidecar proxies cannot talk to ambient E/W gateway for now, so when we see an ambient
+	// E/W gateway (e.g., a gateway that listens on hbone port, but does not have an mTLS port
+	// we filter it out.
+	if isSidecarProxy(b.proxy) {
+		var sidecarGws []model.NetworkGateway
+		for _, gw := range gws {
+			if gw.Port == 0 {
+				continue
+			}
+			sidecarGws = append(sidecarGws, gw)
+		}
+		return sidecarGws
+	}
+
 	return gws
 }
 

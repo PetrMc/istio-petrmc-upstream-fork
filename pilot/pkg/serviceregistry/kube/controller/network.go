@@ -384,29 +384,35 @@ func (n *networkManager) extractGatewaysInner(svc *model.Service) bool {
 
 // getGatewayDetails returns gateways without the address populated, only the network and (unmapped) port for a given service.
 func (n *networkManager) getGatewayDetails(svc *model.Service) []model.NetworkGateway {
-	// TODO should we start checking if svc's Ports contain the gateway port?
+	// We have different types of E/W gateways - those that use mTLS (those are used in sidecar mode when talking cross networks)
+	// and those that use double-HBONE (those are used in ambient mode when talking cross cluster). A gateway service may or may
+	// not listen on the mTLS (15443, by default) or HBONE (15008) ports, depending on the mode of operation used by the mesh
+	// in the remote cluster. We should not use gateways that don't really listen on the right port.
 
 	// label based gateways
 	// TODO label based gateways could support being the gateway for multiple networks
 	if nw := svc.Attributes.Labels[label.TopologyNetwork.Name]; nw != "" {
-		port := DefaultNetworkGatewayPort
+		hbonePort := DefaultNetworkGatewayHBONEPort
+		gwPort := DefaultNetworkGatewayPort
+
 		if gwPortStr := svc.Attributes.Labels[label.NetworkingGatewayPort.Name]; gwPortStr != "" {
-			if gwPort, err := strconv.Atoi(gwPortStr); err == nil {
-				port = gwPort
-			} else {
+			port, err := strconv.Atoi(gwPortStr)
+			if err != nil {
 				log.Warnf("could not parse %q for %s on %s/%s; defaulting to %d",
 					gwPortStr, label.NetworkingGatewayPort.Name, svc.Attributes.Namespace, svc.Attributes.Name, DefaultNetworkGatewayPort)
+			} else {
+				gwPort = port
 			}
 		}
-		hbonePort := 0
 		sa := types.NamespacedName{}
 		trustDomain := ""
-		if gwPortStr := svc.Attributes.Labels["networking.istio.io/hboneGatewayPort"]; gwPortStr != "" {
-			if gwPort, err := strconv.Atoi(gwPortStr); err == nil {
-				hbonePort = gwPort
-			} else {
+		if hbonePortStr := svc.Attributes.Labels["networking.istio.io/hboneGatewayPort"]; hbonePortStr != "" {
+			port, err := strconv.Atoi(hbonePortStr)
+			if err != nil {
 				log.Warnf("could not parse %q for %s on %s/%s; defaulting to %d",
-					gwPortStr, "networking.istio.io/hboneGatewayPort", svc.Attributes.Namespace, svc.Attributes.Name, 0)
+					hbonePortStr, "networking.istio.io/hboneGatewayPort", svc.Attributes.Namespace, svc.Attributes.Name, 0)
+			} else {
+				hbonePort = port
 			}
 			sa = types.NamespacedName{
 				Namespace: svc.Attributes.Namespace,
@@ -417,9 +423,26 @@ func (n *networkManager) getGatewayDetails(svc *model.Service) []model.NetworkGa
 			// TODO: this is wrong, should be annotations!!!
 			trustDomain = svc.Attributes.Labels["gateway.istio.io/trust-domain"]
 		}
+
+		_, acceptMTLS := svc.Ports.GetByPort(gwPort)
+		_, acceptHBONE := svc.Ports.GetByPort(hbonePort)
+
+		if !acceptMTLS && !acceptHBONE {
+			log.Warnf("service %s/%s is labeled as gateway, but does not listen neither on port %d nor on port %d",
+				svc.Attributes.Namespace, svc.Attributes.Name, gwPort, hbonePort)
+			return nil
+		}
+
+		if !acceptMTLS {
+			gwPort = 0
+		}
+		if !acceptHBONE {
+			hbonePort = 0
+		}
+
 		return []model.NetworkGateway{{
 			Network:        network.ID(nw),
-			Port:           uint32(port),
+			Port:           uint32(gwPort),
 			HBONEPort:      uint32(hbonePort),
 			TrustDomain:    trustDomain,
 			ServiceAccount: sa,
