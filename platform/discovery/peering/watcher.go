@@ -676,6 +676,9 @@ func convertPorts(ports []corev1.ServicePort) []*networking.ServicePort {
 		if e.TargetPort.Type == intstr.String {
 			name = e.TargetPort.StrVal
 		}
+		if name == "" {
+			name = fmt.Sprintf("peered-%d", e.Port)
+		}
 		p := kubeconfig.ConvertProtocol(e.Port, e.Name, e.Protocol, e.AppProtocol)
 		proto := p.String()
 		if p.IsUnsupported() {

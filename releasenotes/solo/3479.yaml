@@ -1,0 +1,12 @@
+apiVersion: release-notes/v2
+
+kind: bug-fix
+
+area: traffic-management
+
+issue:
+  - https://github.com/solo-io/istio/issues/3479
+
+releaseNotes:
+- |
+  **Fixed** invalid service entry generation when service port is not named.

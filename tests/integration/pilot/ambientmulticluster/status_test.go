@@ -1,5 +1,4 @@
 //go:build integ
-// +build integ
 
 // Copyright Solo.io, Inc
 //
