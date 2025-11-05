@@ -1303,6 +1303,18 @@ func TestServiceConditions(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "service without waypoint but with ingress-use-waypoint label",
+			inputs: []any{
+				ns,
+			},
+			svc: makeServiceWithLabels(map[string]string{
+				"istio.io/ingress-use-waypoint": "true",
+			}),
+			conditions: map[model.ConditionType]*model.Condition{
+				model.WaypointBound: nil,
+			},
+		},
 	}
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {

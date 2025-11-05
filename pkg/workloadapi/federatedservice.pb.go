@@ -181,9 +181,11 @@ type FederatedService struct {
 	// Takeover indicates whether this service should override the standard *.cluster.local addresses.
 	// When true, peered services will be accessible via the cluster.local domain.
 	// Deprecated: GLOBAL_ONLY scope (scope=GLOBAL_ONLY) implies takeover=true for backwards compatibility.
-	Takeover      bool `protobuf:"varint,12,opt,name=takeover,proto3" json:"takeover,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Takeover bool `protobuf:"varint,12,opt,name=takeover,proto3" json:"takeover,omitempty"`
+	// IngressUseWaypoint specifies whether ingress gateways should use the waypoint for this service.
+	IngressUseWaypoint *wrapperspb.BoolValue `protobuf:"bytes,13,opt,name=ingress_use_waypoint,json=ingressUseWaypoint,proto3" json:"ingress_use_waypoint,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *FederatedService) Reset() {
@@ -300,6 +302,13 @@ func (x *FederatedService) GetTakeover() bool {
 	return false
 }
 
+func (x *FederatedService) GetIngressUseWaypoint() *wrapperspb.BoolValue {
+	if x != nil {
+		return x.IngressUseWaypoint
+	}
+	return nil
+}
+
 type RemoteWaypoint struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Name represents the name for the service.
@@ -363,7 +372,7 @@ const file_workloadapi_federatedservice_proto_rawDesc = "" +
 	"\"workloadapi/federatedservice.proto\x12\x0eistio.workload\x1a\x1egoogle/protobuf/wrappers.proto\x1a\x1aworkloadapi/workload.proto\"5\n" +
 	"\aSegment\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x16\n" +
-	"\x06domain\x18\x02 \x01(\tR\x06domain\"\xfb\x04\n" +
+	"\x06domain\x18\x02 \x01(\tR\x06domain\"\xc9\x05\n" +
 	"\x10FederatedService\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1c\n" +
 	"\tnamespace\x18\x02 \x01(\tR\tnamespace\x12\x1a\n" +
@@ -377,7 +386,8 @@ const file_workloadapi_federatedservice_proto_rawDesc = "" +
 	"\x11protocols_by_port\x18\n" +
 	" \x03(\v25.istio.workload.FederatedService.ProtocolsByPortEntryR\x0fprotocolsByPort\x122\n" +
 	"\x05scope\x18\v \x01(\x0e2\x1c.istio.workload.ServiceScopeR\x05scope\x12\x1a\n" +
-	"\btakeover\x18\f \x01(\bR\btakeover\x1aB\n" +
+	"\btakeover\x18\f \x01(\bR\btakeover\x12L\n" +
+	"\x14ingress_use_waypoint\x18\r \x01(\v2\x1a.google.protobuf.BoolValueR\x12ingressUseWaypoint\x1aB\n" +
 	"\x14ProtocolsByPortEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\rR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"B\n" +
@@ -412,6 +422,7 @@ var file_workloadapi_federatedservice_proto_goTypes = []any{
 	nil,                            // 4: istio.workload.FederatedService.ProtocolsByPortEntry
 	(*Port)(nil),                   // 5: istio.workload.Port
 	(*wrapperspb.UInt32Value)(nil), // 6: google.protobuf.UInt32Value
+	(*wrapperspb.BoolValue)(nil),   // 7: google.protobuf.BoolValue
 }
 var file_workloadapi_federatedservice_proto_depIdxs = []int32{
 	5, // 0: istio.workload.FederatedService.ports:type_name -> istio.workload.Port
@@ -419,11 +430,12 @@ var file_workloadapi_federatedservice_proto_depIdxs = []int32{
 	3, // 2: istio.workload.FederatedService.waypoint:type_name -> istio.workload.RemoteWaypoint
 	4, // 3: istio.workload.FederatedService.protocols_by_port:type_name -> istio.workload.FederatedService.ProtocolsByPortEntry
 	0, // 4: istio.workload.FederatedService.scope:type_name -> istio.workload.ServiceScope
-	5, // [5:5] is the sub-list for method output_type
-	5, // [5:5] is the sub-list for method input_type
-	5, // [5:5] is the sub-list for extension type_name
-	5, // [5:5] is the sub-list for extension extendee
-	0, // [0:5] is the sub-list for field type_name
+	7, // 5: istio.workload.FederatedService.ingress_use_waypoint:type_name -> google.protobuf.BoolValue
+	6, // [6:6] is the sub-list for method output_type
+	6, // [6:6] is the sub-list for method input_type
+	6, // [6:6] is the sub-list for extension type_name
+	6, // [6:6] is the sub-list for extension extendee
+	0, // [0:6] is the sub-list for field type_name
 }
 
 func init() { file_workloadapi_federatedservice_proto_init() }

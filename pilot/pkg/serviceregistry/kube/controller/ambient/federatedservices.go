@@ -122,6 +122,9 @@ func (a *index) FederatedServicesCollection(
 			Scope:               serviceScope,
 			Takeover:            svc.SoloServiceTakeover,
 		}
+		if svc.Waypoint.IngressLabelPresent {
+			fs.IngressUseWaypoint = wrappers.Bool(svc.Waypoint.IngressUseWaypoint)
+		}
 		if s.Waypoint != nil && waypoint != nil {
 			fs.Waypoint = &workloadapi.RemoteWaypoint{
 				Name:      waypoint.GetName(),

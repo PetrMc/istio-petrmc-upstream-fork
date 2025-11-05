@@ -73,6 +73,8 @@ message FederatedService {
   // When true, peered services will be accessible via the cluster.local domain.
   // Deprecated: GLOBAL_ONLY scope (scope=GLOBAL_ONLY) implies takeover=true for backwards compatibility.
   bool takeover = 12;
+  // IngressUseWaypoint specifies whether ingress gateways should use the waypoint for this service.
+  google.protobuf.BoolValue ingress_use_waypoint = 13;
 }
 
 message RemoteWaypoint  {

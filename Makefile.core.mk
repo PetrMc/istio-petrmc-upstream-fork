@@ -146,6 +146,7 @@ endif
 PROW_ARTIFACTS_BASE ?= https://gcsweb.istio.io/gcs/istio-prow
 
 include tools/proto/proto.mk
+-include soloapi/Makefile.soloapi.mk
 
 .PHONY: default
 default: init build test

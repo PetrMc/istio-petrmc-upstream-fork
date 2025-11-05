@@ -716,6 +716,11 @@ func (c *NetworkWatcher) reconcileGatewayWorkloadEntry(tn types.NamespacedName) 
 		annos[ServiceProtocolsAnnotation] = protocolsStr
 	}
 
+	// store ingress-use-waypoint for use on the ServiceEntry
+	if value := fss.GetIngressUseWaypoint(); value != nil && value.Value {
+		annos["istio.io/ingress-use-waypoint"] = "true"
+	}
+
 	weight := uint32(0)
 	if fss.Capacity != nil {
 		weight = fss.Capacity.GetValue()
@@ -1056,6 +1061,28 @@ func (c *NetworkWatcher) reconcileServiceEntryForSegment(
 		}
 	}
 	se.Spec.SubjectAltNames = sets.SortedList(sans)
+
+	// This is a safegaurd against the local cluster missing the service,
+	// if the ingress-gateway cluster is missing the service, we still want to aggregate ingress-use-waypoint from remote services
+	// While the local service's decision is respected if it exists, for the expected behavior guide customers
+	// to configure the same set of manifests for all clusters. (aka `namespace Sameness`)
+
+	// If local service exists, respect its decision (explicit "true" or implicit/explicit "false")
+	if localService != nil {
+		if localValue := localService.Labels["istio.io/ingress-use-waypoint"]; localValue == "true" {
+			labels["istio.io/ingress-use-waypoint"] = "true"
+		}
+		// If local service exists but label is not "true" (either missing or set to false),
+		// don't set it - respect the local decision over remotes
+	} else {
+		// No local service, aggregate from remotes
+		for _, remote := range remoteServices {
+			if ingressUseWaypoint := remote.Annotations["istio.io/ingress-use-waypoint"]; ingressUseWaypoint == "true" {
+				labels["istio.io/ingress-use-waypoint"] = "true"
+				break
+			}
+		}
+	}
 
 	changed, err := CreateOrUpdateIfNeeded(c.serviceEntries, se, func(desired *clientnetworking.ServiceEntry, live *clientnetworking.ServiceEntry) bool {
 		if desired.Name != live.Name {

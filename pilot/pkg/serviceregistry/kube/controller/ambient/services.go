@@ -279,14 +279,19 @@ func serviceServiceBuilder(
 		waypoint, wperr := fetchWaypointForService(ctx, waypoints, namespaces, services, s.ObjectMeta)
 		if waypoint != nil {
 			waypointStatus.ResourceName = waypoint.ResourceName()
+		}
+		waypointStatus.Error = wperr
 
-			// TODO: add this label to the istio api labels so we have constants to use
-			if val, ok := s.Labels["istio.io/ingress-use-waypoint"]; ok {
+		// TODO: add this label to the istio api labels so we have constants to use
+		// The OR allows propagation even without a waypoint (for cross-cluster ingress routing)
+		if val, ok := s.Labels["istio.io/ingress-use-waypoint"]; ok {
+			// Only set these fields if waypoint exists OR label is explicitly true
+			// This prevents false positives when service has waypoint but no ingress label
+			if waypoint != nil || strings.EqualFold(val, "true") {
 				waypointStatus.IngressLabelPresent = true
 				waypointStatus.IngressUseWaypoint = strings.EqualFold(val, "true")
 			}
 		}
-		waypointStatus.Error = wperr
 
 		ns := ptr.OrEmpty[v1.Namespace](ptr.Flatten(krt.FetchOne[*v1.Namespace](ctx, namespaces, krt.FilterKey(s.GetNamespace()))))
 		soloServiceScope := peering.CalculateScope(s.GetLabels(), ns.GetLabels())
