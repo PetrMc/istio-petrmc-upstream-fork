@@ -311,13 +311,6 @@ func localK8sGatewayToNetworkGateways(clusterID cluster.ID, gw *v1beta1.Gateway)
 		return nil
 	}
 
-	// SOLO skip the gateway if it is pointing to the cluster network
-	// TODO(stevenctl) we can probably remove this? at the very least, change it to lookup
-	// the system namespace label rather than comparing a network to a cluster id.
-	if netLabel == clusterID.String() {
-		return nil
-	}
-
 	base := model.NetworkGateway{
 		Network:     network.ID(netLabel),
 		Cluster:     clusterID,

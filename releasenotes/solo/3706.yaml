@@ -1,0 +1,12 @@
+apiVersion: release-notes/v2
+
+kind: bug-fix
+
+area: traffic-management
+
+issue:
+  - https://github.com/solo-io/istio/issues/3702
+
+releaseNotes:
+- |
+  **Fixed** local eastwest gateways not being translated into networkGateways when the cluster name matches the network ID.
