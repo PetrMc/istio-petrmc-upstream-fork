@@ -35,6 +35,7 @@ import (
 	"istio.io/istio/pilot/pkg/features"
 	"istio.io/istio/pilot/pkg/model"
 	labelutil "istio.io/istio/pilot/pkg/serviceregistry/util/label"
+	"istio.io/istio/pkg/cluster"
 	"istio.io/istio/pkg/config/constants"
 	"istio.io/istio/pkg/config/mesh"
 	"istio.io/istio/pkg/config/schema/kind"
@@ -2104,6 +2105,102 @@ func TestNodeportPeeringNodeWorkloads(t *testing.T) {
 			// should not build a workload for the node without the e/w gw pod
 			result = builder(krt.TestingDummyContext{}, tt.nodes[1])
 			assert.Equal(t, result, nil)
+		})
+	}
+}
+
+func TestPeeredObjectTrustDomain(t *testing.T) {
+	cases := []struct {
+		name   string
+		inputs []any
+		we     *networkingclient.WorkloadEntry
+		result *workloadapi.Workload
+	}{
+		{
+			name: "autogen flat we",
+			inputs: []any{
+				model.ServiceInfo{
+					Service: &workloadapi.Service{
+						Name:      "svc",
+						Namespace: "default",
+						Hostname:  "svc.default.svc.domain.suffix",
+					},
+				},
+				krt.ObjectWithCluster[NetworkGateway]{
+					ClusterID: cluster.ID("cluster1"),
+					Object: &NetworkGateway{
+						NetworkGateway: model.NetworkGateway{
+							Network:     testNW,
+							Cluster:     cluster.ID("cluster0"),
+							TrustDomain: "t1",
+							HBONEPort:   15008,
+						},
+						Source: types.NamespacedName{
+							Namespace: "istio-gateways",
+							Name:      "remote-network-ip",
+						},
+					},
+				},
+			},
+			we: &networkingclient.WorkloadEntry{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "autogenflat.cluster1.default.flat-we",
+					Namespace: "istio-system",
+					Labels: map[string]string{
+						peering.ParentServiceLabel:          "svc",
+						peering.ParentServiceNamespaceLabel: "default",
+						peering.SourceClusterLabel:          "cluster1",
+					},
+				},
+				Spec: networking.WorkloadEntry{
+					Address: "1.2.3.4",
+					Network: string(testNW),
+					Ports: map[string]uint32{
+						"port-5000": 5000,
+					},
+				},
+			},
+			result: &workloadapi.Workload{
+				Uid:               "cluster0/networking.istio.io/WorkloadEntry/default/autogenflat.cluster1.default.flat-we",
+				Name:              "autogenflat.cluster1.default.flat-we",
+				Namespace:         "default",
+				CanonicalName:     "autogenflat.cluster1.default.flat-we",
+				CanonicalRevision: "latest",
+				ClusterId:         "cluster1",
+				Network:           testNW,
+				Addresses:         [][]byte{netip.MustParseAddr("1.2.3.4").AsSlice()},
+				WorkloadType:      workloadapi.WorkloadType_POD,
+				WorkloadName:      "autogenflat.cluster1.default.flat-we",
+				Status:            workloadapi.WorkloadStatus_HEALTHY,
+				TrustDomain:       "t1", // trust domain for peered objects is based on the network gw's trust domain for the remote cluster
+			},
+		},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			mock := krttest.NewMock(t, tt.inputs)
+			a := newAmbientUnitTest(t)
+			a.networks.NetworkGatewaysWithCluster = krttest.GetMockCollection[krt.ObjectWithCluster[NetworkGateway]](mock)
+			a.networks.GatewaysByCluster = krt.NewIndex(
+				a.networks.NetworkGatewaysWithCluster, "cluster", func(o krt.ObjectWithCluster[NetworkGateway]) []cluster.ID {
+					return []cluster.ID{o.ClusterID}
+				},
+			)
+			WorkloadServices := krttest.GetMockCollection[model.ServiceInfo](mock)
+			WorkloadServicesNamespaceIndex := krt.NewNamespaceIndex(WorkloadServices)
+			builder := a.workloadEntryWorkloadBuilder(
+				GetMeshConfig(mock),
+				krttest.GetMockCollection[model.WorkloadAuthorization](mock),
+				krttest.GetMockCollection[*securityclient.PeerAuthentication](mock),
+				krttest.GetMockCollection[Waypoint](mock),
+				WorkloadServices,
+				WorkloadServicesNamespaceIndex,
+				krttest.GetMockCollection[*v1.Namespace](mock),
+				krttest.GetMockCollection[*v1.Service](mock),
+				krttest.GetMockCollection[*soloapi.Segment](mock),
+			)
+			result := builder(krt.TestingDummyContext{}, tt.we)
+			assert.Equal(t, result.Workload, tt.result)
 		})
 	}
 }

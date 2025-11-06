@@ -1,0 +1,12 @@
+apiVersion: release-notes/v2
+
+kind: bug-fix
+
+area: traffic-management
+
+issue:
+  - https://github.com/solo-io/istio/issues/3707
+
+releaseNotes:
+- |
+  **Fixed** incorrect trust domain set on peered flat-networking workloads.

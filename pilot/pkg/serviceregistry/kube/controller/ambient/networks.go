@@ -56,6 +56,8 @@ type networkCollections struct {
 	SystemNamespaceNetworkByCluster krt.Index[cluster.ID, ClusterNetwork]
 	NetworkGateways                 krt.Collection[NetworkGateway]
 	GatewaysByNetwork               krt.Index[network.ID, NetworkGateway]
+	NetworkGatewaysWithCluster      krt.Collection[krt.ObjectWithCluster[NetworkGateway]]
+	GatewaysByCluster               krt.Index[cluster.ID, krt.ObjectWithCluster[NetworkGateway]]
 }
 
 type ClusterNetwork struct {
@@ -68,8 +70,15 @@ func (c ClusterNetwork) ResourceName() string {
 }
 
 func (c networkCollections) HasSynced() bool {
+	// not instantiated for global network collections (i.e. oss multicluster usecase)
+	ngwsWithClusterSynced := true
+	if c.NetworkGatewaysWithCluster != nil {
+		ngwsWithClusterSynced = c.NetworkGatewaysWithCluster.HasSynced()
+	}
+
 	return c.LocalSystemNamespace.AsCollection().HasSynced() &&
-		c.NetworkGateways.HasSynced()
+		c.NetworkGateways.HasSynced() &&
+		ngwsWithClusterSynced
 }
 
 func buildGlobalNetworkCollections(
@@ -230,11 +239,21 @@ func buildNetworkCollections(
 	GatewaysByNetwork := krt.NewIndex(NetworkGateways, "network", func(o NetworkGateway) []network.ID {
 		return []network.ID{o.Network}
 	})
+	NetworkGatewaysWithCluster := krt.NewManyCollection(
+		gateways,
+		fromGatewayWithClusterBuilder(options.ClusterID),
+		opts.WithName("NetworkGatewaysWithCluster")...,
+	)
+	GatewaysByCluster := krt.NewIndex(NetworkGatewaysWithCluster, "cluster", func(o krt.ObjectWithCluster[NetworkGateway]) []cluster.ID {
+		return []cluster.ID{o.ClusterID}
+	})
 
 	return networkCollections{
-		LocalSystemNamespace: SystemNamespaceNetwork,
-		NetworkGateways:      NetworkGateways,
-		GatewaysByNetwork:    GatewaysByNetwork,
+		LocalSystemNamespace:       SystemNamespaceNetwork,
+		NetworkGateways:            NetworkGateways,
+		GatewaysByNetwork:          GatewaysByNetwork,
+		NetworkGatewaysWithCluster: NetworkGatewaysWithCluster,
+		GatewaysByCluster:          GatewaysByCluster,
 	}
 }
 
@@ -382,5 +401,23 @@ func k8sGatewayToNetworkGateways(clusterID cluster.ID, gw *v1beta1.Gateway, loca
 func fromGatewayBuilder(clusterID, localClusterID cluster.ID) krt.TransformationMulti[*v1beta1.Gateway, NetworkGateway] {
 	return func(ctx krt.HandlerContext, gw *v1beta1.Gateway) []NetworkGateway {
 		return k8sGatewayToNetworkGateways(clusterID, gw, localClusterID)
+	}
+}
+
+func fromGatewayWithClusterBuilder(localClusterID cluster.ID) krt.TransformationMulti[*v1beta1.Gateway, krt.ObjectWithCluster[NetworkGateway]] {
+	return func(ctx krt.HandlerContext, gw *v1beta1.Gateway) []krt.ObjectWithCluster[NetworkGateway] {
+		gwCluster, exists := gw.GetLabels()[label.TopologyCluster.Name]
+		if !exists {
+			return nil
+		}
+		ngws := localK8sGatewayToNetworkGateways(localClusterID, gw)
+		ngwsWithCluster := make([]krt.ObjectWithCluster[NetworkGateway], len(ngws))
+		for _, ngw := range ngws {
+			ngwsWithCluster = append(ngwsWithCluster, krt.ObjectWithCluster[NetworkGateway]{
+				ClusterID: cluster.ID(gwCluster),
+				Object:    &ngw,
+			})
+		}
+		return ngwsWithCluster
 	}
 }

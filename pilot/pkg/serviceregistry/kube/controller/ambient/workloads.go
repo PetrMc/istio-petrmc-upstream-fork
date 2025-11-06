@@ -249,7 +249,9 @@ func MergedGlobalWorkloadsCollection(
 			localClusterGetter,
 			localNetworkGetter,
 			globalNetworks.NetworkGateways,
+			globalNetworks.NetworkGatewaysWithCluster,
 			globalNetworks.GatewaysByNetwork,
+			globalNetworks.GatewaysByCluster,
 			clusterSegment,
 			segments,
 			flags,
@@ -526,7 +528,9 @@ func MergedGlobalWorkloadsCollection(
 						return nw.Network
 					},
 					globalNetworks.NetworkGateways,
+					globalNetworks.NetworkGatewaysWithCluster,
 					globalNetworks.GatewaysByNetwork,
+					globalNetworks.GatewaysByCluster,
 					clusterSegment,
 					segments,
 					flags,
@@ -701,7 +705,9 @@ func workloadEntryWorkloadBuilder(
 	clusterGetter func(krt.HandlerContext) cluster.ID,
 	networkGetter func(krt.HandlerContext) network.ID,
 	networkGateways krt.Collection[NetworkGateway],
+	networkGatewaysWithCluster krt.Collection[krt.ObjectWithCluster[NetworkGateway]],
 	gatewaysByNetwork krt.Index[network.ID, NetworkGateway],
+	gatewaysByCluster krt.Index[cluster.ID, krt.ObjectWithCluster[NetworkGateway]],
 	clusterSegment krt.Singleton[*soloapi.Segment],
 	segments krt.Collection[*soloapi.Segment],
 	flags FeatureFlags,
@@ -774,6 +780,7 @@ func workloadEntryWorkloadBuilder(
 		}
 		network := networkGetter(ctx).String()
 		cluster := clusterGetter(ctx)
+		sourceCluster := model.GetOrDefault(wle.Labels[peering.SourceClusterLabel], cluster.String())
 		if wle.Spec.Network != "" {
 			network = wle.Spec.Network
 		}
@@ -787,7 +794,7 @@ func workloadEntryWorkloadBuilder(
 			Namespace:             wle.Namespace,
 			Network:               network,
 			NetworkGateway:        getNetworkGatewayAddress(ctx, network, networkGateways, gatewaysByNetwork),
-			ClusterId:             model.GetOrDefault(wle.Labels[peering.SourceClusterLabel], string(cluster)),
+			ClusterId:             sourceCluster,
 			ServiceAccount:        wle.Spec.ServiceAccount,
 			Services:              constructServicesFromWorkloadEntry(&wle.Spec, services),
 			AuthorizationPolicies: policies,
@@ -800,9 +807,9 @@ func workloadEntryWorkloadBuilder(
 		if wle.Annotations[peering.ServiceEndpointStatus] == peering.ServiceEndpointStatusUnhealthy {
 			w.Status = workloadapi.WorkloadStatus_UNHEALTHY
 		}
-		if wasPeerObject && nodePortPeering {
-			// override trust domain for nodeport gateway services since trust domain is for e/w gateway on remote network
-			w.TrustDomain = getNetworkGatewayTrustDomain(ctx, network, networkGateways, gatewaysByNetwork)
+		if wasPeerObject {
+			// trust domain for peered objects is based on the remote cluster
+			w.TrustDomain = getNetworkGatewayTrustDomain(ctx, sourceCluster, networkGatewaysWithCluster, gatewaysByCluster)
 		}
 		if wle.Spec.Weight > 0 {
 			w.Capacity = wrappers.UInt32(wle.Spec.Weight)
@@ -877,7 +884,9 @@ func (a *index) workloadEntryWorkloadBuilder(
 		},
 		localNetworkGetter,
 		a.networks.NetworkGateways,
+		a.networks.NetworkGatewaysWithCluster,
 		a.networks.GatewaysByNetwork,
+		a.networks.GatewaysByCluster,
 		a.clusterSegment,
 		segments,
 		a.Flags,
@@ -1837,16 +1846,17 @@ func convertGateway(ctx krt.HandlerContext, meshConfig krt.Singleton[MeshConfig]
 
 func getNetworkGatewayTrustDomain(
 	ctx krt.HandlerContext,
-	n string,
-	networkGateways krt.Collection[NetworkGateway],
-	gatewaysByNetwork krt.Index[network.ID, NetworkGateway],
+	clusterID string,
+	networkGatewaysWithCluster krt.Collection[krt.ObjectWithCluster[NetworkGateway]],
+	gatewaysByCluster krt.Index[cluster.ID, krt.ObjectWithCluster[NetworkGateway]],
 ) string {
 	// Currently only support one, so find the first one that is valid
-	for _, net := range LookupNetworkGateway(ctx, network.ID(n), networkGateways, gatewaysByNetwork) {
-		if net.HBONEPort == 0 {
+	// network gw look up uses cluster over network so that flat networking scenarios are supported
+	for _, ngw := range LookupNetworkGatewayByCluster(ctx, cluster.ID(clusterID), networkGatewaysWithCluster, gatewaysByCluster) {
+		if ngw.Object.HBONEPort == 0 {
 			continue
 		}
-		return net.TrustDomain
+		return ngw.Object.TrustDomain
 	}
 
 	return ""

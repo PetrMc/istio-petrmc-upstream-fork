@@ -923,6 +923,15 @@ func (a *index) AdditionalPodSubscriptions(
 	return shouldSubscribe
 }
 
+func LookupNetworkGatewayByCluster(
+	ctx krt.HandlerContext,
+	cluster cluster.ID,
+	networkGatewaysWithCluster krt.Collection[krt.ObjectWithCluster[NetworkGateway]],
+	networkGatewaysByCluster krt.Index[cluster.ID, krt.ObjectWithCluster[NetworkGateway]],
+) []krt.ObjectWithCluster[NetworkGateway] {
+	return krt.Fetch(ctx, networkGatewaysWithCluster, krt.FilterIndex(networkGatewaysByCluster, cluster))
+}
+
 func LookupNetworkGateway(
 	ctx krt.HandlerContext,
 	id network.ID,
