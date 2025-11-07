@@ -45,9 +45,10 @@ type EchoDeployments struct {
 	// Namespace echo apps will be deployed
 	Namespace namespace.Instance
 	// App echo services
-	LocalApp      echo.Instances
-	Sidecar       echo.Instances
-	LocalWaypoint echo.Instances
+	LocalApp               echo.Instances
+	Sidecar                echo.Instances
+	LocalWaypoint          echo.Instances
+	RemoteFlatOnlyWaypoint echo.Instances
 }
 
 // SetupApps sets up a single workload. We will make multiple distinct services all selecting this workload
@@ -173,12 +174,14 @@ func SetupApps(t resource.Context, apps *EchoDeployments, nsServiceScope bool) e
 		return err
 	}
 	scopes.Framework.Infof("deploying to remote flat-network cluster...")
-	if _, err := remoteFlatBuilder.Build(); err != nil {
+	remoteApps, err := remoteFlatBuilder.Build()
+	if err != nil {
 		return err
 	}
 	apps.LocalApp = match.ServiceName(echo.NamespacedName{Name: ServiceLocal, Namespace: apps.Namespace}).GetMatches(localApps)
 	apps.Sidecar = match.ServiceName(echo.NamespacedName{Name: ServiceSidecar, Namespace: apps.Namespace}).GetMatches(localApps)
 	apps.LocalWaypoint = match.ServiceName(echo.NamespacedName{Name: ServiceLocalWaypoint, Namespace: apps.Namespace}).GetMatches(localApps)
+	apps.RemoteFlatOnlyWaypoint = match.ServiceName(echo.NamespacedName{Name: ServiceRemoteFlatOnlyWaypoint, Namespace: apps.Namespace}).GetMatches(remoteApps)
 
 	if _, err := ambient.NewWaypointProxyForCluster(t, apps.Namespace, WaypointXNet, t.Clusters().GetByName(RemoteNetworkCluster)); err != nil {
 		return err

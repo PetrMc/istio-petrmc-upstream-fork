@@ -84,6 +84,7 @@ func TestFromZtunnel(t TrafficContext) {
 	client := t.Apps.LocalApp[0]
 	appsNs := t.Apps.Namespace
 	localWaypoint := t.Apps.LocalWaypoint.Instances().ForCluster(LocalCluster)[0]
+	remoteFlatOnlyWaypoint := t.Apps.RemoteFlatOnlyWaypoint.Instances().ForCluster(RemoteFlatCluster)[0]
 	domainSuffix := t.DomainSuffix
 
 	callWorkload := func(service echo.Instance, c echo.Checker) {
@@ -155,12 +156,32 @@ func TestFromZtunnel(t TrafficContext) {
 
 	// Make sure to-workload waypoint traffic works
 	callWorkload(localWaypoint, check.And(check.OK(), hitLocalCluster, IsL7()))
+	callWorkload(remoteFlatOnlyWaypoint, check.And(check.OK(), hitRemoteFlatCluster, IsL4()))
 }
 
 func TestFromSidecar(t TrafficContext) {
 	client := t.Apps.Sidecar[0]
 	appsNs := t.Apps.Namespace
+	remoteFlatOnlyWaypoint := t.Apps.RemoteFlatOnlyWaypoint.Instances().ForCluster(RemoteFlatCluster)[0]
 	domainSuffix := t.DomainSuffix
+
+	callWorkload := func(t framework.TestContext, service echo.Instance, c echo.Checker) {
+		t.Helper()
+		t.NewSubTestf("to workload %v", service.ServiceName()).Run(func(t framework.TestContext) {
+			if c == nil {
+				c = check.Error()
+			} else {
+				c = check.And(c, DestinationWorkload(service.ServiceName()))
+			}
+			client.CallOrFail(t, echo.CallOptions{
+				ToWorkload: service,
+				Port:       echo.Port{WorkloadPort: 18081},
+				Scheme:     scheme.HTTP,
+				Count:      25,
+				Check:      c,
+			})
+		})
+	}
 
 	call := func(t framework.TestContext, name string, c echo.Checker) {
 		t.Helper()
@@ -211,6 +232,7 @@ func TestFromSidecar(t TrafficContext) {
 	// Should hit remote and local
 	call(t, ServiceSidecar, check.And(check.OK(), hitAllClusters(t)))
 
+	callWorkload(t, remoteFlatOnlyWaypoint, check.And(check.OK(), hitRemoteFlatCluster, IsL4()))
 	// Test PreferClose traffic distribution
 	// Note: Node locality labels are set during test setup (see main_test.go SetupNodeLocality)
 	// so pods in each cluster automatically get different locality from their nodes
@@ -294,6 +316,7 @@ spec:
 	cb.ApplyOrFail(t)
 	defaultIngress := istio.DefaultIngressOrFail(t, t)
 	domainSuffixForCall := t.DomainSuffix
+
 	call := func(t framework.TestContext, name string, c echo.Checker) {
 		t.Helper()
 		t.NewSubTestf("to %v", name).Run(func(t framework.TestContext) {
