@@ -250,9 +250,9 @@ func (s *Controller) workloadEntryHandler(old, curr config.Config, event model.E
 		event = model.EventDelete
 	}
 
-	wi := s.convertWorkloadEntryToWorkloadInstance(curr, s.Cluster())
 	peered := peering.WasPeerObject(&curr)
 	shouldShare := !peered || peering.ShouldTakeover(curr.Labels, nil)
+	wi := s.convertWorkloadEntryToWorkloadInstance(wle, curr.Meta, s.Cluster())
 	if wi != nil && !wi.DNSServiceEntryOnly {
 		handlerEvent := event
 		if peered && !shouldShare {
@@ -282,7 +282,7 @@ func (s *Controller) workloadEntryHandler(old, curr config.Config, event model.E
 	currSes := getWorkloadServiceEntries(cfgs, wle)
 	var oldSes map[types.NamespacedName]*config.Config
 	if oldWle != nil {
-		if labels.Instance(oldWle.Labels).Equals(curr.Labels) {
+		if labels.Instance(oldWle.Labels).Equals(wle.Labels) {
 			oldSes = currSes
 		} else {
 			// labels update should trigger proxy update

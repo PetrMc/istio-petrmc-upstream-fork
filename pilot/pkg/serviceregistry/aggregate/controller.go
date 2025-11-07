@@ -223,6 +223,19 @@ func (c *Controller) AddressInformation(addresses sets.String) ([]model.AddressI
 	return i, removed
 }
 
+func (c *Controller) ServiceInfo(key string) *model.ServiceInfo {
+	if !features.EnableAmbientMultiNetwork {
+		return nil
+	}
+	for _, p := range c.GetRegistries() {
+		// When it comes to service info in ambient multicluster setup, only the local cluster matter.
+		if p.Cluster() == c.configClusterID && p.Provider() == provider.Kubernetes {
+			return p.ServiceInfo(key)
+		}
+	}
+	return nil
+}
+
 func (c *Controller) FederatedWaypoints() krt.Collection[krt.Named] {
 	if !features.EnableAmbient {
 		return nil

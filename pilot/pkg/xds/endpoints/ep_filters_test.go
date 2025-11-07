@@ -679,8 +679,7 @@ func TestEndpointsByNetworkFilter_SkipLBWithHostname(t *testing.T) {
 }
 
 func TestEndpointsByNetworkFilter_AmbientMuiltiNetwork(t *testing.T) {
-	t.Skip("https://github.com/istio/istio/issues/3622")
-
+	test.SetForTest(t, &features.EnableAmbient, true)
 	test.SetForTest(t, &features.EnableAmbientMultiNetwork, true)
 	test.SetForTest(t, &features.EnableAmbientWaypointMultiNetwork, true)
 	env := environment(t)
