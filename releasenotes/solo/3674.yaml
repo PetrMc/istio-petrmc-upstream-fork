@@ -1,0 +1,13 @@
+apiVersion: release-notes/v2
+
+kind: bug-fix
+
+area: traffic-management
+
+issue:
+  - https://github.com/solo-io/istio/issues/3669
+
+releaseNotes:
+- |
+  **Fixed** sidecars and gateways not respecting load balancing settings or performing locality load balancing
+  when sending to a waypoint.

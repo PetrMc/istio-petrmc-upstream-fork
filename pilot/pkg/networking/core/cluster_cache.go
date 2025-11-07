@@ -23,7 +23,9 @@ import (
 	"istio.io/istio/pilot/pkg/model"
 	"istio.io/istio/pilot/pkg/networking/util"
 	"istio.io/istio/pilot/pkg/xds/endpoints"
+	"istio.io/istio/pkg/config/host"
 	"istio.io/istio/pkg/config/schema/kind"
+	"istio.io/istio/pkg/log"
 	"istio.io/istio/pkg/util/hash"
 )
 
@@ -53,7 +55,9 @@ type clusterCache struct {
 	downstreamAuto bool
 	supportsIPv4   bool
 
-	hasWaypointServices bool
+	// SOLO ingress/sidecar use waypoint needs to apply waypoint config for LB
+	waypointService         *model.Service
+	waypointDestinationRule *model.ConsolidatedDestRule
 
 	// dependent configs
 	service         *model.Service
@@ -89,7 +93,9 @@ func (t *clusterCache) Key() any {
 	h.Write(Separator)
 	h.WriteString(strconv.FormatBool(t.hbone))
 	h.Write(Separator)
-	h.WriteString(strconv.FormatBool(t.hasWaypointServices))
+	if t.waypointService != nil {
+		h.WriteString(t.waypointService.Hostname.String())
+	}
 	h.Write(Separator)
 
 	if t.proxyView != nil {
@@ -110,6 +116,13 @@ func (t *clusterCache) Key() any {
 	h.Write(Separator)
 
 	for _, dr := range t.destinationRule.GetFrom() {
+		h.WriteString(dr.Name)
+		h.Write(Slash)
+		h.WriteString(dr.Namespace)
+	}
+	h.Write(Separator)
+
+	for _, dr := range t.waypointDestinationRule.GetFrom() {
 		h.WriteString(dr.Name)
 		h.Write(Slash)
 		h.WriteString(dr.Namespace)
@@ -195,7 +208,19 @@ func buildClusterKey(service *model.Service, port *model.Port, cb *ClusterBuilde
 			service, dr,
 		)
 	}
-	waypointServices := len(cb.req.Push.ServicesWithWaypoint(service.Attributes.Namespace+"/"+string(service.Hostname))) > 0
+
+	// SOLO envoy -> waypoint interop
+	var waypointService *model.Service
+	var waypointDestinationRule *model.ConsolidatedDestRule
+	if waypointServices := cb.req.Push.ServicesWithWaypoint(service.Attributes.Namespace + "/" + string(service.Hostname)); len(waypointServices) > 0 {
+		waypointHostname := host.Name(waypointServices[0].WaypointHostname)
+		waypointService = proxy.SidecarScope.GetService(waypointHostname)
+		waypointDestinationRule = proxy.SidecarScope.DestinationRule(model.TrafficDirectionOutbound, proxy, waypointHostname)
+		if waypointService == nil {
+			log.Debugf("cds: failed to find waypoint %s attached to service %s", waypointHostname, service.Hostname)
+		}
+	}
+
 	return clusterCache{
 		clusterName:             clusterName,
 		proxyVersion:            cb.proxyVersion.String(),
@@ -216,6 +241,8 @@ func buildClusterKey(service *model.Service, port *model.Port, cb *ClusterBuilde
 		serviceAccounts:         cb.req.Push.ServiceAccounts(service.Hostname, service.Attributes.Namespace),
 		endpointBuilder:         eb,
 
-		hasWaypointServices: waypointServices,
+		// SOLO envoy -> waypoint interop
+		waypointService:         waypointService,
+		waypointDestinationRule: waypointDestinationRule,
 	}
 }

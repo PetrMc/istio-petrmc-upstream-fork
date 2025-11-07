@@ -74,6 +74,10 @@ type EndpointBuilder struct {
 	nodeType               model.NodeType
 	failoverPriorityLabels []byte
 
+	// SOLO ingress/sidecar use waypoint needs to apply waypoint config for LB
+	waypointEndpointBuilder *EndpointBuilder
+	ingressUseWaypoint      bool
+
 	// These fields are provided for convenience only
 	subsetName   string
 	subsetLabels labels.Instance
@@ -109,6 +113,7 @@ func NewCDSEndpointBuilder(
 	dir model.TrafficDirection, subsetName string, hostname host.Name, port int,
 	service *model.Service, dr *model.ConsolidatedDestRule,
 ) *EndpointBuilder {
+	waypointEndpointBuilder, ingressUseWaypoint := maybeBuildWaypointEndpointBuilder(service, proxy, push)
 	b := EndpointBuilder{
 		clusterName:     clusterName,
 		network:         proxy.Metadata.Network,
@@ -120,6 +125,10 @@ func NewCDSEndpointBuilder(
 		clusterLocal:    push.IsClusterLocal(service),
 		nodeType:        proxy.Type,
 
+		// SOLO envoy -> waypoint interop
+		waypointEndpointBuilder: waypointEndpointBuilder,
+		ingressUseWaypoint:      ingressUseWaypoint,
+
 		subsetName: subsetName,
 		hostname:   hostname,
 		port:       port,
@@ -130,6 +139,33 @@ func NewCDSEndpointBuilder(
 	b.populateSubsetInfo()
 	b.populateFailoverPriorityLabels()
 	return &b
+}
+
+// SOLO envoy -> waypoint interop: create waypoint endpoint builder early for cache key
+func maybeBuildWaypointEndpointBuilder(service *model.Service, proxy *model.Proxy, push *model.PushContext) (*EndpointBuilder, bool) {
+	if service == nil || push == nil {
+		return nil, false
+	}
+	waypointServices := push.ServicesWithWaypoint(service.Attributes.Namespace + "/" + string(service.Hostname))
+	if len(waypointServices) == 0 {
+		return nil, false
+	}
+	svcInfo := waypointServices[0]
+	if len(waypointServices) > 1 {
+		// should never happen
+		log.Warnf("eds: multiple services found for waypoint %s, using the first one", service.Hostname)
+	}
+	waypointClusterName := model.BuildSubsetKey(
+		model.TrafficDirectionOutbound,
+		"",
+		host.Name(svcInfo.WaypointHostname),
+		int(svcInfo.Service.GetWaypoint().GetHboneMtlsPort()),
+	)
+	eb := NewEndpointBuilder(waypointClusterName, proxy, push)
+	if eb.service == nil {
+		log.Debugf("eds: failed to find waypoint %s attached to service %s", waypointServices[0].WaypointHostname, service.Hostname)
+	}
+	return &eb, svcInfo.IngressUseWaypoint
 }
 
 func (b *EndpointBuilder) servicePort(port int) *model.Port {
@@ -258,6 +294,14 @@ func (b *EndpointBuilder) WriteHash(h hash.Hash) {
 		h.WriteString(b.proxyView.String())
 	}
 	h.Write(Separator)
+
+	// SOLO envoy -> waypoint interop: include waypoint endpoint builder in cache key
+	// and setting to use waypoint
+	if b.waypointEndpointBuilder != nil {
+		b.waypointEndpointBuilder.WriteHash(h)
+	}
+	h.Write(Separator)
+	h.WriteString(strconv.FormatBool(b.ingressUseWaypoint))
 }
 
 func (b *EndpointBuilder) Cacheable() bool {
@@ -347,10 +391,8 @@ func (b *EndpointBuilder) BuildClusterLoadAssignment(endpointIndex *model.Endpoi
 	// E/W gateway.
 	if (features.EnableIngressWaypointRouting && b.nodeType == model.Router) ||
 		(features.EnableSidecarWaypointInterop && b.nodeType == model.SidecarProxy) {
-		if waypointEps, f := b.findServiceWaypoint(endpointIndex); f {
-			// endpoints are from waypoint service but the envoy endpoint is different envoy cluster
-			locLbEps := b.generate(waypointEps, true)
-			return b.createClusterLoadAssignment(locLbEps)
+		if claWithWaypointEps, f := b.buildClusterLoadAssignmentWithWaypoint(endpointIndex); f {
+			return claWithWaypointEps
 		}
 	}
 
@@ -914,36 +956,55 @@ func getSubSetLabels(dr *v1alpha3.DestinationRule, subsetName string) labels.Ins
 	return nil
 }
 
-// For services that have a waypoint, we want to send to the waypoints rather than the service endpoints.
-// Lookup the service, find its waypoint, then find the waypoint's endpoints.
-func (b *EndpointBuilder) findServiceWaypoint(endpointIndex *model.EndpointIndex) ([]*model.IstioEndpoint, bool) {
+// buildClusterLoadAssignmentWithWaypoint builds a CLA for services that have a waypoint.
+// For services with waypoints, we send to the waypoint endpoints rather than the service endpoints.
+// Returns the CLA and true if waypoint is used, or nil and false otherwise.
+func (b *EndpointBuilder) buildClusterLoadAssignmentWithWaypoint(endpointIndex *model.EndpointIndex) (*endpoint.ClusterLoadAssignment, bool) {
+	// SOLO envoy -> waypoint interop: use pre-fetched waypoint endpoint builder
+	if b.waypointEndpointBuilder == nil {
+		// No waypoint for this service
+		return nil, false
+	}
+
 	if !b.service.HasAddressOrAssigned(b.proxy.Metadata.ClusterID) {
 		// No VIP, so skip this. Currently, waypoints can only accept VIP traffic
 		return nil, false
 	}
 
-	svcs := b.push.ServicesWithWaypoint(b.service.Attributes.Namespace + "/" + string(b.hostname))
-	if len(svcs) == 0 {
-		// Service isn't captured by a waypoint
-		return nil, false
-	}
-	if len(svcs) > 1 {
-		log.Warnf("unexpected multiple waypoint services for %v", b.clusterName)
-	}
-	svc := svcs[0]
 	// They need to explicitly opt-in on the service to send from ingress -> waypoint
-	if b.nodeType == model.Router && !svc.IngressUseWaypoint && !isEastWestGateway(b.proxy) {
+	if b.nodeType == model.Router && !b.ingressUseWaypoint && !isEastWestGateway(b.proxy) {
 		return nil, false
 	}
-	waypointClusterName := model.BuildSubsetKey(
-		model.TrafficDirectionOutbound,
-		"",
-		host.Name(svc.WaypointHostname),
-		int(svc.Service.GetWaypoint().GetHboneMtlsPort()),
-	)
-	endpointBuilder := NewEndpointBuilder(waypointClusterName, b.proxy, b.push)
-	waypointEndpoints, _ := endpointBuilder.snapshotEndpointsForPort(endpointIndex)
-	return waypointEndpoints, true
+
+	// build a CLA for the waypoint cluster, but rename it to use it for the service
+	endpointBuilder := b.waypointEndpointBuilder
+	eps, ok := endpointBuilder.snapshotEndpointsForPort(endpointIndex)
+	if !ok || len(eps) == 0 {
+		// no endpoints, we might have a remote network waypoint but the other cluster
+		// must make the decision to send traffic there
+		return nil, false
+	}
+	localityLbEndpoints := b.generate(eps, true) // use `b` here so we generate `connect_originate` addresses
+	cla := b.createClusterLoadAssignment(localityLbEndpoints)
+
+	// apply lb/failover in terms of the `endpointBuilder` so we consider waypoint config
+	enableFailover, lb := getOutlierDetectionAndLoadBalancerSettings(endpointBuilder.DestinationRule(), endpointBuilder.port, endpointBuilder.subsetName)
+	lbSetting, forceFailover := loadbalancer.GetLocalityLbSetting(b.push.Mesh.GetLocalityLbSetting(), lb.GetLocalityLbSetting(), endpointBuilder.service)
+	enableFailover = enableFailover || forceFailover
+	if lbSetting != nil {
+		// Make a shallow copy of the cla as we are mutating the endpoints with priorities/weights relative to the calling proxy
+		cla = util.CloneClusterLoadAssignment(cla)
+		wrappedLocalityLbEndpoints := make([]*loadbalancer.WrappedLocalityLbEndpoints, len(localityLbEndpoints))
+		for i := range localityLbEndpoints {
+			wrappedLocalityLbEndpoints[i] = &loadbalancer.WrappedLocalityLbEndpoints{
+				IstioEndpoints:      localityLbEndpoints[i].istioEndpoints,
+				LocalityLbEndpoints: cla.Endpoints[i],
+			}
+		}
+		loadbalancer.ApplyLocalityLoadBalancer(cla, wrappedLocalityLbEndpoints, b.locality, b.proxy.Labels, lbSetting, enableFailover)
+	}
+
+	return cla, true
 }
 
 func (b *EndpointBuilder) snapshotEndpointsForPort(endpointIndex *model.EndpointIndex) ([]*model.IstioEndpoint, bool) {

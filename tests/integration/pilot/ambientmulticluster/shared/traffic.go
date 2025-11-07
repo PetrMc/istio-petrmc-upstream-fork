@@ -162,7 +162,7 @@ func TestFromSidecar(t TrafficContext) {
 	appsNs := t.Apps.Namespace
 	domainSuffix := t.DomainSuffix
 
-	call := func(name string, c echo.Checker) {
+	call := func(t framework.TestContext, name string, c echo.Checker) {
 		t.Helper()
 		t.NewSubTestf("to %v", name).Run(func(t framework.TestContext) {
 			if c == nil {
@@ -181,23 +181,23 @@ func TestFromSidecar(t TrafficContext) {
 	}
 
 	// No global name to call! So this should fail
-	call(ServiceLocal, nil)
-	call(ServiceLocalGlobal, check.And(check.OK(), hitLocalCluster))
-	call(ServiceRemoteGlobal, check.And(check.OK(), hitRemoteClusters(t)))
-	call(ServiceAllGlobal, check.And(check.OK(), hitAllClusters(t)))
-	call(ServiceGlobalTakeover, check.And(check.OK(), hitAllClusters(t)))
+	call(t, ServiceLocal, nil)
+	call(t, ServiceLocalGlobal, check.And(check.OK(), hitLocalCluster))
+	call(t, ServiceRemoteGlobal, check.And(check.OK(), hitRemoteClusters(t)))
+	call(t, ServiceAllGlobal, check.And(check.OK(), hitAllClusters(t)))
+	call(t, ServiceGlobalTakeover, check.And(check.OK(), hitAllClusters(t)))
 
 	// Calls should always go to the local waypoint, then may be sent either local or remote.
-	call(ServiceLocalWaypoint, WaypointLocalClusterToAll)
+	call(t, ServiceLocalWaypoint, WaypointLocalClusterToAll)
 
-	call(ServiceRemoteWaypoint, check.And(
+	call(t, ServiceRemoteWaypoint, check.And(
 		check.OK(),
 		hitAllClusters(t),
 		WaypointLocalNetworkToAll,
 	))
 
 	// We should hit the remote waypoint and skip policy on the local sidecar
-	call(ServiceCrossNetworkOnlyWaypoint, check.And(
+	call(t, ServiceCrossNetworkOnlyWaypoint, check.And(
 		check.OK(),
 		hitRemoteNetwork(t),
 		CheckTraversedRemoteNetworkWaypoint(),
@@ -206,10 +206,27 @@ func TestFromSidecar(t TrafficContext) {
 	))
 
 	// Calls should always go to the local waypoint -- they should always skip the remote waypoint
-	call(ServiceAllWaypoint, WaypointLocalNetworkToAll)
+	call(t, ServiceAllWaypoint, WaypointLocalNetworkToAll)
 
 	// Should hit remote and local
-	call(ServiceSidecar, check.And(check.OK(), hitAllClusters(t)))
+	call(t, ServiceSidecar, check.And(check.OK(), hitAllClusters(t)))
+
+	// Test PreferClose traffic distribution
+	// Note: Node locality labels are set during test setup (see main_test.go SetupNodeLocality)
+	// so pods in each cluster automatically get different locality from their nodes
+	t.NewSubTest("prefer-close-waypoint").Run(func(t framework.TestContext) {
+		// Set traffic distribution to PreferClose on the waypoint Gateway itself
+		SetTrafficDistributionOnGateway(t, WaypointDefault, appsNs.Name(), "PreferClose")
+		// Set traffic distribution on the all-waypoint service that uses the waypoint
+		SetTrafficDistributionOnService(t, ServiceAllWaypoint, appsNs.Name(), "PreferClose")
+
+		// Traffic should only use local waypoint and only reach local cluster backends
+		call(t, ServiceAllWaypoint, check.And(
+			check.OK(),
+			hitLocalCluster,
+			CheckAllTraversedWaypointIn(LocalCluster),
+		))
+	})
 }
 
 func TestFromGateway(t TrafficContext) {
@@ -348,6 +365,23 @@ spec:
 
 		// Should hit remote and local
 		call(t, ServiceSidecar, check.And(check.OK(), hitAllClusters(t)))
+
+		// Test that this envoy proxy respects PreferClose when routing to waypoints
+		// Note: Node locality labels are set during test setup (see main_test.go SetupNodeLocality)
+		// so pods in each cluster automatically get different locality from their nodes
+		t.NewSubTest("prefer-close-waypoint").Run(func(t framework.TestContext) {
+			// Set traffic distribution to PreferClose on the waypoint Gateway itself
+			SetTrafficDistributionOnGateway(t, WaypointDefault, apps.Namespace.Name(), "PreferClose")
+			// Set traffic distribution on the all-waypoint service that uses the waypoint
+			SetTrafficDistributionOnService(t, ServiceAllWaypoint, apps.Namespace.Name(), "PreferClose")
+
+			// Traffic should only use local waypoint and only reach local cluster backends
+			call(t, ServiceAllWaypoint, check.And(
+				check.OK(),
+				hitLocalCluster,
+				CheckAllTraversedWaypointIn(LocalCluster),
+			))
+		})
 	})
 }
 
@@ -426,15 +460,20 @@ func RunAllTrafficTests(t framework.TestContext, apps *EchoDeployments) {
 		t.Errorf("apps must be set and deployed before running traffic tests")
 	}
 	RunCase := func(t framework.TestContext, name string, domainSuffix string, f func(t TrafficContext)) {
+		// always make sure this is set at the start of each test
+		SetTrafficDistributionOnGateway(t, WaypointDefault, apps.Namespace.Name(), "Any")
+
 		t.NewSubTest(name).Run(func(t framework.TestContext) {
 			f(TrafficContext{TestContext: t, Apps: *apps, DomainSuffix: domainSuffix})
 		})
 	}
 
-	// Use the default domain suffix (mesh.internal)
-	RunCase(t, "test-from-ztunnel", defaultDomain, TestFromZtunnel)
-	RunCase(t, "test-from-sidecar", defaultDomain, TestFromSidecar)
-	RunCase(t, "test-from-gateway", defaultDomain, TestFromGateway)
+	t.NewSubTest("default mode").Run(func(t framework.TestContext) {
+		// Use the default domain suffix (mesh.internal)
+		RunCase(t, "test-from-ztunnel", defaultDomain, TestFromZtunnel)
+		RunCase(t, "test-from-sidecar", defaultDomain, TestFromSidecar)
+		RunCase(t, "test-from-gateway", defaultDomain, TestFromGateway)
+	})
 
 	t.NewSubTest("single segment").Run(func(t framework.TestContext) {
 		segmentName := "test-segment"
@@ -448,9 +487,6 @@ func RunAllTrafficTests(t framework.TestContext, apps *EchoDeployments) {
 		if err := SetupHTTPRoutesForSegment(t, apps.Namespace, segmentName, segmentDomain); err != nil {
 			t.Fatalf("Failed to setup HTTPRoutes for segment: %v", err)
 		}
-
-		// Wait for config propagation
-		time.Sleep(5 * time.Second)
 
 		// tests are unchanged except we send traffic to `test.mesh` instead of `mesh.internal`
 		RunCase(t, "test-from-ztunnel", segmentDomain, TestFromZtunnel)

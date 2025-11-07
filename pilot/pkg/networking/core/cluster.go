@@ -379,8 +379,8 @@ func (configgen *ConfigGeneratorImpl) buildOutboundClusters(cb *ClusterBuilder, 
 			// which will replace the endpoints with the waypoint's.
 			// Currently, we do not support waypoint -> waypoint, so skip this for waypoints. We should consider how we want this
 			// in the future.
-			if features.EnableSidecarWaypointInterop && cb.proxyType != model.Waypoint &&
-				(discoveryType == cluster.Cluster_STRICT_DNS || discoveryType == cluster.Cluster_LOGICAL_DNS) && clusterKey.hasWaypointServices {
+			if shouldDoWaypointInterop(cb.proxyType) &&
+				(discoveryType == cluster.Cluster_STRICT_DNS || discoveryType == cluster.Cluster_LOGICAL_DNS) && clusterKey.waypointService != nil {
 				discoveryType = cluster.Cluster_EDS
 			}
 			// END SOLO
@@ -407,8 +407,19 @@ func (configgen *ConfigGeneratorImpl) buildOutboundClusters(cb *ClusterBuilder, 
 				}
 			}
 
-			subsetClusters := cb.applyDestinationRule(defaultCluster, DefaultClusterMode, service, port,
-				clusterKey.endpointBuilder, clusterKey.destinationRule.GetRule(), clusterKey.serviceAccounts)
+			svcForDr := clusterKey.service
+			drToApply := clusterKey.destinationRule.GetRule()
+			if shouldDoWaypointInterop(cb.proxyType) && clusterKey.waypointService != nil {
+				// the endpoints we're sending to are that of the waypoint
+				// use the waypoint's config for DR/LoadBalancing
+				svcForDr = clusterKey.waypointService
+				drToApply = nil // don't apply Service DR to Waypoint
+				if clusterKey.waypointDestinationRule != nil {
+					drToApply = clusterKey.waypointDestinationRule.GetRule()
+				}
+			}
+			subsetClusters := cb.applyDestinationRule(defaultCluster, DefaultClusterMode, svcForDr, port,
+				clusterKey.endpointBuilder, drToApply, clusterKey.serviceAccounts)
 
 			if service.UseInferenceSemantics() && proxy.Type == model.Router {
 				cb.applyOverrideHostPolicy(defaultCluster)
@@ -433,6 +444,16 @@ func (configgen *ConfigGeneratorImpl) buildOutboundClusters(cb *ClusterBuilder, 
 	}
 
 	return resources, cacheStats{hits: hit, miss: miss}
+}
+
+func shouldDoWaypointInterop(nodeType model.NodeType) bool {
+	if features.EnableSidecarWaypointInterop && nodeType == model.SidecarProxy {
+		return true
+	}
+	if features.EnableIngressWaypointRouting && nodeType == model.Router {
+		return true
+	}
+	return false
 }
 
 type clusterPatcher struct {

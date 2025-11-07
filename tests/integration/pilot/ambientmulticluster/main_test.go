@@ -172,6 +172,9 @@ values:
 				return nil
 			}, retry.Timeout(1*time.Minute))
 		}).
+		// Label nodes with different regions/zones per cluster before deploying workloads
+		// This allows locality-based routing tests to work properly
+		Setup(shared.SetupNodeLocality).
 		Setup(func(t resource.Context) error {
 			return shared.SetupApps(t, apps, false)
 		}).

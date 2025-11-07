@@ -7,6 +7,7 @@
 package shared
 
 import (
+	"context"
 	"fmt"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -14,6 +15,7 @@ import (
 
 	apiannotation "istio.io/api/annotation"
 	"istio.io/api/label"
+	"istio.io/istio/pkg/kube/controllers"
 	"istio.io/istio/pkg/test/framework"
 	"istio.io/istio/pkg/test/framework/components/ambient"
 	"istio.io/istio/pkg/test/framework/components/cluster"
@@ -186,7 +188,9 @@ func SetupApps(t resource.Context, apps *EchoDeployments, nsServiceScope bool) e
 		if _, err := ambient.NewWaypointProxyForCluster(t, apps.Namespace, WaypointDefault, c); err != nil {
 			return err
 		}
+	}
 
+	for _, c := range t.Clusters() {
 		for _, svc := range []string{
 			ServiceLocalWaypoint,
 			ServiceRemoteWaypoint,
@@ -231,6 +235,53 @@ spec:
 			if err != nil {
 				return err
 			}
+		}
+	}
+
+	return nil
+}
+
+// SetupNodeLocality labels nodes in each cluster with different topology.kubernetes.io/region and zone labels.
+// This must be called before deploying workloads so pods pick up locality from their nodes.
+func SetupNodeLocality(t resource.Context) error {
+	ctx := context.Background()
+
+	// Map cluster names to their locality (region.zone format)
+	clusterLocalities := map[string]struct{ region, zone string }{
+		LocalCluster:         {region: "region-local", zone: "zone-local"},
+		RemoteFlatCluster:    {region: "region-flat", zone: "zone-flat"},
+		RemoteNetworkCluster: {region: "region-x-net", zone: "zone-x-net"},
+	}
+
+	for _, c := range t.Clusters() {
+		locality, ok := clusterLocalities[c.Name()]
+		if !ok {
+			scopes.Framework.Infof("Skipping locality setup for unknown cluster %s", c.Name())
+			continue
+		}
+
+		// Get all nodes in the cluster
+		nodes, err := c.Kube().CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+		if err != nil {
+			return fmt.Errorf("failed to list nodes in cluster %s: %w", c.Name(), err)
+		}
+
+		// Label each node with region and zone
+		for _, node := range nodes.Items {
+			labels := node.GetLabels()
+			if labels == nil {
+				labels = make(map[string]string)
+			}
+			labels["topology.kubernetes.io/region"] = locality.region
+			labels["topology.kubernetes.io/zone"] = locality.zone
+
+			node.SetLabels(labels)
+			_, err := c.Kube().CoreV1().Nodes().Update(ctx, &node, metav1.UpdateOptions{})
+			if err != nil {
+				return fmt.Errorf("failed to label node %s in cluster %s: %w", node.Name, c.Name(), err)
+			}
+			scopes.Framework.Infof("Labeled node %s in cluster %s with region=%s, zone=%s",
+				node.Name, c.Name(), locality.region, locality.zone)
 		}
 	}
 
@@ -445,5 +496,83 @@ func (s ServiceSettings) ToConfig() echo.Config {
 		ServiceAnnotations:   annos,
 		Ports:                ports.All(),
 		Subsets:              []echo.SubsetConfig{{Replicas: replicas, Labels: labels}},
+	}
+}
+
+// SetTrafficDistributionOnService sets the networking.istio.io/traffic-distribution annotation on a Service resource.
+func SetTrafficDistributionOnService(t framework.TestContext, name, ns string, distribution string) {
+	for _, c := range t.Clusters() {
+		// Fetch the current value
+		svc, err := c.Kube().CoreV1().Services(ns).Get(context.TODO(), name, metav1.GetOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		oldAnnotation := ""
+		if svc.Annotations != nil {
+			oldAnnotation = svc.Annotations["networking.istio.io/traffic-distribution"]
+		}
+
+		set := func(dist string) error {
+			var annotation string
+			if dist != "" {
+				annotation = fmt.Sprintf(`"networking.istio.io/traffic-distribution":%q`, dist)
+			} else {
+				annotation = `"networking.istio.io/traffic-distribution":null`
+			}
+
+			patch := []byte(fmt.Sprintf(`{"metadata":{"annotations":{%s}}}`, annotation))
+			_, err := c.Kube().CoreV1().Services(ns).Patch(context.TODO(), name, types.MergePatchType, patch, metav1.PatchOptions{})
+			return controllers.IgnoreNotFound(err)
+		}
+
+		if err := set(distribution); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			if err := set(oldAnnotation); err != nil {
+				scopes.Framework.Errorf("failed resetting traffic distribution for Service %s", name)
+			}
+		})
+	}
+}
+
+// SetTrafficDistributionOnGateway sets the networking.istio.io/traffic-distribution annotation in spec.infrastructure.annotations
+// on a Gateway resource so it propagates to the Gateway proxy.
+func SetTrafficDistributionOnGateway(t framework.TestContext, name, ns string, distribution string) {
+	for _, c := range t.Clusters() {
+		// Fetch the current value
+		gw, err := c.GatewayAPI().GatewayV1().Gateways(ns).Get(context.TODO(), name, metav1.GetOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		oldAnnotation := ""
+		if gw.Spec.Infrastructure != nil && gw.Spec.Infrastructure.Annotations != nil {
+			if val, ok := gw.Spec.Infrastructure.Annotations["networking.istio.io/traffic-distribution"]; ok {
+				oldAnnotation = string(val)
+			}
+		}
+
+		set := func(dist string) error {
+			var annotation string
+			if dist != "" {
+				annotation = fmt.Sprintf(`"networking.istio.io/traffic-distribution":%q`, dist)
+			} else {
+				annotation = `"networking.istio.io/traffic-distribution":null`
+			}
+
+			// Set annotation in spec.infrastructure.annotations for Gateway
+			patch := []byte(fmt.Sprintf(`{"spec":{"infrastructure":{"annotations":{%s}}}}`, annotation))
+			_, err := c.GatewayAPI().GatewayV1().Gateways(ns).Patch(context.TODO(), name, types.MergePatchType, patch, metav1.PatchOptions{})
+			return controllers.IgnoreNotFound(err)
+		}
+
+		if err := set(distribution); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			if err := set(oldAnnotation); err != nil {
+				scopes.Framework.Errorf("failed resetting traffic distribution for Gateway %s", name)
+			}
+		})
 	}
 }
