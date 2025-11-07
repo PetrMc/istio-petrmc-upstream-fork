@@ -47,6 +47,8 @@ type peerCluster struct {
 	synced    *atomic.Bool
 	connected *atomic.Bool
 	locality  string
+
+	drainingWeight uint32
 }
 
 func (s *peerCluster) run() {
@@ -143,6 +145,7 @@ func newPeerCluster(
 		connected:          atomic.NewBool(false),
 		locality:           gateway.Locality,
 		segmentResolved:    make(chan struct{}),
+		drainingWeight:     gateway.DrainingWeight,
 	}
 
 	federatedServiceAdscHandler := adsc.Register(func(

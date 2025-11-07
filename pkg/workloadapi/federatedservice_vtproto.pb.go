@@ -117,6 +117,9 @@ func (this *FederatedService) EqualVT(that *FederatedService) bool {
 	if !(*wrapperspb.BoolValue)(this.IngressUseWaypoint).EqualVT((*wrapperspb.BoolValue)(that.IngressUseWaypoint)) {
 		return false
 	}
+	if !(*wrapperspb.UInt32Value)(this.DrainingWeight).EqualVT((*wrapperspb.UInt32Value)(that.DrainingWeight)) {
+		return false
+	}
 	return string(this.unknownFields) == string(that.unknownFields)
 }
 
@@ -225,6 +228,16 @@ func (m *FederatedService) MarshalToSizedBufferVTStrict(dAtA []byte) (int, error
 	if m.unknownFields != nil {
 		i -= len(m.unknownFields)
 		copy(dAtA[i:], m.unknownFields)
+	}
+	if m.DrainingWeight != nil {
+		size, err := (*wrapperspb.UInt32Value)(m.DrainingWeight).MarshalToSizedBufferVTStrict(dAtA[:i])
+		if err != nil {
+			return 0, err
+		}
+		i -= size
+		i = protohelpers.EncodeVarint(dAtA, i, uint64(size))
+		i--
+		dAtA[i] = 0x72
 	}
 	if m.IngressUseWaypoint != nil {
 		size, err := (*wrapperspb.BoolValue)(m.IngressUseWaypoint).MarshalToSizedBufferVTStrict(dAtA[:i])
@@ -474,6 +487,10 @@ func (m *FederatedService) SizeVT() (n int) {
 	}
 	if m.IngressUseWaypoint != nil {
 		l = (*wrapperspb.BoolValue)(m.IngressUseWaypoint).SizeVT()
+		n += 1 + l + protohelpers.SizeOfVarint(uint64(l))
+	}
+	if m.DrainingWeight != nil {
+		l = (*wrapperspb.UInt32Value)(m.DrainingWeight).SizeVT()
 		n += 1 + l + protohelpers.SizeOfVarint(uint64(l))
 	}
 	n += len(m.unknownFields)

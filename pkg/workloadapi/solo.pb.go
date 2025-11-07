@@ -83,11 +83,13 @@ func (x *SoloServiceExtension) GetIngressUseWaypoint() *wrapperspb.BoolValue {
 	return nil
 }
 
-// SoloServiceExtension are internal extension points (optionally) added to Workload objects
+// SoloWorkloadExtension are internal extension points (optionally) added to Workload objects
 type SoloWorkloadExtension struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The amount of traffic that should be drained from this workload.
+	DrainingWeight *wrapperspb.UInt32Value `protobuf:"bytes,1,opt,name=draining_weight,json=drainingWeight,proto3" json:"draining_weight,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *SoloWorkloadExtension) Reset() {
@@ -120,14 +122,22 @@ func (*SoloWorkloadExtension) Descriptor() ([]byte, []int) {
 	return file_workloadapi_solo_proto_rawDescGZIP(), []int{1}
 }
 
+func (x *SoloWorkloadExtension) GetDrainingWeight() *wrapperspb.UInt32Value {
+	if x != nil {
+		return x.DrainingWeight
+	}
+	return nil
+}
+
 var File_workloadapi_solo_proto protoreflect.FileDescriptor
 
 const file_workloadapi_solo_proto_rawDesc = "" +
 	"\n" +
 	"\x16workloadapi/solo.proto\x12\x0eistio.workload\x1a\x19google/protobuf/any.proto\x1a\x1egoogle/protobuf/wrappers.proto\"d\n" +
 	"\x14SoloServiceExtension\x12L\n" +
-	"\x14ingress_use_waypoint\x18\x01 \x01(\v2\x1a.google.protobuf.BoolValueR\x12ingressUseWaypoint\"\x17\n" +
-	"\x15SoloWorkloadExtensionB\x11Z\x0fpkg/workloadapib\x06proto3"
+	"\x14ingress_use_waypoint\x18\x01 \x01(\v2\x1a.google.protobuf.BoolValueR\x12ingressUseWaypoint\"^\n" +
+	"\x15SoloWorkloadExtension\x12E\n" +
+	"\x0fdraining_weight\x18\x01 \x01(\v2\x1c.google.protobuf.UInt32ValueR\x0edrainingWeightB\x11Z\x0fpkg/workloadapib\x06proto3"
 
 var (
 	file_workloadapi_solo_proto_rawDescOnce sync.Once
@@ -143,17 +153,19 @@ func file_workloadapi_solo_proto_rawDescGZIP() []byte {
 
 var file_workloadapi_solo_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
 var file_workloadapi_solo_proto_goTypes = []any{
-	(*SoloServiceExtension)(nil),  // 0: istio.workload.SoloServiceExtension
-	(*SoloWorkloadExtension)(nil), // 1: istio.workload.SoloWorkloadExtension
-	(*wrapperspb.BoolValue)(nil),  // 2: google.protobuf.BoolValue
+	(*SoloServiceExtension)(nil),   // 0: istio.workload.SoloServiceExtension
+	(*SoloWorkloadExtension)(nil),  // 1: istio.workload.SoloWorkloadExtension
+	(*wrapperspb.BoolValue)(nil),   // 2: google.protobuf.BoolValue
+	(*wrapperspb.UInt32Value)(nil), // 3: google.protobuf.UInt32Value
 }
 var file_workloadapi_solo_proto_depIdxs = []int32{
 	2, // 0: istio.workload.SoloServiceExtension.ingress_use_waypoint:type_name -> google.protobuf.BoolValue
-	1, // [1:1] is the sub-list for method output_type
-	1, // [1:1] is the sub-list for method input_type
-	1, // [1:1] is the sub-list for extension type_name
-	1, // [1:1] is the sub-list for extension extendee
-	0, // [0:1] is the sub-list for field type_name
+	3, // 1: istio.workload.SoloWorkloadExtension.draining_weight:type_name -> google.protobuf.UInt32Value
+	2, // [2:2] is the sub-list for method output_type
+	2, // [2:2] is the sub-list for method input_type
+	2, // [2:2] is the sub-list for extension type_name
+	2, // [2:2] is the sub-list for extension extendee
+	0, // [0:2] is the sub-list for field type_name
 }
 
 func init() { file_workloadapi_solo_proto_init() }

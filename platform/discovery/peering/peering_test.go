@@ -2166,6 +2166,89 @@ func TestAutomatedPeering(t *testing.T) {
 	}
 }
 
+func TestDraining(t *testing.T) {
+	c1 := NewCluster(t, "c1", "c1")
+	c2 := NewCluster(t, "c2", "c2")
+	c1.CreateService("svc1", true, nil)
+	c2.CreateService("svc1", true, nil)
+
+	ewGw1 := c1.CreateOrUpdateEastWestGateway(
+		"istio-eastwest",
+		constants.IstioSystemNamespace,
+		nil,
+	)
+	ewGw2 := c2.CreateOrUpdateEastWestGateway(
+		"istio-eastwest",
+		constants.IstioSystemNamespace,
+		nil,
+	)
+
+	checkDrainAnno := func(c *Cluster, weName string, drainWeight string) {
+		t.Helper()
+		fetch := func() string {
+			we := c.WorkloadEntries.Get(weName, peering.PeeringNamespace)
+			return we.Annotations[peering.DrainingWeightAnnotation]
+		}
+		assert.EventuallyEqual(c.t, fetch, drainWeight)
+	}
+	updateDrainAnno := func(c *Cluster, gw *k8sbeta.Gateway, drainWeight string) {
+		obj := c.Gateways.Get(gw.Name, gw.Namespace)
+		if obj.Annotations == nil {
+			obj.Annotations = map[string]string{}
+		}
+		obj.Annotations[peering.DrainingWeightAnnotation] = drainWeight
+		c.Gateways.Update(obj)
+	}
+
+	// C1 -> C2
+	peer2 := c2.GeneratedPeerGateway(ewGw2)
+	c1.CreateGateway(peer2)
+	c1WEName := "autogen.c2.default.svc1"
+	AssertWE(c1, DesiredWE{Name: c1WEName})
+	checkDrainAnno(c1, c1WEName, "")
+
+	updateDrainAnno(c2, ewGw2, "10")
+	checkDrainAnno(c1, c1WEName, "10")
+
+	updateDrainAnno(c1, peer2, "100")
+	checkDrainAnno(c1, c1WEName, "100")
+
+	AssertWE(c2)
+
+	// C1 <-> C2
+	peer1 := c1.GeneratedPeerGateway(ewGw1)
+	c2.CreateGateway(peer1)
+
+	AssertWE(c1, DesiredWE{Name: "autogen.c2.default.svc1"})
+	checkDrainAnno(c1, c1WEName, "100")
+
+	c2WEName := "autogen.c1.default.svc1"
+	AssertWE(c2, DesiredWE{Name: c2WEName})
+	checkDrainAnno(c2, c2WEName, "")
+
+	updateDrainAnno(c2, peer1, "10")
+	checkDrainAnno(c2, c2WEName, "10")
+
+	updateDrainAnno(c1, ewGw1, "100")
+	checkDrainAnno(c2, c2WEName, "100")
+
+	// C2 -> C1
+	c1.DeleteGateway(peer2.Name, peer2.Namespace)
+	AssertWE(c1)
+
+	AssertWE(c2, DesiredWE{Name: "autogen.c1.default.svc1"})
+	checkDrainAnno(c2, c2WEName, "100")
+
+	updateDrainAnno(c2, peer1, "50")
+	updateDrainAnno(c1, ewGw1, "")
+	checkDrainAnno(c2, c2WEName, "50")
+
+	// All disconnected
+	c2.DeleteGateway(peer1.Name, peer1.Namespace)
+	AssertWE(c1)
+	AssertWE(c2)
+}
+
 func init() {
 	// With so many controller copies this is super noisy
 	log.FindScope("krt").SetOutputLevel(log.WarnLevel)
@@ -2596,15 +2679,15 @@ func makeLinkGateway(
 }
 
 func (c *Cluster) CreateGateway(gw *k8sbeta.Gateway) {
-	clienttest.NewWriter[*k8sbeta.Gateway](c.t, c.Kube).CreateOrUpdate(gw)
+	c.Gateways.CreateOrUpdate(gw)
 }
 
 func (c *Cluster) DeleteGateway(name, namespace string) {
-	clienttest.NewWriter[*k8sbeta.Gateway](c.t, c.Kube).Delete(name, namespace)
+	c.Gateways.Delete(name, namespace)
 }
 
 func (c *Cluster) DisconnectFrom(other *Cluster) {
-	clienttest.NewWriter[*k8sbeta.Gateway](c.t, c.Kube).Delete("peer-to-"+other.ClusterName, "istio-system")
+	c.Gateways.Delete("peer-to-"+other.ClusterName, "istio-system")
 }
 
 func (c *Cluster) ConnectTo(other *Cluster) {

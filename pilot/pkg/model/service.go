@@ -594,6 +594,9 @@ type IstioEndpoint struct {
 
 	// If in k8s, the node where the pod resides
 	NodeName string
+
+	// Amount of draining from this Endpoint
+	DrainingWeight uint32
 }
 
 func (ep *IstioEndpoint) SupportsTunnel(tunnelType string) bool {
@@ -2103,7 +2106,8 @@ func (ep *IstioEndpoint) Equals(other *IstioEndpoint) bool {
 		ep.SubDomain == other.SubDomain &&
 		ep.HealthStatus == other.HealthStatus &&
 		ep.SendUnhealthyEndpoints == other.SendUnhealthyEndpoints &&
-		ep.NodeName == other.NodeName
+		ep.NodeName == other.NodeName &&
+		ep.DrainingWeight == other.DrainingWeight
 	if !eq {
 		return false
 	}

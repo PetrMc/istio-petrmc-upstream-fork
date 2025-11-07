@@ -413,6 +413,10 @@ func (b *EndpointBuilder) generate(eps []*model.IstioEndpoint, toServiceWaypoint
 		return b.filterIstioEndpoint(ep)
 	})
 
+	isDraining := slices.FindFunc(eps, func(ep *model.IstioEndpoint) bool {
+		return ep.DrainingWeight > 0
+	}) != nil
+
 	localityEpMap := make(map[string]*LocalityEndpoints)
 	for _, ep := range eps {
 		mtlsEnabled := b.mtlsChecker.checkMtlsEnabled(ep, b.proxy.IsWaypointProxy())
@@ -420,17 +424,56 @@ func (b *EndpointBuilder) generate(eps []*model.IstioEndpoint, toServiceWaypoint
 		if eep == nil {
 			continue
 		}
-		locLbEps, found := localityEpMap[ep.Locality.Label]
+		localityLabel := ep.Locality.Label
+		if isDraining {
+			if ep.DrainingWeight == 0 || ep.Locality.ClusterID == b.clusterID {
+				// No draining
+				eep.LoadBalancingWeight.Value *= 100
+			} else if ep.DrainingWeight < 100 {
+				eep.LoadBalancingWeight.Value *= (100 - ep.DrainingWeight)
+			} else {
+				// Full drain
+				continue
+			}
+		}
+		locLbEps, found := localityEpMap[localityLabel]
 		if !found {
 			locLbEps = &LocalityEndpoints{
 				llbEndpoints: endpoint.LocalityLbEndpoints{
-					Locality:    util.ConvertLocality(ep.Locality.Label),
+					Locality:    util.ConvertLocality(localityLabel),
 					LbEndpoints: make([]*endpoint.LbEndpoint, 0, len(eps)),
 				},
 			}
-			localityEpMap[ep.Locality.Label] = locLbEps
+			localityEpMap[localityLabel] = locLbEps
 		}
 		locLbEps.append(ep, eep)
+	}
+
+	if isDraining {
+		// for every locality, if all draining endpoints, move them to next locality
+		for locality, locLbEps := range localityEpMap {
+			if slices.FindFunc(locLbEps.istioEndpoints, func(ep *model.IstioEndpoint) bool {
+				return ep.DrainingWeight == 0
+			}) != nil {
+				// has non-draining endpoint
+				continue
+			}
+			// find next locality
+			newLocality := locality
+			for newLocality != "" {
+				if lastSlash := strings.LastIndexByte(newLocality, '/'); lastSlash != -1 {
+					newLocality = newLocality[:lastSlash]
+				} else {
+					newLocality = ""
+				}
+				if newEps, found := localityEpMap[newLocality]; found {
+					delete(localityEpMap, locality)
+					newEps.istioEndpoints = append(newEps.istioEndpoints, locLbEps.istioEndpoints...)
+					newEps.llbEndpoints.LbEndpoints = append(newEps.llbEndpoints.LbEndpoints, locLbEps.llbEndpoints.LbEndpoints...)
+					break
+				}
+			}
+		}
 	}
 
 	locEps := make([]*LocalityEndpoints, 0, len(localityEpMap))

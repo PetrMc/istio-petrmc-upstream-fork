@@ -304,6 +304,7 @@ func (a *index) buildGlobalCollections(
 		LocalWorkloadServices,
 		GlobalWorkloadServicesWithCluster,
 		GobalWorkloadServicesWithClusterByCluster,
+		a.drainingByClusters,
 		GlobalNetworks,
 		options.SystemNamespace,
 		options.ClusterID,

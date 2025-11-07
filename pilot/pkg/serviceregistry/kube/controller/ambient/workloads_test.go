@@ -20,6 +20,7 @@ import (
 	"sort"
 	"testing"
 
+	"google.golang.org/protobuf/types/known/wrapperspb"
 	v1 "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -858,6 +859,7 @@ func TestPodWorkloads(t *testing.T) {
 			if wrapper != nil {
 				res = wrapper.Workload
 			}
+
 			assert.Equal(t, res, tt.result)
 		})
 	}
@@ -1589,6 +1591,7 @@ func TestWorkloadEntryWorkloads(t *testing.T) {
 			if wrapper != nil {
 				res = wrapper.Workload
 			}
+
 			assert.Equal(t, res, tt.result)
 		})
 	}
@@ -2205,6 +2208,303 @@ func TestPeeredObjectTrustDomain(t *testing.T) {
 	}
 }
 
+func TestWorkloadDraining(t *testing.T) {
+	for drain, drainWeight := range map[string]*wrapperspb.UInt32Value{
+		"none": nil,
+		"0":    wrapperspb.UInt32(0),
+		"10":   wrapperspb.UInt32(10),
+		"100":  wrapperspb.UInt32(100),
+	} {
+		gw := &v1beta1.Gateway{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "istio-eastwest",
+				Namespace: "ns-gtw",
+				Labels: map[string]string{
+					label.TopologyCluster.Name: testC,
+					label.TopologyNetwork.Name: testC,
+				},
+			},
+			Spec: v1beta1.GatewaySpec{
+				GatewayClassName: "istio-eastwest",
+				Listeners: []v1beta1.Listener{
+					{
+						Name:     "cross-network",
+						Port:     15008,
+						Protocol: "HBONE",
+					},
+				},
+			},
+		}
+		if drainWeight != nil {
+			gw.Annotations = map[string]string{
+				peering.DrainingWeightAnnotation: drain,
+			}
+		}
+		mock := krttest.NewMock(t, []any{gw})
+		a := newAmbientUnitTest(t)
+		gateways := krttest.GetMockCollection[*v1beta1.Gateway](mock)
+		a.drainingByClusters = drainingCollection(gateways,
+			krt.NewOptionsBuilder(test.NewStop(t), "", krt.GlobalDebugHandler))
+		kube.WaitForCacheSync("draining", a.stop, a.drainingByClusters.HasSynced)
+
+		t.Run(drain, func(t *testing.T) {
+			t.Run("PodWorkloads", func(t *testing.T) {
+				pod := &v1.Pod{
+					TypeMeta: metav1.TypeMeta{},
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "rs-xvnqd",
+						Namespace:    "ns",
+						GenerateName: "rs-",
+						OwnerReferences: []metav1.OwnerReference{
+							{
+								Kind:       "ReplicaSet",
+								APIVersion: "apps/v1",
+								Name:       "rs",
+								Controller: ptr.Of(true),
+							},
+						},
+					},
+					Spec: v1.PodSpec{},
+					Status: v1.PodStatus{
+						Phase: v1.PodRunning,
+						PodIP: "1.2.3.4",
+					},
+				}
+				result := &workloadapi.Workload{
+					Uid:               "cluster0//Pod/ns/rs-xvnqd",
+					Name:              "rs-xvnqd",
+					Namespace:         "ns",
+					Addresses:         [][]byte{netip.AddrFrom4([4]byte{1, 2, 3, 4}).AsSlice()},
+					Network:           testNW,
+					CanonicalName:     "rs",
+					CanonicalRevision: "latest",
+					WorkloadType:      workloadapi.WorkloadType_POD,
+					WorkloadName:      "rs",
+					Status:            workloadapi.WorkloadStatus_UNHEALTHY,
+					ClusterId:         testC,
+				}
+				if drainWeight.GetValue() != 0 {
+					assert.NoError(t, peering.SetDrainingWeight(result, drainWeight.GetValue()))
+				}
+				WorkloadServices := krttest.GetMockCollection[model.ServiceInfo](mock)
+				WorkloadServicesNamespaceIndex := krt.NewNamespaceIndex(WorkloadServices)
+				EndpointSlices := krttest.GetMockCollection[*discovery.EndpointSlice](mock)
+				EndpointSlicesAddressIndex := endpointSliceAddressIndex(EndpointSlices)
+				builder := a.podWorkloadBuilder(
+					GetMeshConfig(mock),
+					krttest.GetMockCollection[model.WorkloadAuthorization](mock),
+					krttest.GetMockCollection[*securityclient.PeerAuthentication](mock),
+					krttest.GetMockCollection[Waypoint](mock),
+					WorkloadServices,
+					WorkloadServicesNamespaceIndex,
+					EndpointSlices,
+					EndpointSlicesAddressIndex,
+					krttest.GetMockCollection[*v1.Namespace](mock),
+					krttest.GetMockCollection[*v1.Service](mock),
+					krttest.GetMockCollection[Node](mock),
+				)
+				wrapper := builder(krt.TestingDummyContext{}, pod)
+				var res *workloadapi.Workload
+				if wrapper != nil {
+					res = wrapper.Workload
+				}
+				assert.Equal(t, res, result)
+			})
+
+			t.Run("WorkloadEntryWorkloads", func(t *testing.T) {
+				inputs := []any{
+					model.ServiceInfo{
+						Service: &workloadapi.Service{
+							Name:      "svc",
+							Namespace: "ns",
+							Hostname:  "hostname",
+							Ports: []*workloadapi.Port{{
+								ServicePort: 80,
+								TargetPort:  8080,
+							}},
+						},
+						LabelSelector: model.NewSelector(map[string]string{"app": "foo"}),
+					},
+				}
+				we := &networkingclient.WorkloadEntry{
+					TypeMeta: metav1.TypeMeta{},
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "name",
+						Namespace: "ns",
+						Labels: map[string]string{
+							"app": "foo",
+						},
+						Annotations: map[string]string{
+							"solo.io/draining-weight": "4",
+						},
+					},
+					Spec: networking.WorkloadEntry{
+						Address: "1.2.3.4",
+					},
+				}
+				result := &workloadapi.Workload{
+					Uid:               "cluster0/networking.istio.io/WorkloadEntry/ns/name",
+					Name:              "name",
+					Namespace:         "ns",
+					Addresses:         [][]byte{netip.AddrFrom4([4]byte{1, 2, 3, 4}).AsSlice()},
+					Network:           testNW,
+					CanonicalName:     "foo",
+					CanonicalRevision: "latest",
+					WorkloadType:      workloadapi.WorkloadType_POD,
+					WorkloadName:      "name",
+					Status:            workloadapi.WorkloadStatus_HEALTHY,
+					ClusterId:         testC,
+					Services: map[string]*workloadapi.PortList{
+						"ns/hostname": {
+							Ports: []*workloadapi.Port{{
+								ServicePort: 80,
+								TargetPort:  8080,
+							}},
+						},
+					},
+				}
+				assert.NoError(t, peering.SetDrainingWeight(result, 4))
+				mock := krttest.NewMock(t, inputs)
+				WorkloadServices := krttest.GetMockCollection[model.ServiceInfo](mock)
+				WorkloadServicesNamespaceIndex := krt.NewNamespaceIndex(WorkloadServices)
+				builder := a.workloadEntryWorkloadBuilder(
+					GetMeshConfig(mock),
+					krttest.GetMockCollection[model.WorkloadAuthorization](mock),
+					krttest.GetMockCollection[*securityclient.PeerAuthentication](mock),
+					krttest.GetMockCollection[Waypoint](mock),
+					WorkloadServices,
+					WorkloadServicesNamespaceIndex,
+					krttest.GetMockCollection[*v1.Namespace](mock),
+					krttest.GetMockCollection[*v1.Service](mock),
+					krttest.GetMockCollection[*soloapi.Segment](mock),
+				)
+				wrapper := builder(krt.TestingDummyContext{}, we)
+				var res *workloadapi.Workload
+				if wrapper != nil {
+					res = wrapper.Workload
+				}
+
+				assert.Equal(t, res, result)
+			})
+
+			t.Run("ServiceEntryWorkloads", func(t *testing.T) {
+				inputs := []any{
+					model.ServiceInfo{
+						Service: &workloadapi.Service{
+							Name:      "name",
+							Namespace: "ns",
+							Hostname:  "a.example.com",
+							Ports: []*workloadapi.Port{{
+								ServicePort: 80,
+								TargetPort:  80,
+							}},
+						},
+						Source: model.TypedObject{
+							NamespacedName: types.NamespacedName{Namespace: "ns", Name: "name"},
+							Kind:           kind.ServiceEntry,
+						},
+					},
+				}
+				se := &networkingclient.ServiceEntry{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "name",
+						Namespace: "ns",
+					},
+					Spec: networking.ServiceEntry{
+						Addresses: []string{"1.2.3.4"},
+						Hosts:     []string{"a.example.com", "b.example.com"},
+						Ports: []*networking.ServicePort{{
+							Number: 80,
+							Name:   "http",
+						}},
+						Resolution: networking.ServiceEntry_DNS,
+					},
+				}
+				result := []*workloadapi.Workload{
+					{
+						Uid:               "cluster0/networking.istio.io/ServiceEntry/ns/name/a.example.com",
+						Name:              "name",
+						Namespace:         "ns",
+						Hostname:          "a.example.com",
+						Network:           testNW,
+						CanonicalName:     "name",
+						CanonicalRevision: "latest",
+						WorkloadType:      workloadapi.WorkloadType_POD,
+						WorkloadName:      "name",
+						Status:            workloadapi.WorkloadStatus_HEALTHY,
+						ClusterId:         testC,
+						Services: map[string]*workloadapi.PortList{
+							"ns/a.example.com": {
+								Ports: []*workloadapi.Port{{
+									ServicePort: 80,
+									TargetPort:  80,
+								}},
+							},
+						},
+					},
+				}
+				mock := krttest.NewMock(t, inputs)
+				builder := a.serviceEntryWorkloadBuilder(
+					GetMeshConfig(mock),
+					krttest.GetMockCollection[model.WorkloadAuthorization](mock),
+					krttest.GetMockCollection[*securityclient.PeerAuthentication](mock),
+					krttest.GetMockCollection[Waypoint](mock),
+					krttest.GetMockCollection[*v1.Namespace](mock),
+					krttest.GetMockCollection[*v1.Service](mock),
+					krttest.GetMockCollection[model.ServiceInfo](mock),
+				)
+				res := builder(krt.TestingDummyContext{}, se)
+				wl := slices.Map(res, func(e model.WorkloadInfo) *workloadapi.Workload {
+					return e.Workload
+				})
+
+				assert.Equal(t, wl, result)
+			})
+
+			t.Run("EndpointSliceWorkloads", func(t *testing.T) {
+				inputs := []any{
+					kubernetesAPIServerService("1.2.3.4"),
+				}
+				slice := kubernetesAPIServerEndpoint("172.18.0.5")
+				result := []*workloadapi.Workload{{
+					Uid:         "cluster0/discovery.k8s.io/EndpointSlice/default/kubernetes/172.18.0.5",
+					Name:        "kubernetes",
+					Namespace:   "default",
+					Addresses:   [][]byte{netip.MustParseAddr("172.18.0.5").AsSlice()},
+					Network:     testNW,
+					Status:      workloadapi.WorkloadStatus_HEALTHY,
+					NetworkMode: workloadapi.NetworkMode_HOST_NETWORK,
+					ClusterId:   testC,
+					Services: map[string]*workloadapi.PortList{
+						"default/kubernetes.default.svc.domain.suffix": {
+							Ports: []*workloadapi.Port{{
+								ServicePort: 443,
+								TargetPort:  6443,
+							}},
+						},
+					},
+				}}
+				if drainWeight.GetValue() != 0 {
+					for _, w := range result {
+						assert.NoError(t, peering.SetDrainingWeight(w, drainWeight.GetValue()))
+					}
+				}
+				mock := krttest.NewMock(t, inputs)
+				WorkloadServices := krttest.GetMockCollection[model.ServiceInfo](mock)
+				builder := a.endpointSlicesBuilder(
+					GetMeshConfig(mock),
+					WorkloadServices,
+				)
+				res := builder(krt.TestingDummyContext{}, slice)
+				wl := slices.Map(res, func(e model.WorkloadInfo) *workloadapi.Workload {
+					return e.Workload
+				})
+				assert.Equal(t, wl, result)
+			})
+		})
+	}
+}
+
 func kubernetesAPIServerService(ip string) model.ServiceInfo {
 	return model.ServiceInfo{
 		Service: &workloadapi.Service{
@@ -2357,13 +2657,15 @@ func newAmbientUnitTest(t test.Failer) *index {
 			},
 		},
 	})
+	gateways := krttest.GetMockCollection[*v1beta1.Gateway](mock)
+	opts := krt.NewOptionsBuilder(test.NewStop(t), "", krt.GlobalDebugHandler)
 	networks := buildNetworkCollections(
 		krttest.GetMockCollection[*v1.Namespace](mock),
-		krttest.GetMockCollection[*v1beta1.Gateway](mock),
+		gateways,
 		Options{
 			SystemNamespace: systemNS,
 			ClusterID:       testC,
-		}, krt.NewOptionsBuilder(test.NewStop(t), "", krt.GlobalDebugHandler))
+		}, opts)
 	idx := &index{
 		networks:        networks,
 		SystemNamespace: systemNS,
@@ -2374,8 +2676,9 @@ func newAmbientUnitTest(t test.Failer) *index {
 			DefaultAllowFromWaypoint:              features.DefaultAllowFromWaypoint,
 			EnableK8SServiceSelectWorkloadEntries: features.EnableK8SServiceSelectWorkloadEntries,
 		},
+		drainingByClusters: drainingCollection(gateways, opts),
 	}
-	kube.WaitForCacheSync("test", test.NewStop(t), idx.networks.HasSynced)
+	kube.WaitForCacheSync("test", opts.Stop(), idx.networks.HasSynced, idx.drainingByClusters.HasSynced)
 	var builtNetworks []string
 	for _, n := range networks.NetworkGateways.List() {
 		builtNetworks = append(builtNetworks, n.Network.String())

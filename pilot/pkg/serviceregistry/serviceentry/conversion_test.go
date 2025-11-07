@@ -1066,7 +1066,7 @@ func TestConvertWorkloadEntryToServiceInstances(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			services := convertServices(*tt.se)
 			s := &Controller{meshWatcher: meshwatcher.NewTestWatcher(mesh.DefaultMeshConfig())}
-			instances := s.convertWorkloadEntryToServiceInstances(tt.wle, services, tt.se.Spec.(*networking.ServiceEntry), &configKey{}, tt.clusterID)
+			instances := s.convertWorkloadEntryToServiceInstances(tt.wle, services, tt.se.Spec.(*networking.ServiceEntry), &configKey{}, tt.clusterID, 0)
 			sortServiceInstances(instances)
 			sortServiceInstances(tt.out)
 

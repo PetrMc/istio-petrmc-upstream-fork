@@ -183,6 +183,7 @@ func MergedGlobalWorkloadsCollection(
 	localWorkloadServices krt.Collection[model.ServiceInfo],
 	globalWorkloadServices krt.Collection[krt.Collection[krt.ObjectWithCluster[model.ServiceInfo]]],
 	globalWorkloadServicesByCluster krt.Index[cluster.ID, krt.Collection[krt.ObjectWithCluster[model.ServiceInfo]]],
+	drainingByClusters krt.Collection[ClusterDraining],
 	globalNetworks networkCollections,
 	localSystemNamespace string,
 	localClusterID cluster.ID,
@@ -224,6 +225,7 @@ func MergedGlobalWorkloadsCollection(
 			localNetworkGetter,
 			globalNetworks.NetworkGateways,
 			globalNetworks.GatewaysByNetwork,
+			drainingByClusters,
 			flags,
 		),
 		opts.WithName("LocalPodWorkloads")...,
@@ -301,6 +303,7 @@ func MergedGlobalWorkloadsCollection(
 			domainSuffix,
 			localClusterGetter,
 			localNetworkGetter,
+			drainingByClusters,
 		),
 		opts.WithName("LocalEndpointSliceWorkloads")...,
 	)
@@ -480,6 +483,7 @@ func MergedGlobalWorkloadsCollection(
 					},
 					globalNetworks.NetworkGateways,
 					globalNetworks.GatewaysByNetwork,
+					drainingByClusters,
 					flags,
 				),
 				append(
@@ -624,6 +628,7 @@ func MergedGlobalWorkloadsCollection(
 						}
 						return nw.Network
 					},
+					drainingByClusters,
 				),
 				append(
 					opts,
@@ -803,6 +808,15 @@ func workloadEntryWorkloadBuilder(
 			ApplicationTunnel:     appTunnel,
 			TrustDomain:           pickTrustDomain(meshCfg),
 			Locality:              getWorkloadEntryLocality(&wle.Spec),
+		}
+
+		val, err := peering.GetDrainingWeightAnnotation(wle.Annotations)
+		if err != nil {
+			log.Warnf("%s %s/%s has an invalid drain weight: %s", wle.Kind, wle.Namespace, wle.Name, err)
+		} else if val > 0 {
+			if err := peering.SetDrainingWeight(w, val); err != nil {
+				log.Warnf("%s %s/%s could not set draining weight: %s", wle.Kind, wle.Namespace, wle.Name, err)
+			}
 		}
 		if wle.Annotations[peering.ServiceEndpointStatus] == peering.ServiceEndpointStatusUnhealthy {
 			w.Status = workloadapi.WorkloadStatus_UNHEALTHY
@@ -1053,6 +1067,7 @@ func podWorkloadBuilder(
 	networkGetter func(krt.HandlerContext) network.ID,
 	networkGateways krt.Collection[NetworkGateway],
 	gatewaysByNetwork krt.Index[network.ID, NetworkGateway],
+	drainingByClusters krt.Collection[ClusterDraining],
 	flags FeatureFlags,
 ) krt.TransformationSingle[*v1.Pod, model.WorkloadInfo] {
 	return func(ctx krt.HandlerContext, p *v1.Pod) *model.WorkloadInfo {
@@ -1131,6 +1146,12 @@ func podWorkloadBuilder(
 			Locality:              getPodLocality(ctx, nodes, p),
 		}
 
+		if draining := krt.FetchOne(ctx, drainingByClusters, krt.FilterKey(string(cluster))); draining != nil {
+			if err := peering.SetDrainingWeight(w, draining.DrainingWeight); err != nil {
+				log.Warnf("Workload %s/%s could not set draining weight: %s", w.Namespace, w.Name, err)
+			}
+		}
+
 		if p.Spec.HostNetwork {
 			w.NetworkMode = workloadapi.NetworkMode_HOST_NETWORK
 		}
@@ -1195,6 +1216,7 @@ func (a *index) podWorkloadBuilder(
 		localNetworkGetter,
 		a.networks.NetworkGateways,
 		a.networks.GatewaysByNetwork,
+		a.drainingByClusters,
 		a.Flags,
 	)
 }
@@ -1401,7 +1423,6 @@ func serviceEntryWorkloadBuilder(
 			if wle.Weight > 0 {
 				w.Capacity = wrappers.UInt32(wle.Weight)
 			}
-
 			if addr, err := netip.ParseAddr(wle.Address); err == nil {
 				w.Addresses = [][]byte{addr.AsSlice()}
 			} else {
@@ -1458,6 +1479,7 @@ func endpointSlicesBuilder(
 	domainSuffix string,
 	clusterGetter func(krt.HandlerContext) cluster.ID,
 	networkGetter func(krt.HandlerContext) network.ID,
+	drainingByClusters krt.Collection[ClusterDraining],
 ) krt.TransformationMulti[*discovery.EndpointSlice, model.WorkloadInfo] {
 	return func(ctx krt.HandlerContext, es *discovery.EndpointSlice) []model.WorkloadInfo {
 		// EndpointSlices carry port information and a list of IPs.
@@ -1558,8 +1580,10 @@ func endpointSlicesBuilder(
 				// If any invalid, skip
 				continue
 			}
+
 			network := networkGetter(ctx)
 			cluster := clusterGetter(ctx)
+
 			w := &workloadapi.Workload{
 				Uid:         cluster.String() + "/discovery.k8s.io/EndpointSlice/" + es.Namespace + "/" + es.Name + "/" + key,
 				Name:        es.Name,
@@ -1579,6 +1603,12 @@ func endpointSlicesBuilder(
 				Waypoint:              nil, // Not supported. In theory, we could allow it as an EndpointSlice label, but there is no real use case.
 				Locality:              nil, // Not supported. We could maybe, there is a "zone", but it doesn't seem to be well supported
 			}
+			if draining := krt.FetchOne(ctx, drainingByClusters, krt.FilterKey(string(cluster))); draining != nil {
+				if err := peering.SetDrainingWeight(w, draining.DrainingWeight); err != nil {
+					log.Warnf("Workload %s/%s could not set draining weight: %s", w.Namespace, w.Name, err)
+				}
+			}
+
 			res = append(res, precomputeWorkload(model.WorkloadInfo{
 				Workload:     w,
 				Labels:       nil,
@@ -1605,6 +1635,7 @@ func (a *index) endpointSlicesBuilder(
 		func(ctx krt.HandlerContext) network.ID {
 			return a.Network(ctx)
 		},
+		a.drainingByClusters,
 	)
 }
 

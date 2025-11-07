@@ -27,6 +27,9 @@ message SoloServiceExtension {
   google.protobuf.BoolValue ingress_use_waypoint = 1;
 }
 
-// SoloServiceExtension are internal extension points (optionally) added to Workload objects
+// SoloWorkloadExtension are internal extension points (optionally) added to Workload objects
 message SoloWorkloadExtension {
+  // The amount of traffic that should be drained from this workload.
+  google.protobuf.UInt32Value draining_weight = 1;
+
 }

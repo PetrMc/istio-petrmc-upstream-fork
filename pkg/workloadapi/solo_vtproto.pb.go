@@ -46,6 +46,9 @@ func (this *SoloWorkloadExtension) EqualVT(that *SoloWorkloadExtension) bool {
 	} else if this == nil || that == nil {
 		return false
 	}
+	if !(*wrapperspb.UInt32Value)(this.DrainingWeight).EqualVT((*wrapperspb.UInt32Value)(that.DrainingWeight)) {
+		return false
+	}
 	return string(this.unknownFields) == string(that.unknownFields)
 }
 
@@ -129,6 +132,16 @@ func (m *SoloWorkloadExtension) MarshalToSizedBufferVTStrict(dAtA []byte) (int, 
 		i -= len(m.unknownFields)
 		copy(dAtA[i:], m.unknownFields)
 	}
+	if m.DrainingWeight != nil {
+		size, err := (*wrapperspb.UInt32Value)(m.DrainingWeight).MarshalToSizedBufferVTStrict(dAtA[:i])
+		if err != nil {
+			return 0, err
+		}
+		i -= size
+		i = protohelpers.EncodeVarint(dAtA, i, uint64(size))
+		i--
+		dAtA[i] = 0xa
+	}
 	return len(dAtA) - i, nil
 }
 
@@ -152,6 +165,10 @@ func (m *SoloWorkloadExtension) SizeVT() (n int) {
 	}
 	var l int
 	_ = l
+	if m.DrainingWeight != nil {
+		l = (*wrapperspb.UInt32Value)(m.DrainingWeight).SizeVT()
+		n += 1 + l + protohelpers.SizeOfVarint(uint64(l))
+	}
 	n += len(m.unknownFields)
 	return n
 }

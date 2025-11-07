@@ -184,8 +184,10 @@ type FederatedService struct {
 	Takeover bool `protobuf:"varint,12,opt,name=takeover,proto3" json:"takeover,omitempty"`
 	// IngressUseWaypoint specifies whether ingress gateways should use the waypoint for this service.
 	IngressUseWaypoint *wrapperspb.BoolValue `protobuf:"bytes,13,opt,name=ingress_use_waypoint,json=ingressUseWaypoint,proto3" json:"ingress_use_waypoint,omitempty"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	// The amount of traffic that should be drained from this workload. valid values: [0-100]
+	DrainingWeight *wrapperspb.UInt32Value `protobuf:"bytes,14,opt,name=draining_weight,json=drainingWeight,proto3" json:"draining_weight,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *FederatedService) Reset() {
@@ -309,6 +311,13 @@ func (x *FederatedService) GetIngressUseWaypoint() *wrapperspb.BoolValue {
 	return nil
 }
 
+func (x *FederatedService) GetDrainingWeight() *wrapperspb.UInt32Value {
+	if x != nil {
+		return x.DrainingWeight
+	}
+	return nil
+}
+
 type RemoteWaypoint struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Name represents the name for the service.
@@ -372,7 +381,7 @@ const file_workloadapi_federatedservice_proto_rawDesc = "" +
 	"\"workloadapi/federatedservice.proto\x12\x0eistio.workload\x1a\x1egoogle/protobuf/wrappers.proto\x1a\x1aworkloadapi/workload.proto\"5\n" +
 	"\aSegment\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x16\n" +
-	"\x06domain\x18\x02 \x01(\tR\x06domain\"\xc9\x05\n" +
+	"\x06domain\x18\x02 \x01(\tR\x06domain\"\x90\x06\n" +
 	"\x10FederatedService\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1c\n" +
 	"\tnamespace\x18\x02 \x01(\tR\tnamespace\x12\x1a\n" +
@@ -387,7 +396,8 @@ const file_workloadapi_federatedservice_proto_rawDesc = "" +
 	" \x03(\v25.istio.workload.FederatedService.ProtocolsByPortEntryR\x0fprotocolsByPort\x122\n" +
 	"\x05scope\x18\v \x01(\x0e2\x1c.istio.workload.ServiceScopeR\x05scope\x12\x1a\n" +
 	"\btakeover\x18\f \x01(\bR\btakeover\x12L\n" +
-	"\x14ingress_use_waypoint\x18\r \x01(\v2\x1a.google.protobuf.BoolValueR\x12ingressUseWaypoint\x1aB\n" +
+	"\x14ingress_use_waypoint\x18\r \x01(\v2\x1a.google.protobuf.BoolValueR\x12ingressUseWaypoint\x12E\n" +
+	"\x0fdraining_weight\x18\x0e \x01(\v2\x1c.google.protobuf.UInt32ValueR\x0edrainingWeight\x1aB\n" +
 	"\x14ProtocolsByPortEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\rR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"B\n" +
@@ -431,11 +441,12 @@ var file_workloadapi_federatedservice_proto_depIdxs = []int32{
 	4, // 3: istio.workload.FederatedService.protocols_by_port:type_name -> istio.workload.FederatedService.ProtocolsByPortEntry
 	0, // 4: istio.workload.FederatedService.scope:type_name -> istio.workload.ServiceScope
 	7, // 5: istio.workload.FederatedService.ingress_use_waypoint:type_name -> google.protobuf.BoolValue
-	6, // [6:6] is the sub-list for method output_type
-	6, // [6:6] is the sub-list for method input_type
-	6, // [6:6] is the sub-list for extension type_name
-	6, // [6:6] is the sub-list for extension extendee
-	0, // [0:6] is the sub-list for field type_name
+	6, // 6: istio.workload.FederatedService.draining_weight:type_name -> google.protobuf.UInt32Value
+	7, // [7:7] is the sub-list for method output_type
+	7, // [7:7] is the sub-list for method input_type
+	7, // [7:7] is the sub-list for extension type_name
+	7, // [7:7] is the sub-list for extension extendee
+	0, // [0:7] is the sub-list for field type_name
 }
 
 func init() { file_workloadapi_federatedservice_proto_init() }

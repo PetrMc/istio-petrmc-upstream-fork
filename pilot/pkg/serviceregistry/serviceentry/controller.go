@@ -300,7 +300,7 @@ func (s *Controller) workloadEntryHandler(old, curr config.Config, event model.E
 			log.Debugf("skip selecting workload instance %v/%v for DNS service entry %v", wi.Namespace, wi.Name, se.Hosts)
 			continue
 		}
-		instance := s.convertWorkloadEntryToServiceInstances(wle, services, se, &key, s.Cluster())
+		instance := s.convertWorkloadEntryToServiceInstances(wle, services, se, &key, s.Cluster(), wi.Endpoint.DrainingWeight)
 		allInstances = append(allInstances, instance...)
 		parentKey := configKeyWithParent{
 			configKey: key,
@@ -324,7 +324,7 @@ func (s *Controller) workloadEntryHandler(old, curr config.Config, event model.E
 			log.Debugf("skip selecting workload instance %v/%v for DNS service entry %v", wi.Namespace, wi.Name, se.Hosts)
 			continue
 		}
-		instance := s.convertWorkloadEntryToServiceInstances(wle, services, se, &key, s.Cluster())
+		instance := s.convertWorkloadEntryToServiceInstances(wle, services, se, &key, s.Cluster(), wi.Endpoint.DrainingWeight)
 		parentKey := configKeyWithParent{
 			configKey: key,
 			parent:    namespacedName,

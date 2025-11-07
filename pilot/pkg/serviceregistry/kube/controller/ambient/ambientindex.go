@@ -137,6 +137,8 @@ type index struct {
 	remoteClusters              krt.Collection[*multicluster.Cluster]
 	meshConfig                  meshwatcher.WatcherCollection
 	remoteClientConfigOverrides []func(*rest.Config)
+
+	drainingByClusters krt.Collection[ClusterDraining]
 }
 
 type FeatureFlags struct {
@@ -161,6 +163,15 @@ type Options struct {
 	Debugger                    *krt.DebugHandler
 	ClientBuilder               multicluster.ClientBuilder
 	RemoteClientConfigOverrides []func(*rest.Config)
+}
+
+type ClusterDraining struct {
+	ClusterID      cluster.ID
+	DrainingWeight uint32
+}
+
+func (cdm ClusterDraining) ResourceName() string {
+	return cdm.ClusterID.String()
 }
 
 func New(options Options) Index {
@@ -211,6 +222,8 @@ func New(options Options) Index {
 			multicluster.ClusterKRTMetadataKey: options.ClusterID,
 		}),
 	)...)
+
+	a.drainingByClusters = drainingCollection(Gateways, opts)
 
 	gatewayClassClient := kclient.NewDelayedInformer[*v1beta1.GatewayClass](options.Client, gvr.GatewayClass, kubetypes.StandardInformer, filter)
 	GatewayClasses := krt.WrapClient[*v1beta1.GatewayClass](gatewayClassClient, opts.WithName("informer/GatewayClasses")...)
@@ -973,7 +986,8 @@ func (a *index) HasSynced() bool {
 		a.waypoints.HasSynced() &&
 		a.authorizationPolicies.HasSynced() &&
 		a.networks.HasSynced() &&
-		(a.federatedServices.Collection == nil || a.federatedServices.HasSynced())
+		(a.federatedServices.Collection == nil || a.federatedServices.HasSynced()) &&
+		a.drainingByClusters.HasSynced()
 }
 
 func (a *index) Network(ctx krt.HandlerContext) network.ID {
@@ -1034,3 +1048,21 @@ func PushXdsAddress[T any](xds model.XDSUpdater, f func(T) string) func(events [
 }
 
 type MeshConfig = meshwatcher.MeshConfigResource
+
+func drainingCollection(gateways krt.Collection[*v1beta1.Gateway], opts krt.OptionsBuilder) krt.Collection[ClusterDraining] {
+	return krt.NewCollection(gateways, func(ctx krt.HandlerContext, gw *v1beta1.Gateway) *ClusterDraining {
+		val, err := peering.GetDrainingWeightAnnotation(gw.Annotations)
+		if err != nil {
+			log.Warnf("Gateway %s/%s has an invalid drain weight: %s", gw.Namespace, gw.Name, err)
+			return nil
+		}
+		if val == 0 {
+			return nil
+		}
+
+		return &ClusterDraining{
+			ClusterID:      cluster.ID(gw.Labels[label.TopologyCluster.Name]),
+			DrainingWeight: val,
+		}
+	}, opts.WithName("ClusterDraining")...)
+}

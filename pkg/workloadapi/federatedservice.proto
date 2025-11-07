@@ -75,6 +75,8 @@ message FederatedService {
   bool takeover = 12;
   // IngressUseWaypoint specifies whether ingress gateways should use the waypoint for this service.
   google.protobuf.BoolValue ingress_use_waypoint = 13;
+  // The amount of traffic that should be drained from this workload. valid values: [0-100]
+  google.protobuf.UInt32Value draining_weight = 14;
 }
 
 message RemoteWaypoint  {

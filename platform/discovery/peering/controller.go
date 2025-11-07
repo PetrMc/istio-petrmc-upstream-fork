@@ -10,9 +10,11 @@ import (
 	"fmt"
 	"net/netip"
 	"reflect"
+	"strconv"
 	"strings"
 
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/wrapperspb"
 	corev1 "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -29,6 +31,7 @@ import (
 	networking "istio.io/api/networking/v1alpha3"
 	clientnetworking "istio.io/client-go/pkg/apis/networking/v1"
 	"istio.io/istio/pilot/pkg/model"
+	"istio.io/istio/pilot/pkg/util/protoconv"
 	"istio.io/istio/pkg/cluster"
 	"istio.io/istio/pkg/config/constants"
 	"istio.io/istio/pkg/kube/controllers"
@@ -245,6 +248,15 @@ func (c *NetworkWatcher) reconcileGateway(name types.NamespacedName) error {
 				cluster.locality = peer.Locality
 				changed = true
 			}
+			if cluster.drainingWeight != peer.DrainingWeight {
+				log.Infof(
+					"gateway for cluster %s draining weight changed from %d to %d",
+					peer.Cluster,
+					cluster.drainingWeight, peer.DrainingWeight,
+				)
+				cluster.drainingWeight = peer.DrainingWeight
+				changed = true
+			}
 
 			// TODO handle other changes to the cluster that affect the
 			// services/workloads from that cluster or use krt to automatically
@@ -430,6 +442,11 @@ func (c *NetworkWatcher) reconcileFlatWorkloadEntry(tn types.NamespacedName) err
 		return c.genericReconcileWorkloadEntries(nil, weGroupLabel)
 	}
 
+	drainingWeight, err := GetDrainingWeight(workload.Workload)
+	if err != nil {
+		log.Warnf("workload has an invalid draining weight: %s", err)
+	}
+	drainingWeight = max(cluster.drainingWeight, drainingWeight)
 	mergedServices := c.mergedServicesForWorkload(workload, segment, segmentDomain)
 
 	// potentially write multiple workloadEntries so we can be selected by multiple services
@@ -476,6 +493,10 @@ func (c *NetworkWatcher) reconcileFlatWorkloadEntry(tn types.NamespacedName) err
 					}
 				}
 			}
+		}
+
+		if drainingWeight > 0 {
+			annos[DrainingWeightAnnotation] = strconv.FormatUint(uint64(drainingWeight), 10)
 		}
 
 		we := &clientnetworking.WorkloadEntry{
@@ -601,6 +622,7 @@ func (c *NetworkWatcher) reconcileGatewayWorkloadEntry(tn types.NamespacedName) 
 	fs = pc.federatedServices.GetKey(tn.String())
 	locality = pc.locality
 	networkName = pc.networkName
+	peerDrainingWeight := pc.drainingWeight
 
 	if fs == nil {
 		// No federated service exists, remove
@@ -738,6 +760,11 @@ func (c *NetworkWatcher) reconcileGatewayWorkloadEntry(tn types.NamespacedName) 
 		// to properly compute the ServiceEntry
 		// TODO: john make this per-service opt-in
 		annos[ServiceEndpointStatus] = ServiceEndpointStatusUnhealthy
+	}
+
+	drainingWeight := max(peerDrainingWeight, fs.Service.GetDrainingWeight().GetValue())
+	if drainingWeight > 0 {
+		annos[DrainingWeightAnnotation] = strconv.FormatUint(uint64(drainingWeight), 10)
 	}
 
 	we := &clientnetworking.WorkloadEntry{
@@ -1903,6 +1930,48 @@ func (c *NetworkWatcher) getSegmentDomain(segmentName string) (string, error) {
 	}
 
 	return segment.Spec.Domain, nil
+}
+
+const SoloWorkloadExtensionName = "solo.io/SoloWorkloadExtension"
+
+func getSoloWorkloadExtension(workload *workloadapi.Workload) (*workloadapi.Extension, *workloadapi.SoloWorkloadExtension, error) {
+	ext := ptr.Flatten(slices.FindFunc(workload.Extensions, func(ext *workloadapi.Extension) bool {
+		return ext.Name == SoloWorkloadExtensionName
+	}))
+	if ext == nil {
+		return nil, nil, nil
+	}
+	soloExt, err := protoconv.UnmarshalAny[workloadapi.SoloWorkloadExtension](ext.Config)
+	return ext, soloExt, err
+}
+
+func GetDrainingWeight(workload *workloadapi.Workload) (uint32, error) {
+	_, soloExt, err := getSoloWorkloadExtension(workload)
+	if err != nil {
+		return 0, err
+	}
+	return soloExt.GetDrainingWeight().GetValue(), nil
+}
+
+func SetDrainingWeight(workload *workloadapi.Workload, drainingWeight uint32) error {
+	ext, soloExt, err := getSoloWorkloadExtension(workload)
+	if err != nil {
+		return err
+	}
+	if ext == nil {
+		ext = &workloadapi.Extension{
+			Name: SoloWorkloadExtensionName,
+		}
+		workload.Extensions = append(workload.Extensions, ext)
+		soloExt = &workloadapi.SoloWorkloadExtension{}
+	}
+	soloExt.DrainingWeight = wrapperspb.UInt32(drainingWeight)
+	out, err := protoconv.MessageToAnyWithError(soloExt)
+	if err != nil {
+		return err
+	}
+	ext.Config = out
+	return nil
 }
 
 // LockForTest should only be used in tests, and only used to workaround

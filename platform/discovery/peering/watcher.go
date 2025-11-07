@@ -734,6 +734,9 @@ const (
 	// ServiceProtocolsAnnotation stores the port-to-protocol mapping from FederatedService
 	// Format: "80:HTTP,443:HTTPS,9090:GRPC"
 	ServiceProtocolsAnnotation = "solo.io/service-protocols"
+
+	// Amount of traffic to drain. Valid values are 0-100.
+	DrainingWeightAnnotation = "solo.io/draining-weight"
 )
 
 // Aliases for backward compatibility - use model.SoloServiceScope* instead
@@ -803,6 +806,22 @@ func CalculateScope(svcl, nsl map[string]string) model.SoloServiceScope {
 
 	// Default to Cluster when no label is present
 	return model.SoloServiceScopeCluster
+}
+
+func GetDrainingWeightAnnotation(annos map[string]string) (uint32, error) {
+	anno := annos[DrainingWeightAnnotation]
+	if anno == "" {
+		return 0, nil
+	}
+
+	val, err := strconv.ParseUint(anno, 10, 32)
+	if err != nil {
+		return 0, err
+	}
+	if val > 100 {
+		return 0, fmt.Errorf("value must be between 0 and 100: %q", anno)
+	}
+	return uint32(val), nil
 }
 
 // ShouldTakeover checks if the service should override *.cluster.local addresses
@@ -951,10 +970,11 @@ func CreateOrUpdateIfNeeded[T controllers.ComparableObject](c kclient.ReadWriter
 }
 
 type PeerGateway struct {
-	Network  networkid.ID
-	Cluster  cluster.ID
-	Address  string
-	Locality string
+	Network        networkid.ID
+	Cluster        cluster.ID
+	Address        string
+	Locality       string
+	DrainingWeight uint32
 }
 
 func TranslatePeerGateway(gw *gateway.Gateway) (PeerGateway, error) {
@@ -999,6 +1019,15 @@ func TranslatePeerGateway(gw *gateway.Gateway) (PeerGateway, error) {
 		}
 		peer.Locality = locality
 	}
+
+	drainingWeight := uint32(0)
+	val, err := GetDrainingWeightAnnotation(gw.Annotations)
+	if err == nil {
+		drainingWeight = val
+	} else {
+		log.Warnf("Gateway %s/%s has an invalid draining weight: %s", gw.Namespace, gw.Name, err)
+	}
+	peer.DrainingWeight = drainingWeight
 
 	return peer, nil
 }

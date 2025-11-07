@@ -1,0 +1,18 @@
+apiVersion: release-notes/v2
+
+kind: feature
+
+area: traffic-management
+
+issue:
+  - https://github.com/solo-io/istio/issues/2683
+
+releaseNotes:
+- |
+  **Added** the ability to mark a cluster as draining.
+    - The annotation, `solo.io/draining-weight: weight`, specifies the amount [0-100] of traffic to drain.
+    - The annotation can be on:
+      1. the eastwest gateway to affect the traffic from remote clusters
+      2. the remote gateway to affect traffic to the remote cluster
+    - If a weight is placed on both sides for a given cluster, the maximum weight is applied.
+  

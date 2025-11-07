@@ -122,8 +122,12 @@ func (a *index) FederatedServicesCollection(
 			Scope:               serviceScope,
 			Takeover:            svc.SoloServiceTakeover,
 		}
+
 		if svc.Waypoint.IngressLabelPresent {
 			fs.IngressUseWaypoint = wrappers.Bool(svc.Waypoint.IngressUseWaypoint)
+		}
+		if draining := krt.FetchOne(ctx, a.drainingByClusters, krt.FilterKey(string(a.ClusterID))); draining != nil {
+			fs.DrainingWeight = wrappers.UInt32(draining.DrainingWeight)
 		}
 		if s.Waypoint != nil && waypoint != nil {
 			fs.Waypoint = &workloadapi.RemoteWaypoint{

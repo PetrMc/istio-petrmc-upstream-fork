@@ -292,7 +292,7 @@ func ensureCanonicalServiceLabels(name string, srcLabels map[string]string) map[
 }
 
 func (s *Controller) convertEndpoint(service *model.Service, servicePort *networking.ServicePort,
-	wle *networking.WorkloadEntry, configKey *configKey, clusterID cluster.ID,
+	wle *networking.WorkloadEntry, configKey *configKey, clusterID cluster.ID, drainingWeight uint32,
 ) *model.ServiceInstance {
 	var instancePort uint32
 	addr := wle.GetAddress()
@@ -319,6 +319,9 @@ func (s *Controller) convertEndpoint(service *model.Service, servicePort *networ
 	if locality == "" && len(wle.Labels[model.LocalityLabel]) > 0 {
 		locality = model.GetLocalityLabel(wle.Labels[model.LocalityLabel])
 	}
+	if srcCluster := wle.Labels[peering.SourceClusterLabel]; srcCluster != "" {
+		clusterID = cluster.ID(srcCluster)
+	}
 	labels := labelutil.AugmentLabels(wle.Labels, clusterID, locality, "", networkID)
 	return &model.ServiceInstance{
 		Endpoint: &model.IstioEndpoint{
@@ -338,8 +341,9 @@ func (s *Controller) convertEndpoint(service *model.Service, servicePort *networ
 			ServiceAccount: sa,
 			// Workload entry config name is used as workload name, which will appear in metric label.
 			// After VM auto registry is introduced, workload group annotation should be used for workload name.
-			WorkloadName: configKey.name,
-			Namespace:    configKey.namespace,
+			WorkloadName:   configKey.name,
+			Namespace:      configKey.namespace,
+			DrainingWeight: drainingWeight,
 		},
 		Service:     service,
 		ServicePort: convertPort(servicePort),
@@ -349,12 +353,12 @@ func (s *Controller) convertEndpoint(service *model.Service, servicePort *networ
 // convertWorkloadEntryToServiceInstances translates a WorkloadEntry into ServiceEndpoints. This logic is largely the
 // same as the ServiceEntry convertServiceEntryToInstances.
 func (s *Controller) convertWorkloadEntryToServiceInstances(wle *networking.WorkloadEntry, services []*model.Service,
-	se *networking.ServiceEntry, configKey *configKey, clusterID cluster.ID,
+	se *networking.ServiceEntry, configKey *configKey, clusterID cluster.ID, drainingWeight uint32,
 ) []*model.ServiceInstance {
 	out := make([]*model.ServiceInstance, 0, len(services)*len(se.Ports))
 	for _, service := range services {
 		for _, port := range se.Ports {
-			out = append(out, s.convertEndpoint(service, port, wle, configKey, clusterID))
+			out = append(out, s.convertEndpoint(service, port, wle, configKey, clusterID, drainingWeight))
 		}
 	}
 	return out
@@ -405,7 +409,7 @@ func (s *Controller) convertServiceEntryToInstances(cfg config.Config, services 
 				})
 			} else {
 				for _, endpoint := range serviceEntry.Endpoints {
-					out = append(out, s.convertEndpoint(service, serviceEntryPort, endpoint, &configKey{}, s.clusterID))
+					out = append(out, s.convertEndpoint(service, serviceEntryPort, endpoint, &configKey{}, s.clusterID, 0))
 				}
 			}
 		}
@@ -490,6 +494,13 @@ func (s *Controller) convertWorkloadEntryToWorkloadInstance(cfg config.Config, c
 		locality = model.GetLocalityLabel(we.Labels[model.LocalityLabel])
 	}
 	lbls := labelutil.AugmentLabels(we.Labels, clusterID, locality, "", networkID)
+	drainingWeight := uint32(0)
+	val, err := peering.GetDrainingWeightAnnotation(cfg.Annotations)
+	if err == nil {
+		drainingWeight = val
+	} else {
+		log.Warnf("WorkloadEntry %s/%s has an invalid drain weight: %s", cfg.Namespace, cfg.Name, err)
+	}
 	return &model.WorkloadInstance{
 		Endpoint: &model.IstioEndpoint{
 			Addresses: []string{addr},
@@ -507,6 +518,7 @@ func (s *Controller) convertWorkloadEntryToWorkloadInstance(cfg config.Config, c
 			Labels:         lbls,
 			TLSMode:        tlsMode,
 			ServiceAccount: sa,
+			DrainingWeight: drainingWeight,
 		},
 		PortMap:             we.Ports,
 		Namespace:           cfg.Namespace,
