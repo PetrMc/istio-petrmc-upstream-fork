@@ -1332,6 +1332,7 @@ func (c *NetworkWatcher) reconcileNodeWorkloadEntry(tn types.NamespacedName) err
 			continue
 		}
 		// by default use the cluster locality based on istio-remote Gateway labels
+		// fallback to what is set on the node workload sent from the remote cluster
 		locality := cluster.locality
 		if workload.Locality != nil {
 			region, zone, subzone := workload.Locality.GetRegion(), workload.Locality.GetZone(), workload.Locality.GetSubzone()
@@ -1377,7 +1378,7 @@ func (c *NetworkWatcher) reconcileNodeWorkloadEntry(tn types.NamespacedName) err
 			},
 			Spec: networking.WorkloadEntry{
 				Address:        address.String(),
-				Network:        clusterID,
+				Network:        string(cluster.networkName),
 				Weight:         1,
 				Locality:       locality,
 				Ports:          ports,

@@ -1628,8 +1628,8 @@ func TestPeering(t *testing.T) {
 	})
 
 	t.Run("nodeport peering", func(t *testing.T) {
-		c1 := NewCluster(t, "c1", "c1")
-		c2 := NewCluster(t, "c2", "c2")
+		c1 := NewCluster(t, "c1", "n1")
+		c2 := NewCluster(t, "c2", "n2")
 		c2.ConnectByNodePortTo(c1)
 
 		var (

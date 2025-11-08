@@ -1,0 +1,12 @@
+apiVersion: release-notes/v2
+
+kind: bug-fix
+
+area: traffic-management
+
+issue:
+  - https://github.com/solo-io/istio/issues/2681
+
+releaseNotes:
+- |
+  **Fixed** incorrect network set on peered node workload entries for nodeport peering.
