@@ -2682,6 +2682,12 @@ func (ps *PushContext) ServicesWithWaypoint(key string) []ServiceWaypointInfo {
 	return ps.ambientIndex.ServicesWithWaypoint(key)
 }
 
+// ServiceInfo returns the ambient info about the given service, if present.
+// Key identifiies the service and expected to be in the form of 'namespace/hostname'.
+func (ps *PushContext) ServiceInfo(key string) *ServiceInfo {
+	return ps.ambientIndex.ServiceInfo(key)
+}
+
 func (ps *PushContext) ServicesWithWaypointOrRemoteWaypoint() sets.Set[host.Name] {
 	return ps.ambientIndex.ServicesWithWaypointOrRemoteWaypoint()
 }

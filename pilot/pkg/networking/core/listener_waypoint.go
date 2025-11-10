@@ -80,7 +80,6 @@ func (lb *ListenerBuilder) serviceForHostname(name host.Name) *model.Service {
 
 func (lb *ListenerBuilder) buildWaypointInbound() []*listener.Listener {
 	// For the common single-network case We create 3 listeners:
-
 	// 1. Decapsulation CONNECT listener.
 	// 2. IP dispatch listener, handling both VIPs and direct pod IPs.
 	// 3. One of two options based on the type of waypoint:
