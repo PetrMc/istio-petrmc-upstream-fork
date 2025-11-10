@@ -397,6 +397,41 @@ spec:
 	return nil
 }
 
+func SetDrainingForTest(t framework.TestContext, drainingWeight uint32, clusters ...cluster.Cluster) {
+	fromCluster := clusters[0]
+	var gwName string
+	switch len(clusters) {
+	case 1:
+		gwName = "istio-eastwest"
+	case 2:
+		gwName = fmt.Sprintf("istio-remote-peer-%s", clusters[1].Name())
+	default:
+		t.Fatalf("must have 1 or 2 clusters defined")
+	}
+	_, err := fromCluster.GatewayAPI().GatewayV1().Gateways("istio-gateway").Patch(
+		t.Context(),
+		gwName,
+		types.MergePatchType,
+		fmt.Appendf(nil, `{"metadata":{"annotations":{"%s":"%d"}}}`, peering.DrainingWeightAnnotation, drainingWeight),
+		metav1.PatchOptions{})
+	if err != nil {
+		t.Fatalf("Failed to annotate %s on cluster %s: %v", gwName, fromCluster.Name(), err)
+	}
+
+	// Add cleanup to remove the label
+	t.Cleanup(func() {
+		_, err := fromCluster.GatewayAPI().GatewayV1().Gateways("istio-gateway").Patch(
+			t.Context(),
+			gwName,
+			types.MergePatchType,
+			fmt.Appendf(nil, `{"metadata":{"annotations":{"%s":null}}}`, peering.DrainingWeightAnnotation),
+			metav1.PatchOptions{})
+		if err != nil {
+			t.Logf("Failed to remove annotation from %s on cluster %s: %v", gwName, fromCluster.Name(), err)
+		}
+	})
+}
+
 const (
 	// ServiceLocal is a service that is not marked as global at all
 	ServiceLocal = "local"

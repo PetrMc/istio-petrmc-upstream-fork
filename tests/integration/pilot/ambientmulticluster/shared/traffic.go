@@ -9,6 +9,8 @@ package shared
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -24,6 +26,8 @@ import (
 	"istio.io/istio/pkg/test/framework/components/istio"
 	"istio.io/istio/pkg/test/framework/components/namespace"
 	"istio.io/istio/pkg/test/scopes"
+	"istio.io/istio/pkg/test/util/assert"
+	"istio.io/istio/pkg/test/util/retry"
 	"istio.io/istio/platform/discovery/peering"
 )
 
@@ -519,14 +523,242 @@ func RunAllTrafficTests(t framework.TestContext, apps *EchoDeployments) {
 
 	// TODO test multi-segment
 
-	t.NewSubTest("namespace-service-scope_traffic-tests").Run(func(t framework.TestContext) {
-		// setting the scope via SetupApps only works on Creation, and we want it
-		// to unset after this subtest scope.
-		SetLabelForTest(t, apps.Namespace.Name(), peering.ServiceScopeLabel, string(peering.ServiceScopeGlobal))
+	testDraining(t, RunCase)
 
+	t.NewSubTest("namespace-service-scope_traffic-tests").Run(func(t framework.TestContext) {
 		SetupApps(t, apps, true)
 		RunCase(t, "test-from-ztunnel", defaultDomain, TestFromZtunnel)
 		RunCase(t, "test-from-sidecar", defaultDomain, TestFromSidecar)
 		RunCase(t, "test-from-gateway", defaultDomain, TestFromGateway)
+	})
+}
+
+func testDraining(t framework.TestContext, runCase func(t framework.TestContext, name string, domainSuffix string, f func(t TrafficContext))) {
+	t.NewSubTest("draining").Run(func(t framework.TestContext) {
+		localCluster := t.Clusters().GetByName(LocalCluster)
+		remoteNetworkCluster := t.Clusters().GetByName(RemoteNetworkCluster)
+
+		waitForDrainingWeights := func(onCluster, forCluster cluster.Cluster, drainingWeight int) {
+			expected := strconv.Itoa(drainingWeight)
+			assert.EventuallyEqual(t, func() []string {
+				workloads, err := onCluster.Istio().NetworkingV1().WorkloadEntries("istio-system").List(t.Context(), metav1.ListOptions{
+					LabelSelector: "solo.io/source-cluster=" + forCluster.Name(),
+				})
+				if err != nil {
+					return []string{err.Error()}
+				}
+				missing := []string{}
+				for _, wl := range workloads.Items {
+					if wl.Annotations[peering.DrainingWeightAnnotation] != expected {
+						missing = append(missing, wl.Name)
+					}
+				}
+				return missing
+			}, []string{}, retry.Timeout(5*time.Second), retry.Delay(100*time.Millisecond))
+		}
+
+		hitLocalAndFlat := check.ReachedClusters(t.Clusters(), t.Clusters().Exclude(
+			t.Clusters().GetByName(RemoteNetworkCluster)))
+
+		runCase(t, "test-from-ztunnel", defaultDomain, func(t TrafficContext) {
+			client := t.Apps.LocalApp[0]
+			appsNs := t.Apps.Namespace
+			domainSuffix := t.DomainSuffix
+
+			call := func(name string, c echo.Checker) {
+				t.Helper()
+				t.NewSubTestf("to %v", name).Run(func(t framework.TestContext) {
+					if name == ServiceRemoteOnlyTakeover && domainSuffix != defaultDomain {
+						// TODO remove skip when 57782 merges in upstream istio
+						t.Skip("https://github.com/istio/istio/pull/57782")
+					}
+					if c == nil {
+						c = check.Error()
+					} else {
+						c = check.And(c, DestinationWorkload(name))
+					}
+					client.CallOrFail(t, echo.CallOptions{
+						Address: GlobalNameWithSuffix(name, appsNs, domainSuffix),
+						Port:    echo.Port{ServicePort: 80},
+						Scheme:  scheme.HTTP,
+						Count:   25,
+						Check:   c,
+					})
+				})
+			}
+
+			SetDrainingForTest(t, 100, localCluster, remoteNetworkCluster)
+			waitForDrainingWeights(localCluster, remoteNetworkCluster, 100)
+
+			call(ServiceRemoteGlobal, check.And(IsL4(), check.OK(), hitRemoteFlatCluster))
+			call(ServiceAllGlobal, check.And(IsL4(), check.OK(), hitLocalAndFlat))
+
+			call(ServiceCrossNetworkOnlyWaypoint, nil)
+
+			call(ServiceSidecar, check.And(check.OK(), hitLocalAndFlat, IsL7()))
+		})
+
+		runCase(t, "test-from-sidecar", defaultDomain, func(t TrafficContext) {
+			client := t.Apps.Sidecar[0]
+			appsNs := t.Apps.Namespace
+			domainSuffix := t.DomainSuffix
+
+			call := func(name string, c echo.Checker) {
+				t.Helper()
+				t.NewSubTestf("to %v", name).Run(func(t framework.TestContext) {
+					if c == nil {
+						c = check.Error()
+					}
+					client.CallOrFail(t, echo.CallOptions{
+						Address: GlobalNameWithSuffix(name, appsNs, domainSuffix),
+						Port:    echo.Port{ServicePort: 80},
+						Scheme:  scheme.HTTP,
+						Count:   10,
+						Check:   c,
+					})
+				})
+			}
+
+			// set peering to 40% drain
+			SetDrainingForTest(t, 40, localCluster, remoteNetworkCluster)
+			waitForDrainingWeights(localCluster, remoteNetworkCluster, 40)
+			// override with 100%
+			SetDrainingForTest(t, 100, remoteNetworkCluster)
+			waitForDrainingWeights(localCluster, remoteNetworkCluster, 100)
+
+			call(ServiceRemoteGlobal, check.And(IsL7(), check.OK(), hitRemoteFlatCluster, DestinationWorkload(ServiceRemoteGlobal)))
+			call(ServiceAllGlobal, check.And(IsL7(), check.OK(), hitLocalAndFlat, DestinationWorkload(ServiceAllGlobal)))
+
+			call(ServiceCrossNetworkOnlyWaypoint, check.Status(http.StatusServiceUnavailable))
+
+			call(ServiceSidecar, check.And(check.OK(), hitLocalAndFlat, IsL7(), DestinationWorkload(ServiceSidecar)))
+		})
+
+		runCase(t, "test-from-gateway", defaultDomain, func(t TrafficContext) {
+			apps := t.Apps
+			domainSuffix := t.DomainSuffix
+			if domainSuffix == "" {
+				domainSuffix = peering.DomainSuffix[1:]
+			}
+
+			// Add a suffix to resource names if using a custom domain to avoid conflicts
+			nameSuffix := ""
+			if t.DomainSuffix != "" && t.DomainSuffix != peering.DomainSuffix[1:] {
+				nameSuffix = "-segment"
+			}
+
+			// Setup GW for
+			cb := t.ConfigIstio().YAML(apps.Namespace.Name(), fmt.Sprintf(`
+apiVersion: networking.istio.io/v1
+kind: Gateway
+metadata:
+  name: gateway%s
+spec:
+  selector:
+    istio: ingressgateway
+  servers:
+  - port:
+      number: 80
+      name: http
+      protocol: HTTP
+    hosts:
+    - "*.%s" # global
+    - "*.svc.cluster.local" # global takeover
+`, nameSuffix, domainSuffix))
+
+			for _, svc := range AllServices {
+				// For global-takeover, the destination should always be .svc.cluster.local
+				destHost := GlobalNameWithSuffix(svc, apps.Namespace, t.DomainSuffix)
+				if svc == ServiceGlobalTakeover {
+					destHost = fmt.Sprintf("%s.%s.svc.cluster.local", svc, apps.Namespace.Name())
+				}
+
+				cb.Eval(apps.Namespace.Name(), map[string]string{
+					"name":        svc,
+					"nameSuffix":  nameSuffix,
+					"host":        GlobalNameWithSuffix(svc, apps.Namespace, t.DomainSuffix),
+					"destHost":    destHost,
+					"gatewayName": "gateway" + nameSuffix,
+				}, `
+apiVersion: networking.istio.io/v1alpha3
+kind: VirtualService
+metadata:
+  name: {{.name}}{{.nameSuffix}}
+spec:
+  hosts:
+  - "{{.host}}"
+  gateways:
+  - {{.gatewayName}}
+  http:
+  - route:
+    - destination:
+        host: "{{.destHost}}"
+        port:
+          number: 80
+`)
+			}
+			cb.ApplyOrFail(t)
+			defaultIngress := istio.DefaultIngressOrFail(t, t)
+			domainSuffixForCall := t.DomainSuffix
+			call := func(t framework.TestContext, name string, c echo.Checker) {
+				t.Helper()
+				t.NewSubTestf("to %v", name).Run(func(t framework.TestContext) {
+					if c == nil {
+						c = check.Status(503)
+					} else {
+						c = check.And(c, DestinationWorkload(name))
+					}
+					defaultIngress.CallOrFail(t, echo.CallOptions{
+						Address: GlobalNameWithSuffix(name, apps.Namespace, domainSuffixForCall),
+						Port:    echo.Port{ServicePort: 80},
+						Scheme:  scheme.HTTP,
+						Count:   10,
+						Check:   c,
+					})
+				})
+			}
+
+			SetDrainingForTest(t, 100, remoteNetworkCluster)
+			waitForDrainingWeights(localCluster, remoteNetworkCluster, 100)
+
+			// Changing ingress-use-waypoint will not drain pooled connections
+			applyDrainingWorkaround(t)
+			t.NewSubTest("default").Run(func(t framework.TestContext) {
+				call(t, ServiceRemoteGlobal, check.And(check.OK(), hitRemoteFlatCluster))
+				call(t, ServiceAllGlobal, check.And(check.OK(), hitLocalAndFlat))
+
+				call(t, ServiceRemoteWaypoint, check.And(check.OK(), hitLocalAndFlat))
+
+				call(t, ServiceCrossNetworkOnlyWaypoint, nil)
+				call(t, ServiceAllWaypoint, check.And(check.OK(), hitLocalAndFlat, CheckNotTraversedWaypoint()))
+
+				call(t, ServiceSidecar, check.And(check.OK(), hitLocalAndFlat))
+			})
+			t.NewSubTest("use-waypoint").Run(func(t framework.TestContext) {
+				for _, svc := range AllServices {
+					SetIngressUseWaypoint(t, svc, apps.Namespace.Name())
+				}
+				// This is really unfortunate but the only way to trigger a drain.
+				// ingress-use-waypoint is determined by the eastwest gateway. This uses the *outer* HBONE connection.
+				// This gets aggressively pooled, but we need to re-establish things.
+				// This can impact real users, but only if they are trying to change this back and forth cross-cluster which is odd.
+				RestartDeployment(t, "istio-ingressgateway", "istio-system")
+				t.Cleanup(func() {
+					// Do it again so we don't impact other tests
+					RestartDeployment(t, "istio-ingressgateway", "istio-system")
+				})
+				call(t, ServiceRemoteGlobal, check.And(check.OK(), hitRemoteFlatCluster))
+				call(t, ServiceAllGlobal, check.And(check.OK(), hitLocalAndFlat))
+
+				call(t, ServiceCrossNetworkOnlyWaypoint, nil)
+
+				call(t, ServiceRemoteWaypoint, check.And(check.OK(), PerClusterChecker(map[string]echo.Checker{
+					LocalCluster:      CheckAllTraversedWaypointIn(LocalCluster, RemoteFlatCluster),
+					RemoteFlatCluster: CheckAllTraversedWaypointIn(LocalCluster, RemoteFlatCluster),
+				})))
+
+				call(t, ServiceSidecar, check.And(check.OK(), hitLocalAndFlat))
+			})
+		})
 	})
 }
