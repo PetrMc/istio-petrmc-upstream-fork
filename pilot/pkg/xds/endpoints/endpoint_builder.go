@@ -77,6 +77,7 @@ type EndpointBuilder struct {
 
 	// SOLO ingress/sidecar use waypoint needs to apply waypoint config for LB
 	waypointEndpointBuilder *EndpointBuilder
+	waypointClusterName     string // cluster name of expected waypoint, used in cache key even if waypoint not found
 	ingressUseWaypoint      bool
 
 	// These fields are provided for convenience only
@@ -115,7 +116,7 @@ func NewCDSEndpointBuilder(
 	dir model.TrafficDirection, subsetName string, hostname host.Name, port int,
 	service *model.Service, dr *model.ConsolidatedDestRule,
 ) *EndpointBuilder {
-	waypointEndpointBuilder, ingressUseWaypoint := maybeBuildWaypointEndpointBuilder(service, proxy, push)
+	waypointEndpointBuilder, waypointClusterName, ingressUseWaypoint := maybeBuildWaypointEndpointBuilder(service, proxy, push)
 	b := EndpointBuilder{
 		clusterName:     clusterName,
 		network:         proxy.Metadata.Network,
@@ -129,6 +130,7 @@ func NewCDSEndpointBuilder(
 
 		// SOLO envoy -> waypoint interop
 		waypointEndpointBuilder: waypointEndpointBuilder,
+		waypointClusterName:     waypointClusterName,
 		ingressUseWaypoint:      ingressUseWaypoint,
 
 		subsetName: subsetName,
@@ -147,13 +149,13 @@ func NewCDSEndpointBuilder(
 }
 
 // SOLO envoy -> waypoint interop: create waypoint endpoint builder early for cache key
-func maybeBuildWaypointEndpointBuilder(service *model.Service, proxy *model.Proxy, push *model.PushContext) (*EndpointBuilder, bool) {
+func maybeBuildWaypointEndpointBuilder(service *model.Service, proxy *model.Proxy, push *model.PushContext) (*EndpointBuilder, string, bool) {
 	if service == nil || push == nil {
-		return nil, false
+		return nil, "", false
 	}
 	waypointServices := push.ServicesWithWaypoint(service.Attributes.Namespace + "/" + string(service.Hostname))
 	if len(waypointServices) == 0 {
-		return nil, false
+		return nil, "", false
 	}
 	svcInfo := waypointServices[0]
 	if len(waypointServices) > 1 {
@@ -169,8 +171,10 @@ func maybeBuildWaypointEndpointBuilder(service *model.Service, proxy *model.Prox
 	eb := NewEndpointBuilder(waypointClusterName, proxy, push)
 	if eb.service == nil {
 		log.Debugf("eds: failed to find waypoint %s attached to service %s", waypointServices[0].WaypointHostname, service.Hostname)
+		// Return cluster name even when service not found, so it's included in cache key
+		return nil, waypointClusterName, svcInfo.IngressUseWaypoint
 	}
-	return &eb, svcInfo.IngressUseWaypoint
+	return &eb, waypointClusterName, svcInfo.IngressUseWaypoint
 }
 
 func (b *EndpointBuilder) servicePort(port int) *model.Port {
@@ -316,6 +320,9 @@ func (b *EndpointBuilder) WriteHash(h hash.Hash) {
 	// and setting to use waypoint
 	if b.waypointEndpointBuilder != nil {
 		b.waypointEndpointBuilder.WriteHash(h)
+	} else if b.waypointClusterName != "" {
+		// Waypoint service not found, but include expected cluster name in hash
+		h.WriteString(b.waypointClusterName)
 	}
 	h.Write(Separator)
 	h.WriteString(strconv.FormatBool(b.ingressUseWaypoint))
