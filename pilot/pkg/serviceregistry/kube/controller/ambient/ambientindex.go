@@ -209,13 +209,19 @@ func New(options Options) Index {
 	)...)
 	authzPolicies := kclient.NewDelayedInformer[*securityclient.AuthorizationPolicy](options.Client,
 		gvr.AuthorizationPolicy, kubetypes.StandardInformer, configFilter)
+	// Start with a.stop to ensure the informer respects the index's stop channel
+	authzPolicies.Start(a.stop)
 	AuthzPolicies := krt.WrapClient[*securityclient.AuthorizationPolicy](authzPolicies, opts.WithName("informer/AuthorizationPolicies")...)
 
 	peerAuths := kclient.NewDelayedInformer[*securityclient.PeerAuthentication](options.Client,
 		gvr.PeerAuthentication, kubetypes.StandardInformer, configFilter)
+	// Start with a.stop to ensure the informer respects the index's stop channel
+	peerAuths.Start(a.stop)
 	PeerAuths := krt.WrapClient[*securityclient.PeerAuthentication](peerAuths, opts.WithName("informer/PeerAuthentications")...)
 
 	gatewayClient := kclient.NewDelayedInformer[*v1beta1.Gateway](options.Client, gvr.KubernetesGateway, kubetypes.StandardInformer, filter)
+	// Start with a.stop to ensure the informer respects the index's stop channel
+	gatewayClient.Start(a.stop)
 	Gateways := krt.WrapClient[*v1beta1.Gateway](gatewayClient, opts.With(
 		krt.WithName("informer/Gateways"),
 		krt.WithMetadata(krt.Metadata{
@@ -226,6 +232,8 @@ func New(options Options) Index {
 	a.drainingByClusters = drainingCollection(Gateways, opts)
 
 	gatewayClassClient := kclient.NewDelayedInformer[*v1beta1.GatewayClass](options.Client, gvr.GatewayClass, kubetypes.StandardInformer, filter)
+	// Start with a.stop to ensure the informer respects the index's stop channel
+	gatewayClassClient.Start(a.stop)
 	GatewayClasses := krt.WrapClient[*v1beta1.GatewayClass](gatewayClassClient, opts.WithName("informer/GatewayClasses")...)
 	Pods := krt.NewInformerFiltered[*corev1.Pod](options.Client, kclient.Filter{
 		ObjectFilter:    options.Client.ObjectFilter(),
@@ -239,10 +247,14 @@ func New(options Options) Index {
 
 	serviceEntries := kclient.NewDelayedInformer[*networkingclient.ServiceEntry](options.Client,
 		gvr.ServiceEntry, kubetypes.StandardInformer, configFilter)
+	// Start with a.stop to ensure the informer respects the index's stop channel
+	serviceEntries.Start(a.stop)
 	ServiceEntries := krt.WrapClient[*networkingclient.ServiceEntry](serviceEntries, opts.WithName("informer/ServiceEntries")...)
 
 	workloadEntries := kclient.NewDelayedInformer[*networkingclient.WorkloadEntry](options.Client,
 		gvr.WorkloadEntry, kubetypes.StandardInformer, configFilter)
+	// Start with a.stop to ensure the informer respects the index's stop channel
+	workloadEntries.Start(a.stop)
 	WorkloadEntries := krt.WrapClient[*networkingclient.WorkloadEntry](workloadEntries, opts.WithName("informer/WorkloadEntries")...)
 
 	servicesClient := kclient.NewFiltered[*corev1.Service](options.Client, filter)
@@ -291,7 +303,8 @@ func New(options Options) Index {
 		)
 
 		// We can run this in a goroutine because all of the dependent collections will wait for the initial sync
-		go LocalCluster.Run(a.meshConfig, a.Debugger)
+		// Pass a.stop so the LocalCluster respects the index's stop channel
+		go LocalCluster.Run(a.meshConfig, a.Debugger, a.stop)
 		a.buildGlobalCollections(
 			LocalCluster,
 			AuthzPolicies,
@@ -312,6 +325,9 @@ func New(options Options) Index {
 
 	segments := kclient.NewDelayedInformer[*soloapi.Segment](options.Client,
 		gvr.Segment, kubetypes.StandardInformer, configFilter)
+	// Start the segments informer with a.stop to ensure it respects the index's stop channel.
+	// This prevents goroutine leaks when the index stops - the informer will stop when a.stop is closed.
+	segments.Start(a.stop)
 	Segments := krt.WrapClient[*soloapi.Segment](segments, opts.With(
 		append(opts.WithName("informer/Segments"),
 			krt.WithMetadata(krt.Metadata{
