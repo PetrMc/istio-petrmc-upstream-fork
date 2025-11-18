@@ -506,6 +506,34 @@ var optionalPolicyTags = []*tracing.CustomTag{
 	dryRunPolicyTraceTag("istio.authorization.dry_run.deny_policy.result", authz_model.RBACShadowRulesDenyStatPrefix+authz_model.RBACShadowEngineResult),
 }
 
+// buildWaypointSourceTag creates a custom trace tag for waypoints that captures the source (client) workload name.
+// The peer_metadata filter sets dynamic metadata in both downstream (connect_terminate) and upstream (main_internal)
+// discovery paths, ensuring the metadata is available regardless of which HCM creates the trace span.
+func buildWaypointSourceTag() *tracing.CustomTag {
+	return &tracing.CustomTag{
+		Tag: "istio.source_workload",
+		Type: &tracing.CustomTag_Metadata_{
+			Metadata: &tracing.CustomTag_Metadata{
+				Kind: &envoy_type_metadata_v3.MetadataKind{
+					Kind: &envoy_type_metadata_v3.MetadataKind_Request_{
+						Request: &envoy_type_metadata_v3.MetadataKind_Request{},
+					},
+				},
+				MetadataKey: &envoy_type_metadata_v3.MetadataKey{
+					Key: "envoy.filters.http.peer_metadata",
+					Path: []*envoy_type_metadata_v3.MetadataKey_PathSegment{
+						{
+							Segment: &envoy_type_metadata_v3.MetadataKey_PathSegment_Key{
+								Key: "source_workload",
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
 func buildServiceTags(metadata *model.NodeMetadata, labels map[string]string) []*tracing.CustomTag {
 	var revision, service string
 	if labels != nil {
@@ -617,6 +645,11 @@ func configureCustomTags(spec *model.TracingSpec, hcmTracing *hcm.HttpConnection
 		}
 	} else if spec.EnableIstioTags {
 		tags = append(buildServiceTags(node.Metadata, node.Labels), optionalPolicyTags...)
+	}
+
+	// For waypoint proxies, add the source workload tag to capture the client workload name.
+	if node.Type == model.Waypoint {
+		tags = append(tags, buildWaypointSourceTag())
 	}
 
 	if len(providerTags) == 0 {
