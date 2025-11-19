@@ -1,0 +1,12 @@
+apiVersion: release-notes/v2
+
+kind: feature
+
+area: telemetry
+
+issue:
+  - https://github.com/solo-io/istio/issues/3683
+
+releaseNotes:
+- |
+  **Added** source workload identification to waypoint proxy traces in ambient mesh. Trace spans from waypoint proxies now include the `istio.source_workload` tag identifying the client workload that initiated the request, improving observability for L7 traffic processed through waypoints.
