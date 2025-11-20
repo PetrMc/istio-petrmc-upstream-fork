@@ -1732,31 +1732,40 @@ func TestConfigureCustomTagsForWaypoint(t *testing.T) {
 			// Configure custom tags
 			configureCustomTags(nil, hcmTracing, map[string]*tpb.Tracing_CustomTag{}, proxyCfg, proxy)
 
-			// Check if the source tag exists
-			var hasSourceTag bool
+			// Check if the source tags exist
+			expectedTags := map[string]string{
+				"istio.source_workload":   "WORKLOAD_NAME",
+				"istio.source_namespace":  "NAMESPACE",
+				"istio.source_cluster_id": "CLUSTER_ID",
+			}
+			foundTags := make(map[string]bool)
 			for _, tag := range hcmTracing.CustomTags {
-				if tag.Tag == "istio.source_workload" {
-					hasSourceTag = true
+				if expectedField, ok := expectedTags[tag.Tag]; ok {
+					foundTags[tag.Tag] = true
 					// Verify the tag configuration
 					metadata := tag.GetMetadata()
 					if metadata == nil {
-						t.Errorf("source tag should use metadata type, but got nil")
+						t.Errorf("tag %s should use metadata type, but got nil", tag.Tag)
 					} else {
 						assert.Equal(t, metadata.MetadataKey.Key, "envoy.filters.http.peer_metadata")
 						assert.Equal(t, len(metadata.MetadataKey.Path), 1)
 						if len(metadata.MetadataKey.Path) > 0 {
-							assert.Equal(t, metadata.MetadataKey.Path[0].GetKey(), "source_workload")
+							assert.Equal(t, metadata.MetadataKey.Path[0].GetKey(), expectedField)
 						}
 					}
-					break
 				}
 			}
 
-			if tt.wantSource && !hasSourceTag {
-				t.Errorf("waypoint proxy should have source tag, but it doesn't")
-			}
-			if !tt.wantSource && hasSourceTag {
-				t.Errorf("non-waypoint proxy should not have source tag, but it does")
+			if tt.wantSource {
+				for tagName := range expectedTags {
+					if !foundTags[tagName] {
+						t.Errorf("waypoint proxy should have tag %s, but it doesn't", tagName)
+					}
+				}
+			} else {
+				for tagName := range foundTags {
+					t.Errorf("non-waypoint proxy should not have tag %s, but it does", tagName)
+				}
 			}
 		})
 	}

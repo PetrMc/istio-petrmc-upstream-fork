@@ -506,31 +506,23 @@ var optionalPolicyTags = []*tracing.CustomTag{
 	dryRunPolicyTraceTag("istio.authorization.dry_run.deny_policy.result", authz_model.RBACShadowRulesDenyStatPrefix+authz_model.RBACShadowEngineResult),
 }
 
-// buildWaypointSourceTag creates a custom trace tag for waypoints that captures the source (client) workload name.
-// The peer_metadata filter sets dynamic metadata in both downstream (connect_terminate) and upstream (main_internal)
-// discovery paths, ensuring the metadata is available regardless of which HCM creates the trace span.
-func buildWaypointSourceTag() *tracing.CustomTag {
-	return &tracing.CustomTag{
-		Tag: "istio.source_workload",
-		Type: &tracing.CustomTag_Metadata_{
-			Metadata: &tracing.CustomTag_Metadata{
-				Kind: &envoy_type_metadata_v3.MetadataKind{
-					Kind: &envoy_type_metadata_v3.MetadataKind_Request_{
-						Request: &envoy_type_metadata_v3.MetadataKind_Request{},
-					},
-				},
-				MetadataKey: &envoy_type_metadata_v3.MetadataKey{
-					Key: "envoy.filters.http.peer_metadata",
-					Path: []*envoy_type_metadata_v3.MetadataKey_PathSegment{
-						{
-							Segment: &envoy_type_metadata_v3.MetadataKey_PathSegment_Key{
-								Key: "source_workload",
-							},
-						},
-					},
-				},
+// buildWaypointSourceTags creates custom trace tags for waypoints that capture source (client) peer info.
+// Uses Envoy v1.37+ format specifiers to read directly from filter state (downstream_peer object).
+// The peer_metadata filter populates this during downstream discovery.
+func buildWaypointSourceTags() []*tracing.CustomTag {
+	buildFilterStateTag := func(tagName, fieldName string) *tracing.CustomTag {
+		return &tracing.CustomTag{
+			Tag: tagName,
+			Type: &tracing.CustomTag_Value{
+				Value: fmt.Sprintf("%%FILTER_STATE(downstream_peer:FIELD:%s)%%", fieldName),
 			},
-		},
+		}
+	}
+
+	return []*tracing.CustomTag{
+		buildFilterStateTag("istio.source_workload", "workload_name"),
+		buildFilterStateTag("istio.source_namespace", "namespace_name"),
+		buildFilterStateTag("istio.source_cluster_id", "cluster_name"),
 	}
 }
 
@@ -647,9 +639,9 @@ func configureCustomTags(spec *model.TracingSpec, hcmTracing *hcm.HttpConnection
 		tags = append(buildServiceTags(node.Metadata, node.Labels), optionalPolicyTags...)
 	}
 
-	// For waypoint proxies, add the source workload tag to capture the client workload name.
+	// For waypoint proxies, add source peer tags to capture client workload info.
 	if node.Type == model.Waypoint {
-		tags = append(tags, buildWaypointSourceTag())
+		tags = append(tags, buildWaypointSourceTags()...)
 	}
 
 	if len(providerTags) == 0 {
@@ -708,6 +700,15 @@ func buildCustomTagsFromProvider(providerTags map[string]*telemetrypb.Tracing_Cu
 				},
 			}
 			tags = append(tags, env)
+		case *telemetrypb.Tracing_CustomTag_Formatter:
+			// Envoy v1.37+ supports format specifiers (like %FILTER_STATE%) in CustomTag.value
+			formatter := &tracing.CustomTag{
+				Tag: tagName,
+				Type: &tracing.CustomTag_Value{
+					Value: tag.Formatter.Value,
+				},
+			}
+			tags = append(tags, formatter)
 		}
 	}
 	return tags
