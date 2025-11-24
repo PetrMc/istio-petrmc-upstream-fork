@@ -520,9 +520,9 @@ func buildWaypointSourceTags() []*tracing.CustomTag {
 	}
 
 	return []*tracing.CustomTag{
-		buildFilterStateTag("istio.source_workload", "workload_name"),
-		buildFilterStateTag("istio.source_namespace", "namespace_name"),
-		buildFilterStateTag("istio.source_cluster_id", "cluster_name"),
+		buildFilterStateTag("istio.source_workload", "workload"),
+		buildFilterStateTag("istio.source_namespace", "namespace"),
+		buildFilterStateTag("istio.source_cluster_id", "cluster"),
 	}
 }
 
