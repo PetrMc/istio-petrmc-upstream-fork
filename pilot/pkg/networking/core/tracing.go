@@ -507,8 +507,9 @@ var optionalPolicyTags = []*tracing.CustomTag{
 }
 
 // buildWaypointSourceTags creates custom trace tags for waypoints that capture source (client) peer info.
-// Uses Envoy v1.37+ format specifiers to read directly from filter state (downstream_peer object).
+// Uses Envoy FILTER_STATE FIELD accessor to extract all available fields from downstream_peer.
 // The peer_metadata filter populates this during downstream discovery.
+// All fields are extracted individually to support dynamic addition of new fields in WorkloadMetadataObject.
 func buildWaypointSourceTags() []*tracing.CustomTag {
 	buildFilterStateTag := func(tagName, fieldName string) *tracing.CustomTag {
 		return &tracing.CustomTag{
@@ -519,10 +520,18 @@ func buildWaypointSourceTags() []*tracing.CustomTag {
 		}
 	}
 
+	// Extract all available fields from WorkloadMetadataObject
+	// See: proxy/extensions/common/metadata_object.h for field definitions
 	return []*tracing.CustomTag{
 		buildFilterStateTag("istio.source_workload", "workload"),
 		buildFilterStateTag("istio.source_namespace", "namespace"),
 		buildFilterStateTag("istio.source_cluster_id", "cluster"),
+		buildFilterStateTag("istio.source_canonical_service", "service"),
+		buildFilterStateTag("istio.source_canonical_revision", "revision"),
+		buildFilterStateTag("istio.source_app", "app"),
+		buildFilterStateTag("istio.source_app_version", "version"),
+		buildFilterStateTag("istio.source_workload_type", "type"),
+		buildFilterStateTag("istio.source_instance_name", "name"),
 	}
 }
 

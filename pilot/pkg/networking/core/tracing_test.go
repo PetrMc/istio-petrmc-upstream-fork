@@ -15,6 +15,7 @@
 package core
 
 import (
+	"fmt"
 	"testing"
 
 	core "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
@@ -1732,26 +1733,32 @@ func TestConfigureCustomTagsForWaypoint(t *testing.T) {
 			// Configure custom tags
 			configureCustomTags(nil, hcmTracing, map[string]*tpb.Tracing_CustomTag{}, proxyCfg, proxy)
 
-			// Check if the source tags exist
+			// Expected FILTER_STATE tags for waypoint source tracking.
+			// Field names must match WorkloadMetadataObject token constants from:
+			// proxy/extensions/common/metadata_object.h
 			expectedTags := map[string]string{
-				"istio.source_workload":   "WORKLOAD_NAME",
-				"istio.source_namespace":  "NAMESPACE",
-				"istio.source_cluster_id": "CLUSTER_ID",
+				"istio.source_workload":          "workload",
+				"istio.source_namespace":         "namespace",
+				"istio.source_cluster_id":        "cluster",
+				"istio.source_canonical_service": "service",
+				"istio.source_canonical_revision": "revision",
+				"istio.source_app":               "app",
+				"istio.source_app_version":       "version",
+				"istio.source_workload_type":     "type",
+				"istio.source_instance_name":     "name",
 			}
 			foundTags := make(map[string]bool)
 			for _, tag := range hcmTracing.CustomTags {
 				if expectedField, ok := expectedTags[tag.Tag]; ok {
 					foundTags[tag.Tag] = true
-					// Verify the tag configuration
-					metadata := tag.GetMetadata()
-					if metadata == nil {
-						t.Errorf("tag %s should use metadata type, but got nil", tag.Tag)
+					// Verify FILTER_STATE format with FIELD accessor
+					value := tag.GetValue()
+					if value == "" {
+						t.Errorf("tag %s should use Value type with FILTER_STATE, but got empty", tag.Tag)
 					} else {
-						assert.Equal(t, metadata.MetadataKey.Key, "envoy.filters.http.peer_metadata")
-						assert.Equal(t, len(metadata.MetadataKey.Path), 1)
-						if len(metadata.MetadataKey.Path) > 0 {
-							assert.Equal(t, metadata.MetadataKey.Path[0].GetKey(), expectedField)
-						}
+						expectedValue := fmt.Sprintf("%%FILTER_STATE(downstream_peer:FIELD:%s)%%", expectedField)
+						assert.Equal(t, expectedValue, value,
+							"tag %s should have FILTER_STATE format", tag.Tag)
 					}
 				}
 			}
